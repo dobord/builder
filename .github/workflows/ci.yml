@@ -11,7 +11,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, windows-2025]
+        include:
+          - os: ubuntu-24.04
+            platform: linux
+          - os: windows-2025
+            platform: windows
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
@@ -28,3 +32,36 @@ jobs:
         env:
           REQUIRE_TINK_TESTS: '1'
         run: python -m unittest discover -s tests -v
+      - name: Create PUBLIC test ciphertext and disposable test keys
+        if: github.event_name != 'pull_request'
+        run: python tests/transport_fixture.py create ${{ matrix.platform }}
+      - name: Upload PUBLIC synthetic fixtures only
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: public-test-${{ matrix.platform }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: public-test-fixture/*
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+  artifact-transport:
+    needs: security-tests
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.12'
+      - run: |
+          python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r requirements.lock
+      - name: Verify GitHub API digests and decrypt Linux and Windows fixtures
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python tests/transport_fixture.py verify

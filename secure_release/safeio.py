@@ -133,4 +133,6 @@ def sdk_zip(root: Path, archive: Path) -> None:
             if item.suffix.casefold() in {".c", ".cc", ".cpp", ".cxx"}:
                 raise ValueError("implementation source in SDK; review required")
             z.write(item, rel.as_posix())
+    if archive.stat().st_size > 1900 * 1024**2:
+        raise ValueError("SDK exceeds the 1900 MiB initial release limit")
     zip_files(archive)

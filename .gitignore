@@ -1,0 +1,8 @@
+__pycache__/
+.venv/
+*.pyc
+public-test-fixture/
+*.enc
+*.key
+*-private.json
+*-private_key.json

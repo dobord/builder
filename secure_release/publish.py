@@ -145,8 +145,20 @@ def publish_release():
     except urllib.error.HTTPError as error:
         if error.code != 404:
             raise
-        release = api.json("POST", f"/repos/{BIN}/releases", {"tag_name": tag, "target_commitish": sha(env("GITHUB_SHA")),
-                           "name": tag, "body": marker, "draft": True, "prerelease": False})
+        # The tag endpoint may omit drafts. Resume the exact matching draft.
+        matches = []
+        for page in range(1, 21):
+            listed = api.get(f"/repos/{BIN}/releases?per_page=100&page={page}")
+            matches.extend(r for r in listed if r["tag_name"] == tag)
+            if len(listed) < 100:
+                break
+        else:
+            raise ValueError("release inventory limit exceeded")
+        if len(matches) > 1:
+            raise ValueError("ambiguous existing release")
+        release = matches[0] if matches else api.json("POST", f"/repos/{BIN}/releases", {
+            "tag_name": tag, "target_commitish": sha(env("GITHUB_SHA")),
+            "name": tag, "body": marker, "draft": True, "prerelease": False})
     if release["body"] != marker:
         raise ValueError("conflicting release; never overwrite")
     assets = api.get(f"/repos/{BIN}/releases/{release['id']}/assets?per_page=100")
