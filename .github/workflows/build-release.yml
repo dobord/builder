@@ -75,7 +75,7 @@ jobs:
           - platform: linux
             os: ubuntu-24.04
           - platform: windows
-            os: windows-2025
+            os: windows-2022
     env:
       TARGET_PLATFORM: ${{ matrix.platform }}
     steps:
