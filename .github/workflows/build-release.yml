@@ -1,0 +1,136 @@
+name: Build static SDK
+run-name: Encrypted SDK request ${{ inputs.release_id }}
+on:
+  workflow_dispatch:
+    inputs:
+      release_id:
+        required: true
+        type: string
+      salt:
+        required: true
+        type: string
+      request:
+        description: HPKE-encrypted signed request; no plaintext project metadata
+        required: true
+        type: string
+permissions: {}
+concurrency:
+  group: encrypted-build-${{ inputs.release_id }}
+  cancel-in-progress: false
+env:
+  RELEASE_ENABLED: ${{ vars.RELEASE_ENABLED }}
+  BUILDER_COMMIT_SHA: ${{ vars.BUILDER_COMMIT_SHA }}
+jobs:
+  prepare:
+    if: >-
+      github.repository_id == '1372874997' &&
+      github.ref == 'refs/heads/main' &&
+      github.sha == vars.BUILDER_COMMIT_SHA &&
+      vars.RELEASE_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: dobord/builder
+          ref: ${{ vars.BUILDER_COMMIT_SHA }}
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.12'
+      - name: Install hash-pinned cryptographic libraries
+        run: |
+          python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r requirements.lock
+      - name: Authenticate request and fetch fixed sources without executing them
+        env:
+          SOURCE_READ_TOKEN: ${{ secrets.SOURCE_READ_TOKEN }}
+          SOURCE_ALLOWLIST: ${{ secrets.SOURCE_ALLOWLIST }}
+          BUILDER_INPUT_PRIVATE_KEY: ${{ secrets.BUILDER_INPUT_PRIVATE_KEY }}
+          REQUEST_VERIFY_PUBLIC_KEY: ${{ secrets.REQUEST_VERIFY_PUBLIC_KEY }}
+          ARTIFACT_ENCRYPTION_PUBLIC_KEY: ${{ secrets.ARTIFACT_ENCRYPTION_PUBLIC_KEY }}
+        run: python -m secure_release prepare
+      - name: Upload encrypted input only
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: sources-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/cipher-input/input.enc
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+      - name: Remove job-local plaintext
+        if: always()
+        run: python -m secure_release cleanup
+  build:
+    needs: prepare
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 330
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux
+            os: ubuntu-24.04
+          - platform: windows
+            os: windows-2025
+    env:
+      TARGET_PLATFORM: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: dobord/builder
+          ref: ${{ vars.BUILDER_COMMIT_SHA }}
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.12'
+      - name: Install hash-pinned cryptographic libraries
+        run: |
+          python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r requirements.lock
+      - name: Install pinned CMake
+        run: |
+          python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r build-tools.lock
+      - name: Install Linux system prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y autoconf autoconf-archive automake g++-14 libgl1-mesa-dev libtool ninja-build
+      - name: Download this attempt's encrypted source bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: sources-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/cipher-input
+      - name: Decrypt input, build, test final SDK and encrypt output
+        env:
+          BUILDER_INPUT_PRIVATE_KEY: ${{ secrets.BUILDER_INPUT_PRIVATE_KEY }}
+          REQUEST_VERIFY_PUBLIC_KEY: ${{ secrets.REQUEST_VERIFY_PUBLIC_KEY }}
+          ARTIFACT_ENCRYPTION_PUBLIC_KEY: ${{ secrets.ARTIFACT_ENCRYPTION_PUBLIC_KEY }}
+        run: python -m secure_release build
+      - name: Upload encrypted SDK only
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: sdk-${{ matrix.platform }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/cipher-output/sdk.enc
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 0
+      - name: Encrypt diagnostics without printing private compiler output
+        if: always()
+        env:
+          ARTIFACT_ENCRYPTION_PUBLIC_KEY: ${{ secrets.ARTIFACT_ENCRYPTION_PUBLIC_KEY }}
+        run: python -m secure_release diagnostics
+      - name: Upload encrypted diagnostics only
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: diagnostic-${{ matrix.platform }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/cipher-diagnostics/diagnostic.enc
+          if-no-files-found: ignore
+          retention-days: 1
+          compression-level: 0
+      - name: Remove job-local plaintext
+        if: always()
+        run: python -m secure_release cleanup

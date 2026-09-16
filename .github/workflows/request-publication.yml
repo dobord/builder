@@ -1,0 +1,41 @@
+name: Request verified publication
+on:
+  workflow_run:
+    workflows: ['Build static SDK']
+    branches: [main]
+    types: [completed]
+permissions: {}
+jobs:
+  notify:
+    if: >-
+      github.repository_id == '1372874997' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'workflow_dispatch' &&
+      github.event.workflow_run.head_repository.id == 1372874997 &&
+      github.event.workflow_run.head_sha == vars.BUILDER_COMMIT_SHA &&
+      vars.RELEASE_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    env:
+      RELEASE_ENABLED: ${{ vars.RELEASE_ENABLED }}
+      BUILDER_COMMIT_SHA: ${{ vars.BUILDER_COMMIT_SHA }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: dobord/builder
+          ref: ${{ vars.BUILDER_COMMIT_SHA }}
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.12'
+      - name: Install hash-pinned cryptographic libraries
+        run: |
+          python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r requirements.lock
+      - name: Validate completed run and dispatch publisher; never execute artifacts
+        env:
+          BUILDER_TOKEN: ${{ github.token }}
+          BIN_DISPATCH_TOKEN: ${{ secrets.BIN_DISPATCH_TOKEN }}
+        run: python -m secure_release notify

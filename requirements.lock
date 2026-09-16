@@ -1,4 +1,4 @@
-# Python 3.12/3.13, Linux x86-64 and Windows AMD64. PyPI wheel SHA256 pins.
+# Python 3.12/3.13, Linux x86-64 and Windows AMD64. Wheel-only, hash-pinned.
 tink==1.16.1 \
  --hash=sha256:99766688b84b362516488fbf371b4f801c5b2833a86cc8b70f58d607a636d951 \
  --hash=sha256:af3519dfa01704e9f1ae1020db6076dcff89b5f799deba08a1adf901d977fc4e \
@@ -6,7 +6,7 @@ tink==1.16.1 \
  --hash=sha256:a33da9474ee43a21e0c7261ad8af1a3b394d1607db2d79a0a21e3d5305285e68
 absl-py==2.3.1 --hash=sha256:eeecf07f0c2a93ace0772c92e596ace6d3d3996c042b2128459aaae2a76de11d
 bazel-runfiles==1.6.3 --hash=sha256:76a6c2d1e9cc2b8fc9ae657901aff0dbf4da46ee1eeab67cce8fd907e3196857
-protobuf==5.29.5 \
- --hash=sha256:6cf42630262c59b2d8de33954443d94b746c952b01434fc58a417fdbd2e84bd5 \
- --hash=sha256:3f76e3a3675b4a4d867b52e4a5f5b78a2ef9565549d4037e06cf7b0942b1d3fc \
- --hash=sha256:63848923da3325e1bf7e9003d680ce6e14b07e55d0473253a690c3a8b8fd6e61
+protobuf==6.33.5 \
+ --hash=sha256:3093804752167bcab3998bec9f1048baae6e29505adaf1afd14a37bddede533c \
+ --hash=sha256:cbf16ba3350fb7b889fca858fb215967792dc125b35c7976ca4818bee3521cf0 \
+ --hash=sha256:69915a973dd0f60f31a08b8318b73eab2bd6a392c79184b3612226b0a3f8ec02
