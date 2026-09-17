@@ -10,7 +10,7 @@ import sys
 import tempfile
 import time
 import uuid
-from . import crypto, safeio
+from . import crypto, safeio, process, build_support
 from .github import Client
 from .protocol import *
 
@@ -26,15 +26,15 @@ def event() -> dict:
 
 
 def clean_env() -> dict:
-    # This is credential hygiene, NOT a sandbox against malicious approved code.
+    # Credential hygiene, NOT a sandbox against malicious approved code.
     return {k: v for k, v in os.environ.items() if not any(x in k.upper() for x in
             ("TOKEN", "PRIVATE_KEY", "PUBLIC_KEY", "SECRET", "GITHUB_", "ACTIONS_", "GIT_CONFIG", "GIT_TRACE", "GIT_CURL"))}
 
 
-def run(args: list[str], log: Path, *, cwd: Path | None = None, environment: dict | None = None, timeout=18000) -> None:
-    with log.open("ab") as sink:
-        subprocess.run(args, cwd=cwd, env=environment or clean_env(), stdout=sink,
-                       stderr=subprocess.STDOUT, check=True, timeout=timeout)
+def run(args: list[str], log: Path, *, cwd: Path | None = None, environment: dict | None = None,
+        timeout=18000, stage="fetch", public_progress=False) -> None:
+    process.run(args, log, cwd=cwd, environment=clean_env() if environment is None else environment,
+                timeout=timeout, stage=stage, public_progress=public_progress)
 
 
 def request():
@@ -61,7 +61,6 @@ def request():
     document = crypto.sign(payload, env("REQUEST_SIGNING_PRIVATE_KEY"))
     encrypted = crypto.seal_message(crypto.canonical(document), env("BUILDER_INPUT_PUBLIC_KEY"), message_context(rid, salt))
     answer = Client(env("BUILDER_DISPATCH_TOKEN")).dispatch(BUILDER, "build-release.yml", {"release_id": rid, "salt": salt, "request": encrypted})
-    # Dispatch acknowledgement only. Never wait for the build here.
     with open(env("GITHUB_STEP_SUMMARY"), "a", encoding="utf-8") as summary:
         summary.write(f"Accepted release request `{rid}`. Builder run: {answer['workflow_run_id']}\n")
 
@@ -87,7 +86,7 @@ def git_archive(repo: str, revision: str, destination: Path, token: str | None, 
         root = Path(folder)
         environment = clean_env()
         environment.update({"GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
-                            "GIT_TERMINAL_PROMPT": "0", "GIT_LFS_SKIP_SMUDGE": "1"})
+                            "GIT_TERMINAL_PROMPT": "0", "GIT_LFS_SKIP_SMUDGE": "1", "GCM_INTERACTIVE": "never"})
         settings = {"credential.helper": "", "core.hooksPath": str(root / "no-hooks"), "http.followRedirects": "false"}
         if token:
             settings["http.https://github.com/.extraheader"] = "AUTHORIZATION: basic " + crypto.b64(("x-access-token:" + token).encode())
@@ -97,7 +96,7 @@ def git_archive(repo: str, revision: str, destination: Path, token: str | None, 
             environment[f"GIT_CONFIG_VALUE_{i}"] = v
         run(["git", "init", "--template=", str(root)], log, environment=environment, timeout=60)
         run(["git", "-C", str(root), "fetch", "--no-tags", "--depth=1", "https://github.com/" + repo + ".git", revision], log, environment=environment, timeout=1200)
-        result = subprocess.run(["git", "-C", str(root), "rev-parse", "FETCH_HEAD"], env=environment, capture_output=True, check=True, timeout=30)
+        result = subprocess.run(["git", "-C", str(root), "rev-parse", "FETCH_HEAD"], env=environment, stdin=subprocess.DEVNULL, capture_output=True, check=True, timeout=30)
         if result.stdout.decode().strip() != revision:
             raise ValueError("unexpected fetched revision")
         run(["git", "-C", str(root), "-c", "core.autocrlf=false", "archive", "--format=tar.gz", revision, "-o", str(destination)],
@@ -155,8 +154,7 @@ def prepare():
     safeio.pack_tar(bundle, archive)
     context = file_context(payload["release_id"], payload["salt"], int(env("GITHUB_RUN_ID")), int(env("GITHUB_RUN_ATTEMPT")),
                            env("GITHUB_SHA"), "sources", "all")
-    destination = Path(env("CIPHER_DIR")) / "input.enc"
-    crypto.encrypt_file(archive, destination, crypto.public_text(env("BUILDER_INPUT_PRIVATE_KEY")), context)
+    crypto.encrypt_file(archive, Path(env("CIPHER_DIR")) / "input.enc", crypto.public_text(env("BUILDER_INPUT_PRIVATE_KEY")), context)
 
 
 def build():
@@ -178,47 +176,49 @@ def build():
     os.environ.pop("BUILDER_INPUT_PRIVATE_KEY", None)
     safeio.extract_tar(root / "input/workspace.tgz", root / "workspace")
     safeio.extract_tar(root / "input/upstream.tgz", root / "upstream")
-    downloads = root / "upstream/downloads"
+    upstream = root / "upstream"
+    downloads = upstream / "downloads"
     downloads.mkdir(exist_ok=True)
     for source in (root / "input/downloads").iterdir():
         if not safeio.regular(source):
             raise ValueError("unsafe source archive")
         shutil.copyfile(source, downloads / source.name)
-    upstream = root / "upstream"
-    environment = clean_env()
-    environment.update({"VCPKG_DISABLE_METRICS": "1", "VCPKG_BINARY_SOURCES": "clear", "VCPKG_DOWNLOADS": str(downloads),
-                        "GIT_TERMINAL_PROMPT": "0", "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"})
+    build_support.protect_source_archives(root / "workspace", downloads, payload["plan"]["ports"])
+    environment = build_support.build_environment(clean_env(), downloads, upstream)
+    def execute(args, *, stage, timeout, cwd=upstream):
+        run(args, log, cwd=cwd, environment=environment, stage=stage, timeout=timeout, public_progress=True)
     if platform == "linux":
         environment.update({"CC": "gcc-14", "CXX": "g++-14"})
-        run(["bash", str(upstream / "bootstrap-vcpkg.sh"), "-disableMetrics"], log, cwd=upstream, environment=environment)
+        execute(["nasm", "-v"], stage="preflight", timeout=60)
+        execute(["bash", str(upstream / "bootstrap-vcpkg.sh"), "-disableMetrics"], stage="bootstrap", timeout=600)
         executable = str(upstream / "vcpkg")
         triplet = "x64-linux-static-release"
     else:
-        run(["cmd.exe", "/d", "/c", str(upstream / "bootstrap-vcpkg.bat"), "-disableMetrics"], log, cwd=upstream, environment=environment)
+        execute(["cmd.exe", "/d", "/c", str(upstream / "bootstrap-vcpkg.bat"), "-disableMetrics"], stage="bootstrap", timeout=600)
         executable = str(upstream / "vcpkg.exe")
         triplet = "x64-windows-static-release"
     triplets = Path(__file__).resolve().parent.parent / "triplets"
     installed = root / "installed"
     args = ["--triplet=" + triplet, "--overlay-triplets=" + str(triplets), "--overlay-ports=" + str(root / "workspace/ports"), "--x-install-root=" + str(installed)]
     packages = payload["plan"]["platforms"][platform]["packages"]
-    # Private archives were supplied by the credentialed, non-executing fetcher.
-    # Public dependency/tool downloads remain enabled; this is NOT an offline VM.
-    run([executable, "install", *packages, *args, "--binarysource=clear", "--clean-after-build"], log, cwd=upstream, environment=environment)
+    # Preserve downloads through the entire graph. Remove them at final job cleanup.
+    execute(build_support.install_command(executable, packages, args), stage="install", timeout=14400)
     export = root / "export"
     export.mkdir()
     export_packages = sorted({p.split("[", 1)[0] for p in packages})
-    run([executable, "export", *export_packages, *args, "--raw", "--output=sdk", "--output-dir=" + str(export)], log, cwd=upstream, environment=environment)
+    execute([executable, "export", *export_packages, *args, "--raw", "--output=sdk", "--output-dir=" + str(export)], stage="export", timeout=900)
     sdk = export / "sdk"
+    build_support.copy_export_triplet(sdk, triplets, triplet)
     package = root / "sdk.zip"
     safeio.sdk_zip(sdk, package)
     safeio.extract_zip(package, root / "consumer-sdk")
     source = root / "workspace" / payload["plan"]["smoke_path"]
     out = root / "smoke-build"
-    run(["cmake", "-S", str(source), "-B", str(out), "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded",
-         "-DCMAKE_TOOLCHAIN_FILE=" + str(root / "consumer-sdk/scripts/buildsystems/vcpkg.cmake"),
-         "-DVCPKG_TARGET_TRIPLET=" + triplet, "-DVCPKG_MANIFEST_MODE=OFF"], log, environment=environment)
-    run(["cmake", "--build", str(out), "--config", "Release", "--parallel", "2"], log, environment=environment)
-    run(["ctest", "--test-dir", str(out), "-C", "Release", "--output-on-failure", "--timeout", "60"], log, environment=environment)
+    execute(["cmake", "-S", str(source), "-B", str(out), "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded",
+             "-DCMAKE_TOOLCHAIN_FILE=" + str(root / "consumer-sdk/scripts/buildsystems/vcpkg.cmake"),
+             "-DVCPKG_TARGET_TRIPLET=" + triplet, "-DVCPKG_MANIFEST_MODE=OFF"], stage="consumer-configure", timeout=600)
+    execute(["cmake", "--build", str(out), "--config", "Release", "--parallel", "2"], stage="consumer-build", timeout=1800)
+    execute(["ctest", "--test-dir", str(out), "-C", "Release", "--output-on-failure", "--timeout", "60"], stage="consumer-test", timeout=180)
     bundle = root / "result"
     bundle.mkdir()
     shutil.copyfile(package, bundle / "sdk.zip")
@@ -235,17 +235,33 @@ def build():
 
 
 def diagnostics():
-    """Only compiler logs, never source-fetch credentials; encrypted on failures too."""
+    """Compiler/supervisor logs only; never credentialed prepare/fetch logs."""
     guard(BUILDER, event="workflow_dispatch")
-    source = work() / "build.log"
+    root = work()
+    source = root / "build.log"
     if not source.is_file():
         return
+    # Include bounded detailed CMake logs for the next diagnosis, still encrypted.
+    combined = root / "diagnostic.log"
+    with combined.open("wb") as out:
+        with source.open("rb") as stream:
+            shutil.copyfileobj(stream, out, 1024 * 1024)
+        remaining = 16 * 1024**2
+        for folder in sorted((root / "upstream/buildtrees").glob("*")):
+            if not folder.is_dir() or folder.is_symlink():
+                continue
+            for log in sorted(folder.glob("*.log")):
+                if not safeio.regular(log) or remaining <= 0:
+                    continue
+                out.write(("\nDETAIL_LOG " + log.relative_to(root).as_posix() + "\n").encode())
+                with log.open("rb") as stream:
+                    data = stream.read(min(remaining, 1024**2))
+                out.write(data)
+                remaining -= len(data)
     data = event()["inputs"]
     context = file_context(data["release_id"], data["salt"], int(env("GITHUB_RUN_ID")), int(env("GITHUB_RUN_ATTEMPT")), env("GITHUB_SHA"), "diagnostic", env("TARGET_PLATFORM"))
-    crypto.encrypt_file(source, Path(env("DIAGNOSTIC_DIR")) / "diagnostic.enc", env("ARTIFACT_ENCRYPTION_PUBLIC_KEY"), context)
+    crypto.encrypt_file(combined, Path(env("DIAGNOSTIC_DIR")) / "diagnostic.enc", env("ARTIFACT_ENCRYPTION_PUBLIC_KEY"), context)
 
 
 def cleanup():
-    target = Path(env("RUNNER_TEMP")) / "encrypted-release-private"
-    if target.exists():
-        shutil.rmtree(target, ignore_errors=False)
+    process.remove_tree(Path(env("RUNNER_TEMP")) / "encrypted-release-private")
