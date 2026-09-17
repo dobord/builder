@@ -17,7 +17,7 @@ jobs:
           - os: windows-2022
             platform: windows
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -25,13 +25,27 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
         with:
           python-version: '3.12'
-      - name: Install hash-pinned cryptographic libraries
+      - name: Install hash-pinned cryptographic libraries and CMake
         run: |
           python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r requirements.lock
+          python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r build-tools.lock
       - name: Synthetic tests only; no repository secrets
         env:
           REQUIRE_TINK_TESTS: '1'
         run: python -m unittest discover -s tests -v
+      - name: Public integration prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-14 ninja-build nasm
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: microsoft/vcpkg
+          ref: 9e593bb18ea69cc5095e012465dcd675a822ed0d
+          path: public-upstream
+          persist-credentials: false
+      - name: Real vcpkg regression with PUBLIC sources only
+        run: python tests/public_vcpkg_integration.py public-upstream
       - name: Create PUBLIC test ciphertext and disposable test keys
         if: github.event_name != 'pull_request'
         run: python tests/transport_fixture.py create ${{ matrix.platform }}
