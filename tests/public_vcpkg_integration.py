@@ -37,6 +37,7 @@ def main():
         windows = os.name == 'nt'
         platform = 'windows' if windows else 'linux'
         triplet = f'x64-{platform}-static-release'
+        legacy_host = f'x64-{platform}'
         executable = str(upstream / ('vcpkg.exe' if windows else 'vcpkg'))
         def run(args, stage='tool', timeout=1200):
             process.run(args, log, cwd=upstream, environment=env, timeout=timeout, stage=stage, public_progress=True)
@@ -49,7 +50,17 @@ def main():
         workspace = root / 'workspace'
         port = workspace / 'ports/archive-fixture'
         port.mkdir(parents=True)
-        (port / 'vcpkg.json').write_text(json.dumps({'name':'archive-fixture','version':'1.0.0','dependencies':['zlib',{'name':'vcpkg-cmake','host':True},{'name':'vcpkg-cmake-config','host':True}]}))
+        # A transitive HOST library is essential: script-only host dependencies
+        # cannot reproduce default host Debug libraries leaking into raw export.
+        (port / 'vcpkg.json').write_text(json.dumps({'name':'archive-fixture','version':'1.0.0','dependencies':['zlib',{'name':'host-fixture','host':True},{'name':'vcpkg-cmake','host':True},{'name':'vcpkg-cmake-config','host':True}]}))
+        host_port = workspace / 'ports/host-fixture'
+        host_port.mkdir()
+        (host_port / 'vcpkg.json').write_text(json.dumps({'name':'host-fixture','version':'1.0.0','dependencies':['zlib']}))
+        (host_port / 'portfile.cmake').write_text('''set(VCPKG_POLICY_EMPTY_PACKAGE enabled)
+file(MAKE_DIRECTORY "${CURRENT_PACKAGES_DIR}/share/host-fixture")
+file(WRITE "${CURRENT_PACKAGES_DIR}/share/host-fixture/role.txt" "${TARGET_TRIPLET};${VCPKG_BUILD_TYPE}\\n")
+file(WRITE "${CURRENT_PACKAGES_DIR}/share/host-fixture/copyright" "Public-domain synthetic fixture.\\n")
+''')
         (port / 'portfile.cmake').write_text('''vcpkg_check_linkage(ONLY_STATIC_LIBRARY)
 vcpkg_from_git(OUT_SOURCE_PATH SOURCE_PATH URL "https://example.invalid/synthetic.git" REF "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 vcpkg_cmake_configure(SOURCE_PATH "${SOURCE_PATH}")
@@ -81,25 +92,48 @@ install(FILES archive-fixture-config.cmake DESTINATION lib/cmake/archive-fixture
                 tar.addfile(info, io.BytesIO(data))
         original_archive = cached.read_bytes()
         build_support.protect_source_archives(workspace, downloads, [{'name':'archive-fixture','sha':SOURCE_SHA}])
-        options = ['--triplet='+triplet, '--overlay-triplets='+str(ROOT/'triplets'), '--overlay-ports='+str(workspace/'ports'), '--x-install-root='+str(root/'installed')]
-        # Reproduce the actual old cleanup bug using PUBLIC zlib and a fake source.
-        run([executable,'install','zlib',*options,'--binarysource=clear','--clean-after-build'], 'install')
+        common = ['--triplet='+triplet, '--overlay-triplets='+str(ROOT/'triplets'), '--overlay-ports='+str(workspace/'ports')]
+        legacy_options = [*common, '--host-triplet='+legacy_host, '--x-install-root='+str(root/'legacy-installed')]
+        # Deliberate negative test: reproduce the original destructive cleanup.
+        run([executable,'install','zlib',*legacy_options,'--binarysource=clear','--clean-after-build'], 'install')
         if cached.exists():
             raise AssertionError('expected old cleanup to delete the synthetic source archive')
         try:
-            run(build_support.install_command(executable,['archive-fixture'],options), 'install')
+            run([executable,'install','archive-fixture',*legacy_options,*build_support.INSTALL_FLAGS], 'install')
         except process.StageFailure:
             if 'RELEASE_SOURCE_ARCHIVE_MISSING' not in log.read_text('utf-8', errors='replace'):
                 raise
         else:
             raise AssertionError('missing archive was not rejected')
         cached.write_bytes(original_archive)
+        # Second negative test: real default host zlib includes Debug files.
+        run([executable,'install','archive-fixture',*legacy_options,*build_support.INSTALL_FLAGS], 'install')
+        export = root / 'export'; export.mkdir()
+        run([executable,'export','archive-fixture',*legacy_options,'--raw','--output=legacy','--output-dir='+str(export)], 'export')
+        legacy_sdk = export / 'legacy'
+        debug_root = legacy_sdk / 'installed' / legacy_host / 'debug'
+        if not any(p.is_file() for p in debug_root.rglob('*')):
+            raise AssertionError('default host Debug files were not exported; regression fixture is invalid')
+        try:
+            safeio.sdk_zip(legacy_sdk, root/'rejected.zip')
+        except ValueError as error:
+            if str(error) != 'workspace or debug tree in SDK':
+                raise
+        else:
+            raise AssertionError('SDK guard no longer rejects a Debug tree')
+        print('PUBLIC_HOST_DEBUG_REPRODUCED: unmodified SDK guard rejected real host Debug files.')
+        # A clean installed root: never hide stale Debug products by deleting them.
+        options = build_support.native_release_options([*common, '--x-install-root='+str(root/'installed')])
         run(build_support.install_command(executable,['archive-fixture'],options), 'install')
         if cached.read_bytes() != original_archive:
             raise AssertionError('fixed installation failed to preserve source archive')
-        export = root / 'export'; export.mkdir()
         run([executable,'export','archive-fixture',*options,'--raw','--output=sdk','--output-dir='+str(export)], 'export')
         sdk = export / 'sdk'
+        if (sdk/'installed'/legacy_host).exists():
+            raise AssertionError('default host triplet leaked into native Release SDK')
+        role = sdk/'installed'/triplet/'share/host-fixture/role.txt'
+        if role.read_text().strip() != triplet + ';release':
+            raise AssertionError('transitive host dependency did not use Release policy')
         build_support.copy_export_triplet(sdk, ROOT/'triplets', triplet)
         packaged = root / 'sdk.zip'
         safeio.sdk_zip(sdk, packaged)
@@ -114,6 +148,9 @@ install(FILES archive-fixture-config.cmake DESTINATION lib/cmake/archive-fixture
         consumer = root/'consumer'; consumer.mkdir()
         (consumer/'CMakeLists.txt').write_text('''cmake_minimum_required(VERSION 3.25)
 project(fixture_consumer LANGUAGES CXX)
+if(NOT VCPKG_HOST_TRIPLET STREQUAL VCPKG_TARGET_TRIPLET)
+    message(FATAL_ERROR "Consumer host/target triplet mismatch")
+endif()
 find_package(archive-fixture CONFIG REQUIRED)
 add_executable(consumer main.cpp)
 target_link_libraries(consumer PRIVATE fixture::archive_fixture)
@@ -125,7 +162,7 @@ add_test(NAME consumer COMMAND consumer)
         run(['cmake','-S',str(consumer),'-B',str(out),'-DCMAKE_BUILD_TYPE=Release','-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded','-DCMAKE_TOOLCHAIN_FILE='+str(received/'scripts/buildsystems/vcpkg.cmake'),'-DVCPKG_TARGET_TRIPLET='+triplet,'-DVCPKG_MANIFEST_MODE=OFF'], 'consumer-configure')
         run(['cmake','--build',str(out),'--config','Release','--parallel','2'], 'consumer-build')
         run(['ctest','--test-dir',str(out),'-C','Release','--output-on-failure'], 'consumer-test')
-        print('PUBLIC_INTEGRATION_OK: destructive cleanup reproduced; guarded archives preserved; static SDK compiled, exported, encrypted and consumed.')
+        print('PUBLIC_INTEGRATION_OK: source cleanup and host Debug defects reproduced; native Release SDK compiled, exported, encrypted and consumed without relaxing archive checks.')
     except Exception:
         if log.exists():
             print(log.read_text('utf-8', errors='replace')[-24000:])
