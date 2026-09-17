@@ -82,7 +82,7 @@ unset(_release_archive_sha256)
 
 def build_environment(original: dict[str, str], downloads: Path, upstream: Path) -> dict[str, str]:
     result = dict(original)
-    # CMake consumers must resolve tools from the same native release triplet too.
+    # Pin the CLI fallback. CMake gets explicit host/target cache arguments.
     result.update({"VCPKG_ROOT": str(upstream), "VCPKG_DOWNLOADS": str(downloads),
                    "VCPKG_DEFAULT_HOST_TRIPLET": native_host_triplet(),
                    "VCPKG_DISABLE_METRICS": "1", "VCPKG_BINARY_SOURCES": "clear",
@@ -98,3 +98,13 @@ def copy_export_triplet(sdk: Path, triplets: Path, triplet: str) -> None:
     target = sdk / "triplets"
     target.mkdir(exist_ok=True)
     shutil.copyfile(triplets / (triplet + ".cmake"), target / (triplet + ".cmake"))
+
+
+def consumer_configure_command(source: Path, build: Path, sdk: Path, triplet: str) -> list[str]:
+    """Use only the exported SDK, with explicit and matching CMake triplet roles."""
+    native_release_options(["--triplet=" + triplet])
+    return ["cmake", "-S", str(source), "-B", str(build),
+            "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded",
+            "-DCMAKE_TOOLCHAIN_FILE=" + str(sdk / "scripts/buildsystems/vcpkg.cmake"),
+            "-DVCPKG_TARGET_TRIPLET=" + triplet, "-DVCPKG_HOST_TRIPLET=" + triplet,
+            "-DVCPKG_MANIFEST_MODE=OFF"]
