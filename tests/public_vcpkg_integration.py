@@ -159,7 +159,7 @@ add_test(NAME consumer COMMAND consumer)
 ''')
         (consumer/'main.cpp').write_text('#include <fixture.hpp>\nint main() { return fixture_value() == 42 ? 0 : 1; }\n')
         out = root/'consumer-build'
-        run(['cmake','-S',str(consumer),'-B',str(out),'-DCMAKE_BUILD_TYPE=Release','-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded','-DCMAKE_TOOLCHAIN_FILE='+str(received/'scripts/buildsystems/vcpkg.cmake'),'-DVCPKG_TARGET_TRIPLET='+triplet,'-DVCPKG_MANIFEST_MODE=OFF'], 'consumer-configure')
+        run(build_support.consumer_configure_command(consumer, out, received, triplet), 'consumer-configure')
         run(['cmake','--build',str(out),'--config','Release','--parallel','2'], 'consumer-build')
         run(['ctest','--test-dir',str(out),'-C','Release','--output-on-failure'], 'consumer-test')
         print('PUBLIC_INTEGRATION_OK: source cleanup and host Debug defects reproduced; native Release SDK compiled, exported, encrypted and consumed without relaxing archive checks.')
