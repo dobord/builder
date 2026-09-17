@@ -167,6 +167,14 @@ def extract_zip(archive: Path, root: Path) -> None:
                 target.chmod(0o755 if item.external_attr >> 16 & 0o111 else 0o644)
 
 
+def forbidden_sdk_tree(name: str) -> bool:
+    """Reject build/configuration roots, not legitimate include/debug headers."""
+    lowered = [p.casefold() for p in parts(name)]
+    return (any(p in {".git", "downloads", "buildtrees"} for p in lowered)
+            or lowered[0] == "debug"
+            or (len(lowered) >= 3 and lowered[0] == "installed" and lowered[2] == "debug"))
+
+
 def sdk_zip(root: Path, archive: Path) -> None:
     """Package the export only, with normalized portable ZIP metadata."""
     banned_suffix = {".pdb", ".ilk", ".obj", ".o", ".pch", ".idb", ".ipch", ".dmp", ".log"}
@@ -174,15 +182,12 @@ def sdk_zip(root: Path, archive: Path) -> None:
     with zipfile.ZipFile(archive, "x", zipfile.ZIP_DEFLATED, compresslevel=6) as z:
         for item in _regular_files(root):
             rel = item.relative_to(root)
-            lowered = [p.casefold() for p in rel.parts]
-            if any(p in {".git", "downloads", "buildtrees", "debug"} for p in lowered):
+            if forbidden_sdk_tree(rel.as_posix()):
                 raise ValueError("workspace or debug tree in SDK")
             if item.suffix.casefold() in banned_suffix or item.name.casefold() in banned_names:
                 continue
             if item.suffix.casefold() in {".c", ".cc", ".cpp", ".cxx"}:
                 raise ValueError("implementation source in SDK; review required")
-            # vcpkg export may intentionally set mtime to the Unix epoch.
-            # ZIP dates start in 1980. Avoid host-local timezone/mtime entirely.
             info = zipfile.ZipInfo(rel.as_posix(), date_time=(1980, 1, 1, 0, 0, 0))
             info.create_system = 3
             info.compress_type = zipfile.ZIP_DEFLATED

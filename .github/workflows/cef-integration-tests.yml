@@ -29,29 +29,13 @@ jobs:
         env:
           REQUIRE_TINK_TESTS: '1'
         run: python -m unittest discover -s tests -v
-      - name: Prepare exact public recipe contract fixtures
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/cef-contracts"
-          git archive --format=tar HEAD > "$RUNNER_TEMP/cef-contracts/builder.tar"
-          git init "$RUNNER_TEMP/cef-recipe"
-          git -C "$RUNNER_TEMP/cef-recipe" fetch --depth=1 https://github.com/dobord/cef.git b67bc8c9f3f3dc43f81c21b2fc24cb2f0fbfbccf
-          test "$(git -C "$RUNNER_TEMP/cef-recipe" rev-parse FETCH_HEAD)" = b67bc8c9f3f3dc43f81c21b2fc24cb2f0fbfbccf
-          git -C "$RUNNER_TEMP/cef-recipe" checkout --detach FETCH_HEAD
-          git -C "$RUNNER_TEMP/cef-recipe" archive --format=tar HEAD vcpkg .github/workflows > "$RUNNER_TEMP/cef-contracts/cef.tar"
-          python -m unittest discover -s "$RUNNER_TEMP/cef-recipe/vcpkg/integration/tests" -v
-          git init "$RUNNER_TEMP/vcpkg-recipe"
-          git -C "$RUNNER_TEMP/vcpkg-recipe" fetch --depth=1 https://github.com/microsoft/vcpkg.git 9e593bb18ea69cc5095e012465dcd675a822ed0d
-          test "$(git -C "$RUNNER_TEMP/vcpkg-recipe" rev-parse FETCH_HEAD)" = 9e593bb18ea69cc5095e012465dcd675a822ed0d
-          git -C "$RUNNER_TEMP/vcpkg-recipe" archive --format=tar FETCH_HEAD ports scripts triplets versions/baseline.json > "$RUNNER_TEMP/cef-contracts/upstream.tar"
-          sha256sum "$RUNNER_TEMP/cef-contracts/"*.tar > "$RUNNER_TEMP/cef-contracts/SHA256SUMS"
-      - name: Preserve public contract fixtures
-        if: runner.os == 'Linux'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - name: Fetch exact public CEF integration recipe
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          name: cef-contract-fixtures
-          path: ${{ runner.temp }}/cef-contracts
-          retention-days: 1
-          if-no-files-found: error
+          repository: dobord/cef
+          ref: 4b8a42f5d212bb40b0f229ff983c2abb5d562ba1
+          path: cef-recipe
+          persist-credentials: false
+      - name: Test pinned CEF contracts
+        working-directory: cef-recipe
+        run: python -m unittest discover -s vcpkg/integration/tests -v

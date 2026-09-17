@@ -25,7 +25,7 @@ def notify():
     available = {a["name"] for a in api.artifacts(BUILDER, run["id"]) if not a["expired"]}
     required = {f"sdk-{platform}-{run['id']}-{run['run_attempt']}" for platform in ("linux", "windows")}
     if not required.issubset(available):
-        return  # Successful iteration(s) are not a complete SDK release pair.
+        return
     Client(env("BIN_DISPATCH_TOKEN")).dispatch(BIN, "publish.yml", {"build_run_id": str(run["id"]), "build_run_attempt": str(run["run_attempt"])})
 
 
@@ -103,7 +103,7 @@ def verify_result():
             raise ValueError("SDK layout invalid")
         for n in names:
             low = n.lower()
-            if any(p in {"downloads", "buildtrees", ".git", "debug"} for p in low.split("/")) or low.endswith((".pdb", ".cpp", ".cxx", ".cc", ".log", ".dmp")):
+            if safeio.forbidden_sdk_tree(n) or low.endswith((".pdb", ".cpp", ".cxx", ".cc", ".log", ".dmp")):
                 raise ValueError("forbidden SDK file")
         cfg = payload["plan"].get("cef")
         if cfg is not None:
@@ -165,7 +165,6 @@ def publish_release():
     except urllib.error.HTTPError as error:
         if error.code != 404:
             raise
-        # The tag endpoint may omit drafts. Resume the exact matching draft.
         matches = []
         for page in range(1, 21):
             listed = api.get(f"/repos/{BIN}/releases?per_page=100&page={page}")
