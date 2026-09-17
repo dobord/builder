@@ -1,0 +1,38 @@
+name: CEF integration contracts
+on:
+  push:
+    branches: [feature/cef-static-integration]
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Prepare exact public recipe contract fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/cef-contracts"
+          git archive --format=tar HEAD > "$RUNNER_TEMP/cef-contracts/builder.tar"
+          git init "$RUNNER_TEMP/cef-recipe"
+          git -C "$RUNNER_TEMP/cef-recipe" fetch --depth=1 https://github.com/dobord/cef.git 90c70380632b70bd3195ad04fc22559840be8bc5
+          test "$(git -C "$RUNNER_TEMP/cef-recipe" rev-parse FETCH_HEAD)" = 90c70380632b70bd3195ad04fc22559840be8bc5
+          git -C "$RUNNER_TEMP/cef-recipe" archive --format=tar FETCH_HEAD vcpkg .github/workflows > "$RUNNER_TEMP/cef-contracts/cef.tar"
+          git init "$RUNNER_TEMP/vcpkg-recipe"
+          git -C "$RUNNER_TEMP/vcpkg-recipe" fetch --depth=1 https://github.com/microsoft/vcpkg.git 9e593bb18ea69cc5095e012465dcd675a822ed0d
+          test "$(git -C "$RUNNER_TEMP/vcpkg-recipe" rev-parse FETCH_HEAD)" = 9e593bb18ea69cc5095e012465dcd675a822ed0d
+          git -C "$RUNNER_TEMP/vcpkg-recipe" archive --format=tar FETCH_HEAD ports scripts triplets versions/baseline.json > "$RUNNER_TEMP/cef-contracts/upstream.tar"
+          sha256sum "$RUNNER_TEMP/cef-contracts/"*.tar > "$RUNNER_TEMP/cef-contracts/SHA256SUMS"
+      - name: Preserve public contract fixtures
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: cef-contract-fixtures
+          path: ${{ runner.temp }}/cef-contracts
+          retention-days: 1
+          if-no-files-found: error
