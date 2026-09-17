@@ -67,6 +67,22 @@ class NativeHostTripletTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 policy.native_release_options(['--triplet=x64-windows-static-release'])
 
+    def test_cmake_consumer_pins_both_roles(self):
+        for triplet in sorted(policy.RELEASE_TRIPLETS):
+            with self.subTest(triplet=triplet), patch.object(policy, 'native_host_triplet', return_value=triplet):
+                sdk = Path('SDK with spaces')
+                command = policy.consumer_configure_command(Path('source'), Path('build'), sdk, triplet)
+                self.assertEqual(command.count('-DVCPKG_TARGET_TRIPLET=' + triplet), 1)
+                self.assertEqual(command.count('-DVCPKG_HOST_TRIPLET=' + triplet), 1)
+                self.assertIn('-DCMAKE_TOOLCHAIN_FILE=' + str(sdk / 'scripts/buildsystems/vcpkg.cmake'), command)
+                self.assertIn('-DVCPKG_MANIFEST_MODE=OFF', command)
+                self.assertIn('-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded', command)
+
+    def test_cmake_consumer_refuses_non_native_triplet(self):
+        with patch.object(policy, 'native_host_triplet', return_value='x64-linux-static-release'):
+            with self.assertRaises(ValueError):
+                policy.consumer_configure_command(Path('s'), Path('b'), Path('sdk'), 'x64-windows-static-release')
+
     def test_package_cannot_override_triplet_policy(self):
         for package in ['--host-triplet=x64-linux', '@options.rsp', 'fixture:x64-linux']:
             with self.subTest(package=package), self.assertRaises(ValueError):
