@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 import shutil
 import urllib.error
-from . import crypto, safeio
+from . import crypto, safeio, cef_build, cef_contract
 from .github import Client
 from .protocol import *
 from .tasks import event, work
@@ -22,6 +22,10 @@ def notify():
         raise ValueError("wrong workflow identifier")
     api_run = api.get(f"/repos/{BUILDER}/actions/runs/{run['id']}/attempts/{run['run_attempt']}")
     check_run(api_run, BUILDER, "build-release.yml", approved, number(run["run_attempt"]), "workflow_dispatch", success=True)
+    available = {a["name"] for a in api.artifacts(BUILDER, run["id"]) if not a["expired"]}
+    required = {f"sdk-{platform}-{run['id']}-{run['run_attempt']}" for platform in ("linux", "windows")}
+    if not required.issubset(available):
+        return  # Successful iteration(s) are not a complete SDK release pair.
     Client(env("BIN_DISPATCH_TOKEN")).dispatch(BIN, "publish.yml", {"build_run_id": str(run["id"]), "build_run_attempt": str(run["run_attempt"])})
 
 
@@ -101,6 +105,22 @@ def verify_result():
             low = n.lower()
             if any(p in {"downloads", "buildtrees", ".git", "debug"} for p in low.split("/")) or low.endswith((".pdb", ".cpp", ".cxx", ".cc", ".log", ".dmp")):
                 raise ValueError("forbidden SDK file")
+        cfg = payload["plan"].get("cef")
+        if cfg is not None:
+            evidence = manifest.get("cef", {})
+            if (evidence.get("build_contract_sha256") != cef_contract.build_key(cfg, platform)
+                    or evidence.get("profile") != cfg["profile"]):
+                raise ValueError("CEF evidence is not bound to the signed acquisition contract")
+            cef_build.validate_evidence(evidence.get("consumer", {}), cfg, platform)
+            import zipfile
+            with zipfile.ZipFile(sdk) as archive:
+                path = f"installed/{triplet}/share/cef-static/build-contract.json"
+                if path not in names or archive.getinfo(path).file_size > 32768:
+                    raise ValueError("CEF package lacks its ABI-tracked build contract")
+                if crypto.parse(archive.read(path)) != cef_contract.port_contract(cfg, platform):
+                    raise ValueError("Installed CEF package differs from the signed build plan")
+        elif "cef" in manifest or any(n.startswith(f"installed/{triplet}/share/cef-static/") for n in names):
+            raise ValueError("Unrequested CEF package or evidence")
         filename = f"vcpkg-{payload['source_tag']}-{platform}-x64-static-release.zip"
         shutil.copyfile(sdk, staging / filename)
         files[filename] = manifest["sdk_sha256"]

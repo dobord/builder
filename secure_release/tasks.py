@@ -10,7 +10,7 @@ import sys
 import tempfile
 import time
 import uuid
-from . import crypto, safeio, process, build_support
+from . import crypto, safeio, process, build_support, cef_build, cef_contract, cef_cache
 from .github import Client
 from .protocol import *
 
@@ -150,6 +150,10 @@ def prepare():
                 or re.findall(r'\bURL\s+"([^"]+)"', text) != ["https://github.com/" + port["repository"] + ".git"]):
             raise ValueError("port sources differ from signed plan")
         git_archive(port["repository"], port["sha"], downloads / f"{port['name']}-{port['sha']}.tar.gz", env("SOURCE_READ_TOKEN"), log)
+    if plan["version"] == 2:
+        revision = plan["cef"]["recipe_commit"]
+        # Public recipe only; never send the private source token to this fetch.
+        git_archive("dobord/cef", revision, downloads / f"cef-static-{revision}.tar.gz", None, log)
     archive = root / "input.tgz"
     safeio.pack_tar(bundle, archive)
     context = file_context(payload["release_id"], payload["salt"], int(env("GITHUB_RUN_ID")), int(env("GITHUB_RUN_ATTEMPT")),
@@ -173,6 +177,8 @@ def build():
             or payload["builder_sha"] != env("GITHUB_SHA") or payload["builder_sha"] != env("BUILDER_COMMIT_SHA")
             or payload["output_key"] != crypto.fingerprint(env("ARTIFACT_ENCRYPTION_PUBLIC_KEY"))):
         raise ValueError("input bundle mismatch")
+    cfg = payload["plan"].get("cef")
+    input_private = env("BUILDER_INPUT_PRIVATE_KEY") if cfg is not None else None
     os.environ.pop("BUILDER_INPUT_PRIVATE_KEY", None)
     safeio.extract_tar(root / "input/workspace.tgz", root / "workspace")
     safeio.extract_tar(root / "input/upstream.tgz", root / "upstream")
@@ -183,7 +189,14 @@ def build():
         if not safeio.regular(source):
             raise ValueError("unsafe source archive")
         shutil.copyfile(source, downloads / source.name)
-    build_support.protect_source_archives(root / "workspace", downloads, payload["plan"]["ports"])
+    source_ports = list(payload["plan"]["ports"])
+    if cfg is not None:
+        revision = cfg["recipe_commit"]
+        recipe_archive = downloads / f"cef-static-{revision}.tar.gz"
+        safeio.extract_tar(recipe_archive, root / "cef-recipe")
+        cef_build.materialize(root / "workspace", cfg, platform)
+        source_ports.append({"name": "cef-static", "sha": revision})
+    build_support.protect_source_archives(root / "workspace", downloads, source_ports)
     environment = build_support.build_environment(clean_env(), downloads, upstream)
     def execute(args, *, stage, timeout, cwd=upstream):
         run(args, log, cwd=cwd, environment=environment, stage=stage, timeout=timeout, public_progress=True)
@@ -201,8 +214,32 @@ def build():
     installed = root / "installed"
     args = build_support.native_release_options(["--triplet=" + triplet, "--overlay-triplets=" + str(triplets), "--overlay-ports=" + str(root / "workspace/ports"), "--x-install-root=" + str(installed)])
     packages = payload["plan"]["platforms"][platform]["packages"]
+    binary_cache = None
+    cache_key = None
+    if cfg is not None:
+        binary_cache = root / "binary-cache"
+        cache_key = cef_build.binary_key(payload["plan"]["upstream_sha"], platform, env("GITHUB_SHA"),
+                                         triplets / (triplet + ".cmake"))
+        selected = cfg["platforms"][platform]["binary_cache"]
+        if selected is not None:
+            cef_cache.fetch(Client(env("BUILD_CACHE_READ_TOKEN")), selected, binary_cache,
+                            platform=platform, kind="vcpkg-binaries", key=cache_key,
+                            revision=env("GITHUB_SHA"), private=input_private)
+        else:
+            binary_cache.mkdir()
+        if not cef_build.run_engine(root, cfg, platform, execute, environment, input_private, env("GITHUB_SHA")):
+            return  # A persisted checkpoint, never an installed or published SDK.
     # Preserve downloads through the entire graph. Remove them at final job cleanup.
-    execute(build_support.install_command(executable, packages, args), stage="install", timeout=14400)
+    try:
+        execute(build_support.install_command(executable, packages, args, binary_cache=binary_cache), stage="install", timeout=14400)
+    finally:
+        if binary_cache is not None and any(binary_cache.rglob("*.zip")):
+            cache_context = cef_cache.context("vcpkg-binaries", platform, cache_key, int(env("GITHUB_RUN_ID")),
+                                              int(env("GITHUB_RUN_ATTEMPT")), env("GITHUB_SHA"), "index")
+            cef_cache.seal(binary_cache, Path(env("RUNNER_TEMP")) / "cipher-cache/vcpkg-binaries",
+                           crypto.public_text(input_private), cache_context)
+            cef_build.write_output("binary_cache_ready", True)
+    input_private = None
     export = root / "export"
     export.mkdir()
     export_packages = sorted({p.split("[", 1)[0] for p in packages})
@@ -214,10 +251,13 @@ def build():
     safeio.extract_zip(package, root / "consumer-sdk")
     source = root / "workspace" / payload["plan"]["smoke_path"]
     out = root / "smoke-build"
-    execute(build_support.consumer_configure_command(source, out, root / "consumer-sdk", triplet),
-            stage="consumer-configure", timeout=600)
+    configure = build_support.consumer_configure_command(source, out, root / "consumer-sdk", triplet)
+    if cfg is not None:
+        configure.append("-DCEF_STATIC_SMOKE_SOURCE=" + str(root / "cef-recipe/vcpkg/ports/cef-static/smoke.c"))
+    execute(configure, stage="consumer-configure", timeout=600)
     execute(["cmake", "--build", str(out), "--config", "Release", "--parallel", "2"], stage="consumer-build", timeout=1800)
     execute(["ctest", "--test-dir", str(out), "-C", "Release", "--output-on-failure", "--timeout", "60"], stage="consumer-test", timeout=180)
+    cef_proof = cef_build.verify_consumer(root, cfg, platform, execute) if cfg is not None else None
     bundle = root / "result"
     bundle.mkdir()
     shutil.copyfile(package, bundle / "sdk.zip")
@@ -227,10 +267,14 @@ def build():
                 "build_run": int(env("GITHUB_RUN_ID")), "build_attempt": int(env("GITHUB_RUN_ATTEMPT")),
                 "source_sha": payload["source_sha"], "upstream_sha": payload["plan"]["upstream_sha"],
                 "image_os": os.environ.get("ImageOS", ""), "image_version": os.environ.get("ImageVersion", "")}
+    if cfg is not None:
+        manifest["cef"] = {"build_contract_sha256": cef_contract.build_key(cfg, platform),
+                           "profile": cfg["profile"], "consumer": cef_proof}
     (bundle / "manifest.json").write_bytes(crypto.canonical(manifest))
     safeio.pack_tar(bundle, root / "result.tgz")
     context = file_context(payload["release_id"], payload["salt"], int(env("GITHUB_RUN_ID")), int(env("GITHUB_RUN_ATTEMPT")), env("GITHUB_SHA"), "sdk", platform)
     crypto.encrypt_file(root / "result.tgz", Path(env("CIPHER_DIR")) / "sdk.enc", env("ARTIFACT_ENCRYPTION_PUBLIC_KEY"), context)
+    cef_build.write_output("sdk_ready", True)
 
 
 def diagnostics():

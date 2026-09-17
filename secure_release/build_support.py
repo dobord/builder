@@ -42,12 +42,19 @@ def native_release_options(options: list[str]) -> list[str]:
     return result
 
 
-def install_command(executable: str, packages: list[str], options: list[str]) -> list[str]:
+def install_command(executable: str, packages: list[str], options: list[str], *, binary_cache: Path | None = None) -> list[str]:
     if (any(arg.split("=", 1)[0] in {"--clean-after-build", "--clean-downloads-after-build", "--head"}
             for arg in [*options, *packages])
             or any(arg.startswith(("-", "@")) or ":" in arg for arg in packages)):
         raise ValueError("unsafe release install option")
-    return [executable, "install", *packages, *native_release_options(options), *INSTALL_FLAGS]
+    flags = list(INSTALL_FLAGS)
+    if binary_cache is not None:
+        path = str(binary_cache.resolve())
+        if not binary_cache.is_absolute() or any(c in path for c in (";", ",", "`", "\n", "\r")):
+            raise ValueError("unsafe local binary-cache path")
+        # Explicitly clear inherited providers, then opt into this job-local cache.
+        flags[0] = "--binarysource=clear;files," + path + ",readwrite"
+    return [executable, "install", *packages, *native_release_options(options), *flags]
 
 
 def protect_source_archives(workspace: Path, downloads: Path, ports: list[dict]) -> None:
