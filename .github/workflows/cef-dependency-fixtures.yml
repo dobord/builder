@@ -1,0 +1,36 @@
+name: CEF dependency source fixtures
+on:
+  push:
+    branches: [feature/cef-static-integration]
+    paths: ['.github/workflows/cef-dependency-fixtures.yml']
+permissions:
+  contents: read
+jobs:
+  sources:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Fetch public upstream source archives only
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir "$RUNNER_TEMP/dependency-fixtures"
+          cd "$RUNNER_TEMP/dependency-fixtures"
+          curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o nss-3.113.1.tar.gz https://ftp.mozilla.org/pub/security/nss/releases/NSS_3_113_1_RTM/src/nss-3.113.1.tar.gz
+          echo '5ffb1182e7d65f8895c09656d20bc7146d1616cd4f09046469b2f79f60b57083094c78da39a3f3faa5087742a19f706ce9e7928a662f9f0d3c410514cba2028f  nss-3.113.1.tar.gz' | sha512sum -c -
+          curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o cups-2.4.19.tar.gz https://github.com/OpenPrinting/cups/archive/refs/tags/v2.4.19.tar.gz
+          curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o libdrm-2.4.134.tar.xz https://dri.freedesktop.org/libdrm/libdrm-2.4.134.tar.xz
+          curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o eudev-3.2.14.tar.gz https://github.com/eudev-project/eudev/archive/refs/tags/v3.2.14.tar.gz
+          curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o pciutils-3.14.0.tar.gz https://www.kernel.org/pub/software/utils/pciutils/pciutils-3.14.0.tar.gz
+          curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o mesa-24.0.7.tar.xz https://archive.mesa3d.org/mesa-24.0.7.tar.xz
+          sha512sum *.tar.* > SHA512SUMS
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: cef-dependency-source-fixtures
+          path: ${{ runner.temp }}/dependency-fixtures
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
