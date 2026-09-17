@@ -168,7 +168,7 @@ def extract_zip(archive: Path, root: Path) -> None:
 
 
 def sdk_zip(root: Path, archive: Path) -> None:
-    """Package the export only, never the workspace. Debug symbols are omitted."""
+    """Package the export only, with normalized portable ZIP metadata."""
     banned_suffix = {".pdb", ".ilk", ".obj", ".o", ".pch", ".idb", ".ipch", ".dmp", ".log"}
     banned_names = {"cmakecache.txt", "compile_commands.json", "credentials", ".git-credentials"}
     with zipfile.ZipFile(archive, "x", zipfile.ZIP_DEFLATED, compresslevel=6) as z:
@@ -181,7 +181,17 @@ def sdk_zip(root: Path, archive: Path) -> None:
                 continue
             if item.suffix.casefold() in {".c", ".cc", ".cpp", ".cxx"}:
                 raise ValueError("implementation source in SDK; review required")
-            z.write(item, rel.as_posix())
+            # vcpkg export may intentionally set mtime to the Unix epoch.
+            # ZIP dates start in 1980. Avoid host-local timezone/mtime entirely.
+            info = zipfile.ZipInfo(rel.as_posix(), date_time=(1980, 1, 1, 0, 0, 0))
+            info.create_system = 3
+            info.compress_type = zipfile.ZIP_DEFLATED
+            source_info = item.stat()
+            mode = 0o755 if source_info.st_mode & 0o111 else 0o644
+            info.external_attr = (stat.S_IFREG | mode) << 16
+            info.file_size = source_info.st_size
+            with item.open("rb") as source, z.open(info, "w", force_zip64=True) as target:
+                shutil.copyfileobj(source, target, 1024 * 1024)
     if archive.stat().st_size > 1900 * 1024**2:
         raise ValueError("SDK exceeds the 1900 MiB initial release limit")
     zip_files(archive)
