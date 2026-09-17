@@ -199,7 +199,7 @@ def build():
         triplet = "x64-windows-static-release"
     triplets = Path(__file__).resolve().parent.parent / "triplets"
     installed = root / "installed"
-    args = ["--triplet=" + triplet, "--overlay-triplets=" + str(triplets), "--overlay-ports=" + str(root / "workspace/ports"), "--x-install-root=" + str(installed)]
+    args = build_support.native_release_options(["--triplet=" + triplet, "--overlay-triplets=" + str(triplets), "--overlay-ports=" + str(root / "workspace/ports"), "--x-install-root=" + str(installed)])
     packages = payload["plan"]["platforms"][platform]["packages"]
     # Preserve downloads through the entire graph. Remove them at final job cleanup.
     execute(build_support.install_command(executable, packages, args), stage="install", timeout=14400)
@@ -214,9 +214,8 @@ def build():
     safeio.extract_zip(package, root / "consumer-sdk")
     source = root / "workspace" / payload["plan"]["smoke_path"]
     out = root / "smoke-build"
-    execute(["cmake", "-S", str(source), "-B", str(out), "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded",
-             "-DCMAKE_TOOLCHAIN_FILE=" + str(root / "consumer-sdk/scripts/buildsystems/vcpkg.cmake"),
-             "-DVCPKG_TARGET_TRIPLET=" + triplet, "-DVCPKG_MANIFEST_MODE=OFF"], stage="consumer-configure", timeout=600)
+    execute(build_support.consumer_configure_command(source, out, root / "consumer-sdk", triplet),
+            stage="consumer-configure", timeout=600)
     execute(["cmake", "--build", str(out), "--config", "Release", "--parallel", "2"], stage="consumer-build", timeout=1800)
     execute(["ctest", "--test-dir", str(out), "-C", "Release", "--output-on-failure", "--timeout", "60"], stage="consumer-test", timeout=180)
     bundle = root / "result"
