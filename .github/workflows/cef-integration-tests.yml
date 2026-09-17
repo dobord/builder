@@ -9,11 +9,18 @@ permissions:
 jobs:
   contracts:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.12'
+      - name: Install hash-pinned test dependencies
+        run: python -m pip install --require-hashes --only-binary=:all: -r requirements.lock
+      - name: Test builder contracts
+        run: python -m unittest discover -s tests -v
       - name: Prepare exact public recipe contract fixtures
         shell: bash
         run: |
@@ -21,9 +28,11 @@ jobs:
           mkdir -p "$RUNNER_TEMP/cef-contracts"
           git archive --format=tar HEAD > "$RUNNER_TEMP/cef-contracts/builder.tar"
           git init "$RUNNER_TEMP/cef-recipe"
-          git -C "$RUNNER_TEMP/cef-recipe" fetch --depth=1 https://github.com/dobord/cef.git 90c70380632b70bd3195ad04fc22559840be8bc5
-          test "$(git -C "$RUNNER_TEMP/cef-recipe" rev-parse FETCH_HEAD)" = 90c70380632b70bd3195ad04fc22559840be8bc5
-          git -C "$RUNNER_TEMP/cef-recipe" archive --format=tar FETCH_HEAD vcpkg .github/workflows > "$RUNNER_TEMP/cef-contracts/cef.tar"
+          git -C "$RUNNER_TEMP/cef-recipe" fetch --depth=1 https://github.com/dobord/cef.git a47ffd16d9d159c8d5af4b3d1457075b69f7ff23
+          test "$(git -C "$RUNNER_TEMP/cef-recipe" rev-parse FETCH_HEAD)" = a47ffd16d9d159c8d5af4b3d1457075b69f7ff23
+          git -C "$RUNNER_TEMP/cef-recipe" checkout --detach FETCH_HEAD
+          git -C "$RUNNER_TEMP/cef-recipe" archive --format=tar HEAD vcpkg .github/workflows > "$RUNNER_TEMP/cef-contracts/cef.tar"
+          python -m unittest discover -s "$RUNNER_TEMP/cef-recipe/vcpkg/integration/tests" -v
           git init "$RUNNER_TEMP/vcpkg-recipe"
           git -C "$RUNNER_TEMP/vcpkg-recipe" fetch --depth=1 https://github.com/microsoft/vcpkg.git 9e593bb18ea69cc5095e012465dcd675a822ed0d
           test "$(git -C "$RUNNER_TEMP/vcpkg-recipe" rev-parse FETCH_HEAD)" = 9e593bb18ea69cc5095e012465dcd675a822ed0d
