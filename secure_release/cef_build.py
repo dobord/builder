@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 import shutil
 import sys
-from . import crypto, safeio, cef_contract, cef_cache
+from . import crypto, safeio, cef_contract, cef_cache, static_audit
 from .protocol import BUILDER
 from .github import Client
 
@@ -81,7 +81,6 @@ def run_engine(root: Path, cfg: dict, platform: str, execute, environment: dict,
         raise ValueError("Explicit fresh build cannot erase an existing workspace")
     else:
         work.mkdir(parents=True, exist_ok=True)
-    # Install Chromium's locked build prerequisites before GN compilation.
     execute([sys.executable, str(recipe / "vcpkg/ports/cef-static/source_build.py"), "prepare",
              "--work", str(work), "--logs", str(logs)], stage="preflight", timeout=10800, cwd=recipe)
     if platform == "linux":
@@ -144,12 +143,19 @@ def verify_consumer(root: Path, cfg: dict, platform: str, execute) -> dict:
                "--work", str(root / "cef-work"), "--logs", str(logs),
                "--contract", cef_contract.build_key(cfg, platform), "--state", str(state),
                "--executable", str(deployed / name)]
-    for folder in (root / "installed", root / "consumer-sdk", root / "cef-work"):
+    for folder in (root / "installed", root / "consumer-sdk", root / "cef-work",
+                   root / "export/sdk", root / "smoke-build"):
         if folder.exists():
             command.extend(["--hide", str(folder)])
     execute(command, stage="consumer-test", timeout=900, cwd=recipe)
     proof = crypto.parse(state.read_bytes())
     validate_evidence(proof, cfg, platform)
+    # The final ZIP (not the pre-export installed tree) is the audit input.
+    # Detailed paths stay in encrypted diagnostics. A clean structural audit
+    # does not upgrade the engine-only runtime profile.
+    report = static_audit.inspect_sdk(root / "sdk.zip", platform)
+    (logs / "target-archive-audit.json").write_bytes(crypto.canonical(report))
+    proof["target_archive_audit"] = static_audit.summarize(report)
     return proof
 
 
