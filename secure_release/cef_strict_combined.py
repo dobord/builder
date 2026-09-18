@@ -21,10 +21,10 @@ import time
 from . import build_support, cef_build, cef_contract, crypto, safeio
 from . import cef_strict_iteration
 
-ENGINE_VCPKG = "d5f62138a9b45c71fb407a48edb0b4cefd5affe6"
-SDK_VCPKG = "36ae23cf2ff8d27549e3992e814e697dc7e2865e"
+ENGINE_VCPKG = "52bef1a3c2bfef7d20f2ad9f7f9ce86ad7a91534"
+SDK_VCPKG = "52bef1a3c2bfef7d20f2ad9f7f9ce86ad7a91534"
 UPSTREAM = "9e593bb18ea69cc5095e012465dcd675a822ed0d"
-CEF = "37efc4f9f340992d50d6f3fa41f617c9013fa26b"
+CEF = "d1c76dcfd2c5c8715942ceea7270a4732d31a3cd"
 LOCKFREECORO = "24038aed3a0be642adb60e71bd994ae8f0d90140"
 LFC_UI = "85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5"
 TRIPLET = "x64-linux-static-release"
@@ -54,6 +54,11 @@ def verify_engine_registry_delta(engine: Path, sdk: Path) -> None:
     if git_head(engine) != ENGINE_VCPKG or git_head(sdk) != SDK_VCPKG:
         raise ValueError("Strict combined registry provenance mismatch")
     before, after = registry_snapshot(engine), registry_snapshot(sdk)
+    if ENGINE_VCPKG == SDK_VCPKG:
+        if before != after:
+            raise ValueError("Unified strict registry snapshots differ")
+        return
+
     changed = {
         name for name in set(before) | set(after)
         if before.get(name) != after.get(name)
