@@ -9,7 +9,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
     def test_full_platform_workflow_is_exact_and_keeps_native_output_private(self):
         text = (ROOT / ".github/workflows/cef-strict-platform-qualification.yml").read_text()
         self.assertIn("repository: dobord/vcpkg", text)
-        self.assertIn("ref: 00fd194d4b672e559804be757c253b172f674507", text)
+        self.assertIn("ref: c01f6ebc41c9282bee4ed6d409f9a8a4a7a39535", text)
         self.assertIn("repository: microsoft/vcpkg", text)
         self.assertIn("ref: 9e593bb18ea69cc5095e012465dcd675a822ed0d", text)
         self.assertIn("repository: dobord/cef", text)
@@ -133,13 +133,13 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
 
     def test_freerdp_static_diagnostic_uses_deterministic_audio_revision(self):
         text = (ROOT / ".github/workflows/freerdp-static-diagnostic.yml").read_text()
-        self.assertIn("ref: 41740842b05f0d72f64778ffccc12f2d7108701a", text)
+        self.assertIn("ref: c01f6ebc41c9282bee4ed6d409f9a8a4a7a39535", text)
         self.assertIn("FREERDP_STATIC_CONFIGURE_FAILURE category=", text)
         self.assertNotIn("upload-artifact", text)
 
     def test_lfc_ui_static_freerdp_workflow_is_relocated_and_static(self):
         text = (ROOT / ".github/workflows/lfc-ui-static-freerdp.yml").read_text()
-        self.assertIn("ref: 41740842b05f0d72f64778ffccc12f2d7108701a", text)
+        self.assertIn("ref: c01f6ebc41c9282bee4ed6d409f9a8a4a7a39535", text)
         self.assertIn("'lfc-ui[freerdp]'", text)
         self.assertIn("freerdp-server-proxy", text)
         self.assertIn("freerdp-shadow", text)
@@ -152,8 +152,8 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
 
     def test_lfc_ui_static_cef_workflow_builds_upstream_example(self):
         text = (ROOT / ".github/workflows/lfc-ui-static-cef.yml").read_text()
-        self.assertIn("ref: c7fb5af43431773dd68b3afe746ef71ecd786dc9", text)
-        self.assertIn("ref: c74fc487b25fc6e3dbbdd4d02c4e963735a66b96", text)
+        self.assertIn("ref: c01f6ebc41c9282bee4ed6d409f9a8a4a7a39535", text)
+        self.assertIn("ref: d8b2c3db26ac34e0e3d68d91b7368d4e1fb4368f", text)
         self.assertIn("'lfc-ui[cef]'", text)
         self.assertIn("web_engine_view_cef.cpp", text)
         self.assertIn("find_package(lfc-ui CONFIG REQUIRED COMPONENTS WebEngine)", text)
