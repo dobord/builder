@@ -124,9 +124,12 @@ producer. The private source workflow now also supports an explicit manual
 continuation on an existing immutable release tag: run `release-request.yml`
 using that exact tag ref and provide a builder run/attempt for either platform.
 The requester verifies the producer repository/workflow/event, the same approved
-builder revision, completed-success status and the exact GitHub artifact digest.
+builder revision, completed status/current attempt and the exact GitHub artifact
+digest. A failed matrix run may contribute a valid platform checkpoint; its run
+conclusion is never treated as runtime success.
 It resolves the checkpoint selector itself and, when present, the matching
-encrypted vcpkg binary-cache selector. Operators never type artifact IDs or
+encrypted vcpkg binary-cache selector using a read-only cache credential distinct
+from the builder-dispatch credential. Operators never type artifact IDs or
 digests and there is no "latest", older-run search, release-import fallback or
 cold-build fallback.
 
