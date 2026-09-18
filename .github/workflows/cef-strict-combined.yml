@@ -1,0 +1,101 @@
+name: Strict CEF combined SDK qualification
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: cef-strict-combined-linux
+  cancel-in-progress: true
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: dobord/vcpkg
+          ref: d11cde21fd7aae08297f3bd5942edc5e293c5b7a
+          path: private-vcpkg
+          token: ${{ secrets.SOURCE_READ_TOKEN }}
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: microsoft/vcpkg
+          ref: 9e593bb18ea69cc5095e012465dcd675a822ed0d
+          path: private-vcpkg/.full-upstream
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: dobord/cef
+          ref: ff3ccfea536393e43fce28f650e0bd538345d23e
+          path: private-vcpkg/.full-cef
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: dobord/lockfreecoro
+          ref: 24038aed3a0be642adb60e71bd994ae8f0d90140
+          path: private-lockfreecoro
+          token: ${{ secrets.SOURCE_READ_TOKEN }}
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: dobord/lfc-ui
+          ref: 85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5
+          path: private-lfc-ui
+          token: ${{ secrets.SOURCE_READ_TOKEN }}
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.12'
+      - name: Install hash-pinned Python build tools
+        run: |
+          python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r requirements.lock
+          python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r build-tools.lock
+      - name: Recover hosted-runner capacity and install native prerequisites
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /usr/local/.ghcup /opt/ghc
+          sudo apt-get update
+          sudo apt-get install -y gcc-14 g++-14 autoconf autoconf-archive automake libtool pkg-config ninja-build gperf flex bison nasm gettext texinfo libltdl-dev xvfb xauth fonts-dejavu-core ccache
+          df -h /
+      - name: Restore reviewed completed-package caches by exact artifact digest
+        env:
+          GH_TOKEN: ${{ secrets.SOURCE_READ_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/cef-strict-cache"
+          fetch_cache() {
+            id="$1"; sha="$2"; name="$3"
+            archive="$RUNNER_TEMP/cef-strict-cache/$name.zip"
+            target="$RUNNER_TEMP/cef-strict-cache/$name"
+            gh api "repos/dobord/vcpkg/actions/artifacts/$id/zip" > "$archive"
+            echo "$sha  $archive" | sha256sum -c - >/dev/null
+            mkdir "$target"
+            unzip -q "$archive" -d "$target"
+            find "$target" -type f -name '*.zip' -print -quit | grep -q .
+          }
+          fetch_cache 10510999882 7fce9a50b14a91452f939011155c265ac5e996815c5d442ba7d1c6b7f5da2b05 core
+          fetch_cache 10513582038 13070e63a1a5ccdaef82d483f4296ba31fa7ef1f237cd17729cf81fddf3d118f cups
+          fetch_cache 10512319512 c837f50873e149ac8c1d823ab906fbb36217616c3198e029bc6ee647e0222b8e gbm
+      - name: Validate final combined helper syntax
+        run: python -m py_compile secure_release/cef_strict_combined.py
+      - name: Run checkpoint-resumed final combined SDK qualification
+        env:
+          BUILDER_INPUT_PRIVATE_KEY: ${{ secrets.BUILDER_INPUT_PRIVATE_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+          CEF_STRICT_BINARY_CACHE_CORE: ${{ runner.temp }}/cef-strict-cache/core
+          CEF_STRICT_BINARY_CACHE_CUPS: ${{ runner.temp }}/cef-strict-cache/cups
+          CEF_STRICT_BINARY_CACHE_GBM: ${{ runner.temp }}/cef-strict-cache/gbm
+        run: python -m secure_release.cef_strict_combined
+      - name: Upload non-sensitive combined qualification summary
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: cef-strict-combined-summary-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/cef-strict-combined-summary.json
+          retention-days: 7
+          if-no-files-found: ignore
