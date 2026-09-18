@@ -84,22 +84,28 @@ jobs:
           set -euo pipefail
           upstream="$GITHUB_WORKSPACE/private-vcpkg/.sdk-upstream"
           installed="$RUNNER_TEMP/strict-sdk-installed"
-          bash "$upstream/bootstrap-vcpkg.sh" -disableMetrics
-          "$upstream/vcpkg" install 'lockfreecoro[auth,grpc,h264,io-uring,opus,postgresql,process,protobuf,saml,sqlite,vp8,vp9]' 'lfc-ui[atspi,lockfreecoro,opengl,vulkan]' 'dbus[core]' --triplet=x64-linux-static-release --host-triplet=x64-linux-static-release --overlay-ports="$GITHUB_WORKSPACE/private-vcpkg/ports" --overlay-triplets="$GITHUB_WORKSPACE/private-vcpkg/triplets" --x-install-root="$installed" --binarysource=clear --clean-buildtrees-after-build --clean-packages-after-build
+          bash "$upstream/bootstrap-vcpkg.sh" -disableMetrics >"$RUNNER_TEMP/sdk-deps-bootstrap.log" 2>&1
+          if ! "$upstream/vcpkg" install 'lockfreecoro[auth,grpc,h264,io-uring,opus,postgresql,process,protobuf,saml,sqlite,vp8,vp9]' 'lfc-ui[atspi,lockfreecoro,opengl,vulkan]' 'dbus[core]' --triplet=x64-linux-static-release --host-triplet=x64-linux-static-release --overlay-ports="$GITHUB_WORKSPACE/private-vcpkg/ports" --overlay-triplets="$GITHUB_WORKSPACE/private-vcpkg/triplets" --x-install-root="$installed" --binarysource=clear --clean-buildtrees-after-build --clean-packages-after-build >"$RUNNER_TEMP/sdk-deps-install.log" 2>&1; then
+            echo "SDK_DEPS_LINUX_INSTALL_FAILED" >&2
+            exit 1
+          fi
           mkdir -p "$RUNNER_TEMP/export"
-          "$upstream/vcpkg" export lockfreecoro lfc-ui dbus --triplet=x64-linux-static-release --host-triplet=x64-linux-static-release --overlay-ports="$GITHUB_WORKSPACE/private-vcpkg/ports" --overlay-triplets="$GITHUB_WORKSPACE/private-vcpkg/triplets" --x-install-root="$installed" --raw --output=sdk-deps --output-dir="$RUNNER_TEMP/export"
+          if ! "$upstream/vcpkg" export lockfreecoro lfc-ui dbus --triplet=x64-linux-static-release --host-triplet=x64-linux-static-release --overlay-ports="$GITHUB_WORKSPACE/private-vcpkg/ports" --overlay-triplets="$GITHUB_WORKSPACE/private-vcpkg/triplets" --x-install-root="$installed" --raw --output=sdk-deps --output-dir="$RUNNER_TEMP/export" >"$RUNNER_TEMP/sdk-deps-export.log" 2>&1; then
+            echo "SDK_DEPS_LINUX_EXPORT_FAILED" >&2
+            exit 1
+          fi
           sdk="$RUNNER_TEMP/export/sdk-deps"
           prefix="$sdk/installed/x64-linux-static-release"
           mkdir -p "$sdk/triplets"
           cp "$GITHUB_WORKSPACE/private-vcpkg/triplets/x64-linux-static-release.cmake" "$sdk/triplets/x64-linux-static-release.cmake"
           if find "$prefix/lib" "$prefix/bin" -type f \( -name '*.so' -o -name '*.so.*' \) -print -quit | grep -q .; then
-            echo "shared target payload found" >&2
-            find "$prefix/lib" "$prefix/bin" -type f \( -name '*.so' -o -name '*.so.*' \) -print | head -50 >&2
+            echo "SDK_DEPS_LINUX_SHARED_TARGET_PAYLOAD" >&2
             exit 1
           fi
-          cmake -S "$GITHUB_WORKSPACE/private-vcpkg/ci/smoke" -B "$RUNNER_TEMP/sdk-consumer" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DCMAKE_TOOLCHAIN_FILE="$sdk/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-linux-static-release -DVCPKG_HOST_TRIPLET=x64-linux-static-release -DVCPKG_MANIFEST_MODE=OFF
-          cmake --build "$RUNNER_TEMP/sdk-consumer" --parallel 2
-          ctest --test-dir "$RUNNER_TEMP/sdk-consumer" --output-on-failure --timeout 60
+          cmake -S "$GITHUB_WORKSPACE/private-vcpkg/ci/smoke" -B "$RUNNER_TEMP/sdk-consumer" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DCMAKE_TOOLCHAIN_FILE="$sdk/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-linux-static-release -DVCPKG_HOST_TRIPLET=x64-linux-static-release -DVCPKG_MANIFEST_MODE=OFF >"$RUNNER_TEMP/sdk-deps-consumer-configure.log" 2>&1 || { echo "SDK_DEPS_LINUX_CONSUMER_CONFIGURE_FAILED" >&2; exit 1; }
+          cmake --build "$RUNNER_TEMP/sdk-consumer" --parallel 2 >"$RUNNER_TEMP/sdk-deps-consumer-build.log" 2>&1 || { echo "SDK_DEPS_LINUX_CONSUMER_BUILD_FAILED" >&2; exit 1; }
+          ctest --test-dir "$RUNNER_TEMP/sdk-consumer" --output-on-failure --timeout 60 >"$RUNNER_TEMP/sdk-deps-consumer-test.log" 2>&1 || { echo "SDK_DEPS_LINUX_CONSUMER_TEST_FAILED" >&2; exit 1; }
+          echo "SDK_DEPS_LINUX_QUALIFIED"
       - name: Bootstrap and install exact Windows SDK dependency graph
         if: runner.os == 'Windows'
         shell: pwsh
@@ -107,8 +113,8 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $upstream = Join-Path $env:GITHUB_WORKSPACE 'private-vcpkg/.sdk-upstream'
           $installed = Join-Path $env:RUNNER_TEMP 'strict-sdk-installed'
-          & cmd.exe /d /c (Join-Path $upstream 'bootstrap-vcpkg.bat') -disableMetrics
-          if ($LASTEXITCODE -ne 0) { throw 'vcpkg bootstrap failed' }
+          & cmd.exe /d /c (Join-Path $upstream 'bootstrap-vcpkg.bat') -disableMetrics *> (Join-Path $env:RUNNER_TEMP 'sdk-deps-bootstrap.log')
+          if ($LASTEXITCODE -ne 0) { throw 'SDK_DEPS_WINDOWS_BOOTSTRAP_FAILED' }
           $vcpkg = Join-Path $upstream 'vcpkg.exe'
           $installArgs = @(
             'install',
@@ -123,8 +129,8 @@ jobs:
             '--clean-buildtrees-after-build',
             '--clean-packages-after-build'
           )
-          & $vcpkg @installArgs
-          if ($LASTEXITCODE -ne 0) { throw 'vcpkg install failed' }
+          & $vcpkg @installArgs *> (Join-Path $env:RUNNER_TEMP 'sdk-deps-install.log')
+          if ($LASTEXITCODE -ne 0) { throw 'SDK_DEPS_WINDOWS_INSTALL_FAILED' }
           $export = Join-Path $env:RUNNER_TEMP 'export'
           New-Item -ItemType Directory -Force $export | Out-Null
           $exportArgs = @(
@@ -136,15 +142,15 @@ jobs:
             "--x-install-root=$installed",
             '--raw','--output=sdk-deps',"--output-dir=$export"
           )
-          & $vcpkg @exportArgs
-          if ($LASTEXITCODE -ne 0) { throw 'vcpkg export failed' }
+          & $vcpkg @exportArgs *> (Join-Path $env:RUNNER_TEMP 'sdk-deps-export.log')
+          if ($LASTEXITCODE -ne 0) { throw 'SDK_DEPS_WINDOWS_EXPORT_FAILED' }
           $sdk = Join-Path $export 'sdk-deps'
           $prefix = Join-Path $sdk 'installed/x64-windows-static-release'
           $triplets = Join-Path $sdk 'triplets'
           New-Item -ItemType Directory -Force $triplets | Out-Null
           Copy-Item "$env:GITHUB_WORKSPACE/private-vcpkg/triplets/x64-windows-static-release.cmake" (Join-Path $triplets 'x64-windows-static-release.cmake')
           $shared = @(Get-ChildItem (Join-Path $prefix 'lib'),(Join-Path $prefix 'bin') -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -ieq '.dll' })
-          if ($shared.Count -ne 0) { throw ('shared target payload found: ' + (($shared | Select-Object -First 20 -ExpandProperty FullName) -join ', ')) }
+          if ($shared.Count -ne 0) { throw 'SDK_DEPS_WINDOWS_SHARED_TARGET_PAYLOAD' }
           $consumer = Join-Path $env:RUNNER_TEMP 'sdk-consumer'
           $cmakeArgs = @(
             '-S',"$env:GITHUB_WORKSPACE/private-vcpkg/ci/smoke",
@@ -157,9 +163,10 @@ jobs:
             '-DVCPKG_HOST_TRIPLET=x64-windows-static-release',
             '-DVCPKG_MANIFEST_MODE=OFF'
           )
-          & cmake @cmakeArgs
-          if ($LASTEXITCODE -ne 0) { throw 'consumer configure failed' }
-          & cmake --build $consumer --config Release --parallel 2
-          if ($LASTEXITCODE -ne 0) { throw 'consumer build failed' }
-          & ctest --test-dir $consumer -C Release --output-on-failure --timeout 60
-          if ($LASTEXITCODE -ne 0) { throw 'consumer test failed' }
+          & cmake @cmakeArgs *> (Join-Path $env:RUNNER_TEMP 'sdk-deps-consumer-configure.log')
+          if ($LASTEXITCODE -ne 0) { throw 'SDK_DEPS_WINDOWS_CONSUMER_CONFIGURE_FAILED' }
+          & cmake --build $consumer --config Release --parallel 2 *> (Join-Path $env:RUNNER_TEMP 'sdk-deps-consumer-build.log')
+          if ($LASTEXITCODE -ne 0) { throw 'SDK_DEPS_WINDOWS_CONSUMER_BUILD_FAILED' }
+          & ctest --test-dir $consumer -C Release --output-on-failure --timeout 60 *> (Join-Path $env:RUNNER_TEMP 'sdk-deps-consumer-test.log')
+          if ($LASTEXITCODE -ne 0) { throw 'SDK_DEPS_WINDOWS_CONSUMER_TEST_FAILED' }
+          Write-Host 'SDK_DEPS_WINDOWS_QUALIFIED'
