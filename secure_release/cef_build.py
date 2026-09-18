@@ -80,7 +80,7 @@ def capture_platform_dependencies(root: Path, cfg: dict, platform: str, execute,
             or result.get("full_platform_graph_qualified") is not True
             or result.get("cef_runtime_verified") is not False
             or result.get("gpu_runtime_qualified") is not False
-            or result.get("module_count") != 36):
+            or result.get("module_count") != 37):
         raise ValueError("Complete CEF platform preflight did not qualify the signed dependency graph")
     sha256 = cef_contract.digest(result.get("manifest_sha256"))
     return {"manifest": manifest, "prefix": snapshot, "sha256": sha256,
@@ -260,7 +260,7 @@ def verify_consumer(root: Path, cfg: dict, platform: str, execute,
                     or qualification.get("status") != "success"
                     or qualification.get("full_platform_graph_qualified") is not True
                     or qualification.get("cef_runtime_verified") is not False
-                    or qualification.get("module_count") != 36
+                    or qualification.get("module_count") != 37
                     or qualification.get("manifest_sha256") != platform_sha256
                     or crypto.digest(platform_preflight["qualification"])
                        != platform_preflight["qualification_sha256"]):
@@ -319,7 +319,7 @@ def validate_platform_preflight(value: dict | None, proof: dict, cfg: dict, plat
             or value.get("full_platform_graph_qualified") is not True
             or value.get("cef_runtime_verified") is not False
             or value.get("gpu_runtime_qualified") is not False
-            or value.get("module_count") != 36
+            or value.get("module_count") != 37
             or value.get("manifest_sha256") != closure.get("manifest_sha256")
             or platform_preflight_digest(value) != closure.get("qualification_sha256")):
         raise ValueError("Strict Linux platform preflight is not bound to final CEF evidence")

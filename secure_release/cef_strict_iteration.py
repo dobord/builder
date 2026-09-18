@@ -20,9 +20,9 @@ from . import cef_cache, cef_contract, crypto, safeio
 from .github import Client
 from .protocol import BUILDER, check_run
 
-VCPKG = "d11cde21fd7aae08297f3bd5942edc5e293c5b7a"
+VCPKG = "324c4c677119df4f4d4b8beced7ef4623afc2512"
 UPSTREAM = "9e593bb18ea69cc5095e012465dcd675a822ed0d"
-CEF = "ff3ccfea536393e43fce28f650e0bd538345d23e"
+CEF = "6a36621ea5493a94d7e79dc388746bbb8829b1d2"
 TRIPLET = "x64-linux-static-release"
 
 
@@ -299,7 +299,7 @@ def main() -> None:
                 "full_platform_graph_qualified": True,
                 "cef_runtime_verified": False,
                 "gpu_runtime_qualified": False,
-                "module_count": 36,
+                "module_count": 37,
             }
             if any(platform_receipt.get(key) != value for key, value in required.items()):
                 raise RuntimeError("Complete static platform graph is not qualified")

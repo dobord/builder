@@ -18,9 +18,9 @@ import sys
 from . import build_support, cef_build, cef_contract, crypto, safeio
 from . import cef_strict_iteration
 
-VCPKG = "d11cde21fd7aae08297f3bd5942edc5e293c5b7a"
+VCPKG = "324c4c677119df4f4d4b8beced7ef4623afc2512"
 UPSTREAM = "9e593bb18ea69cc5095e012465dcd675a822ed0d"
-CEF = "ff3ccfea536393e43fce28f650e0bd538345d23e"
+CEF = "6a36621ea5493a94d7e79dc388746bbb8829b1d2"
 LOCKFREECORO = "24038aed3a0be642adb60e71bd994ae8f0d90140"
 LFC_UI = "85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5"
 TRIPLET = "x64-linux-static-release"
@@ -240,7 +240,7 @@ def main() -> None:
                 or preflight.get("kind") != "cef-static-platform-preflight"
                 or preflight.get("status") != "success"
                 or preflight.get("full_platform_graph_qualified") is not True
-                or preflight.get("module_count") != 36
+                or preflight.get("module_count") != 37
                 or preflight.get("manifest_sha256") != platform_sha):
             raise RuntimeError("Restored platform prefix did not reproduce its qualification")
         shutil.rmtree(requalified)
