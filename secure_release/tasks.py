@@ -399,18 +399,32 @@ def diagnostics():
     with combined.open("wb") as out:
         with source.open("rb") as stream:
             shutil.copyfileobj(stream, out, 1024 * 1024)
-        remaining = 16 * 1024**2
+        remaining = 32 * 1024**2
+        candidates = []
         for folder in sorted((root / "upstream/buildtrees").glob("*")):
-            if not folder.is_dir() or folder.is_symlink():
+            if folder.is_dir() and not folder.is_symlink():
+                candidates.extend(sorted(folder.glob("*.log")))
+        for folder in (root / "cef-logs", root / "cef-platform-probe/native-work/logs",
+                       root / "cef-consumer-evidence"):
+            if folder.is_dir() and not folder.is_symlink():
+                for pattern in ("*.log", "*.json", "*.txt"):
+                    candidates.extend(sorted(folder.rglob(pattern)))
+        seen = set()
+        for log in candidates:
+            try:
+                key = log.resolve(strict=True)
+            except (OSError, RuntimeError):
                 continue
-            for log in sorted(folder.glob("*.log")):
-                if not safeio.regular(log) or remaining <= 0:
-                    continue
-                out.write(("\nDETAIL_LOG " + log.relative_to(root).as_posix() + "\n").encode())
-                with log.open("rb") as stream:
-                    data = stream.read(min(remaining, 1024**2))
-                out.write(data)
-                remaining -= len(data)
+            if key in seen or not safeio.regular(log) or remaining <= 0:
+                continue
+            if not key.is_relative_to(root.resolve()):
+                continue
+            seen.add(key)
+            out.write(("\nDETAIL_LOG " + log.relative_to(root).as_posix() + "\n").encode())
+            with log.open("rb") as stream:
+                data = stream.read(min(remaining, 2 * 1024**2))
+            out.write(data)
+            remaining -= len(data)
     data = event()["inputs"]
     context = file_context(data["release_id"], data["salt"], int(env("GITHUB_RUN_ID")), int(env("GITHUB_RUN_ATTEMPT")), env("GITHUB_SHA"), "diagnostic", env("TARGET_PLATFORM"))
     crypto.encrypt_file(combined, Path(env("DIAGNOSTIC_DIR")) / "diagnostic.enc", env("ARTIFACT_ENCRYPTION_PUBLIC_KEY"), context)
