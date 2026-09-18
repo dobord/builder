@@ -57,9 +57,14 @@ def validate(cfg: dict) -> None:
     lock = cfg["release_lock"]
     require(release == (lock is not None), "Release mode requires a lock; source-only mode must not include one")
     if cfg["profile"] == "static-third-party":
-        require(not release and lock is None, "static-third-party must be source-built; engine-only releases cannot be rebranded")
-        require(all(value["mode"].startswith("source-") for value in cfg["platforms"].values()),
-                "static-third-party requires source acquisition on both platforms")
+        require(cfg["platforms"]["linux"]["mode"].startswith("source-"),
+                "static-third-party Linux requires source acquisition with the frozen platform graph")
+        require(cfg["platforms"]["windows"]["mode"].startswith("source-")
+                or cfg["platforms"]["windows"]["mode"] == "release-import",
+                "static-third-party Windows requires source acquisition or locked release reuse")
+        if cfg["platforms"]["windows"]["mode"] == "release-import":
+            require(lock is not None,
+                    "strict Windows release reuse requires the exact immutable release lock")
     if release:
         require(isinstance(lock, dict) and set(lock) == {"schema", "tag", "tested_commit", "platforms"}, "Invalid CEF release lock")
         require(type(lock["schema"]) is int and lock["schema"] == 1, "Unsupported release lock")
