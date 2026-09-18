@@ -100,7 +100,10 @@ class ProvenanceTests(unittest.TestCase):
         cfg = config()
         for platform, count in (("linux", 1), ("windows", 3)):
             proof = {"schema": 1, "kind": "consumer-verification", "engine_linkage": "static", "capi_only": True,
+                     "third_party_libraries_static": False,
                      "system_libraries_static": False, "sandbox_verified": False, "executable_sha256": "a" * 64,
+                     "target_archive_audit": {"kind": "target-archive-audit-summary",
+                                              "target_archives_static": True, "violation_count": 0},
                      "smoke": {"cef": "152.0.6+g708dc14+chromium-152.0.7977.83", "engine": "static", "interface": "capi",
                                "javascript": True, "paint": True, "browser_modules_clean": True, "renderer_modules_clean": True,
                                "browser_pid": 10, "renderer_pid": 20},
@@ -113,6 +116,29 @@ class ProvenanceTests(unittest.TestCase):
             proof["smoke_runs"]["passed_runs"] = 0
             with self.assertRaises(ValueError):
                 cef_build.validate_evidence(proof, cfg, platform)
+
+    def test_strict_evidence_requires_runtime_and_closure(self):
+        cfg = config(); cfg["profile"] = "static-third-party"
+        proof = {"schema": 1, "kind": "consumer-verification", "engine_linkage": "static", "capi_only": True,
+                 "third_party_libraries_static": True, "system_libraries_static": False,
+                 "sandbox_verified": False, "executable_sha256": "a" * 64,
+                 "target_archive_audit": {"kind": "target-archive-audit-summary",
+                                          "target_archives_static": True, "violation_count": 0},
+                 "smoke": {"cef": "152.0.6+g708dc14+chromium-152.0.7977.83", "engine": "static",
+                           "interface": "capi", "javascript": True, "paint": True,
+                           "browser_modules_clean": True, "renderer_modules_clean": True,
+                           "third_party_modules_static": True, "browser_pid": 10, "renderer_pid": 20},
+                 "smoke_runs": {"status": "success", "executable_sha256": "a" * 64,
+                                "engine_runtime_verified": True, "no_retry_on_failure": True,
+                                "required_runs": 1, "passed_runs": 1,
+                                "runs": [{"number": 1, "status": "success",
+                                          "engine_runtime_verified": True, "cwd": "fresh-1"}]},
+                 "platform_closure": {"kind": "linux-frozen-vcpkg", "manifest_sha256": "b" * 64,
+                                      "inventory_sha256": "c" * 64, "archive_count": 10}}
+        cef_build.validate_evidence(proof, cfg, "linux")
+        proof["smoke"]["third_party_modules_static"] = False
+        with self.assertRaises(ValueError):
+            cef_build.validate_evidence(proof, cfg, "linux")
 
 
 if __name__ == "__main__":
