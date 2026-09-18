@@ -18,7 +18,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/vcpkg
-          ref: c7fb5af43431773dd68b3afe746ef71ecd786dc9
+          ref: c01f6ebc41c9282bee4ed6d409f9a8a4a7a39535
           path: private-vcpkg
           token: ${{ secrets.SOURCE_READ_TOKEN }}
           persist-credentials: false
@@ -31,7 +31,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/cef
-          ref: c74fc487b25fc6e3dbbdd4d02c4e963735a66b96
+          ref: d8b2c3db26ac34e0e3d68d91b7368d4e1fb4368f
           path: private-cef
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -52,16 +52,16 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          if ((git -C private-vcpkg rev-parse HEAD) -ne 'c7fb5af43431773dd68b3afe746ef71ecd786dc9') { throw 'vcpkg revision mismatch' }
+          if ((git -C private-vcpkg rev-parse HEAD) -ne 'c01f6ebc41c9282bee4ed6d409f9a8a4a7a39535') { throw 'vcpkg revision mismatch' }
           if ((git -C private-vcpkg/.lfc-cef-upstream rev-parse HEAD) -ne '9e593bb18ea69cc5095e012465dcd675a822ed0d') { throw 'upstream revision mismatch' }
-          if ((git -C private-cef rev-parse HEAD) -ne 'c74fc487b25fc6e3dbbdd4d02c4e963735a66b96') { throw 'CEF revision mismatch' }
+          if ((git -C private-cef rev-parse HEAD) -ne 'd8b2c3db26ac34e0e3d68d91b7368d4e1fb4368f') { throw 'CEF revision mismatch' }
           if ((git -C private-lfc-ui rev-parse HEAD) -ne '85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5') { throw 'lfc-ui revision mismatch' }
           $downloads = Join-Path $env:GITHUB_WORKSPACE 'private-vcpkg/.lfc-cef-upstream/downloads'
           New-Item -ItemType Directory -Force $downloads | Out-Null
           git -C private-lfc-ui -c core.autocrlf=false archive --format=tar.gz 85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5 -o (Join-Path $downloads 'lfc-ui-85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5.tar.gz')
-          git -C private-cef -c core.autocrlf=false archive --format=tar.gz c74fc487b25fc6e3dbbdd4d02c4e963735a66b96 -o (Join-Path $downloads 'cef-static-c74fc487b25fc6e3dbbdd4d02c4e963735a66b96.tar.gz')
+          git -C private-cef -c core.autocrlf=false archive --format=tar.gz d8b2c3db26ac34e0e3d68d91b7368d4e1fb4368f -o (Join-Path $downloads 'cef-static-d8b2c3db26ac34e0e3d68d91b7368d4e1fb4368f.tar.gz')
           if (-not (Test-Path (Join-Path $downloads 'lfc-ui-85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5.tar.gz'))) { throw 'lfc-ui archive missing' }
-          if (-not (Test-Path (Join-Path $downloads 'cef-static-c74fc487b25fc6e3dbbdd4d02c4e963735a66b96.tar.gz'))) { throw 'CEF recipe archive missing' }
+          if (-not (Test-Path (Join-Path $downloads 'cef-static-d8b2c3db26ac34e0e3d68d91b7368d4e1fb4368f.tar.gz'))) { throw 'CEF recipe archive missing' }
       - name: Verify lfc-ui overlay patches against exact source
         shell: pwsh
         run: |
