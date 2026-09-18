@@ -5,6 +5,7 @@ on:
       - feature/cef-static-integration
     paths:
       - .github/workflows/cef-strict-windows.yml
+      - secure_release/cef_strict_windows.py
 permissions:
   contents: read
 jobs:
