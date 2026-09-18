@@ -119,6 +119,16 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn("CEF_WINDOWS_MSVC_STL_GRAPH_QUALIFIED", text)
         self.assertNotIn("upload-artifact", text)
 
+    def test_static_dependency_diagnostics_are_bounded_and_exact(self):
+        text = (ROOT / ".github/workflows/static-dependency-diagnostics.yml").read_text()
+        self.assertIn("ref: aaed4aa90086389b491b84db2a648e8e34a14266", text)
+        self.assertIn("CEF_LIBUDEV_CONFIGURE_FAILURE cause=", text)
+        self.assertIn("CEF_GTK3_CONFIGURE_FAILURE cause=", text)
+        self.assertIn("cef-libudev", text)
+        self.assertIn("gtk3", text)
+        self.assertNotIn("upload-artifact", text)
+        self.assertNotIn("cat $RUNNER_TEMP", text)
+
     def test_lfc_ui_static_freerdp_workflow_is_relocated_and_static(self):
         text = (ROOT / ".github/workflows/lfc-ui-static-freerdp.yml").read_text()
         self.assertIn("ref: aaed4aa90086389b491b84db2a648e8e34a14266", text)
