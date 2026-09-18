@@ -94,6 +94,11 @@ jobs:
       - name: Install pinned CMake
         run: |
           python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r build-tools.lock
+      - name: Release unused hosted Linux SDKs before the static graph
+        if: runner.os == 'Linux'
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /usr/local/.ghcup /opt/ghc
+          df -h /
       - name: Install Linux system prerequisites including assembler
         if: runner.os == 'Linux'
         run: |
