@@ -22,10 +22,29 @@ MAX_UNPACKED = 12 * 1024**3
 MAX_MEMBER = 256 * 1024**2
 MAX_MEMBERS = 1_000_000
 BIGOBJ_CLASS = bytes.fromhex('c7a1bad1eebaa94baf20faf66aa4dcb8')
-SHARED_NAME = re.compile(r'\.(?:so(?:\..*)?|dll|dylib)def require(condition: bool, message: str) -> None:
+SHARED_NAME = re.compile(r'\.(?:so(?:\..*)?|dll|dylib)$', re.I)
+WINDOWS_API_SET = re.compile(r'(?:api|ext)-ms-win-[a-z0-9-]+\.dll\Z', re.I)
+# Windows OS ABI imports reviewed for the pinned CEF/Rust closure. Keep this
+# finite: unknown DLLs stay violations and require explicit review.
+WINDOWS_OS_IMPORT_DLLS = frozenset({
+    'advapi32.dll',
+    'bcrypt.dll',
+    'bcryptprimitives.dll',
+    'kernel32.dll',
+    'ntdll.dll',
+    'ole32.dll',
+    'rpcrt4.dll',
+    'secur32.dll',
+    'shell32.dll',
+    'user32.dll',
+    'userenv.dll',
+    'ws2_32.dll',
+})
+
+
+def require(condition: bool, message: str) -> None:
     if not condition:
         raise ValueError(message)
-
 
 def u(data: bytes, offset: int, fmt: str):
     size = struct.calcsize(fmt)
