@@ -5,19 +5,50 @@ import os
 from pathlib import Path
 import shutil
 import sys
-from . import crypto, safeio, cef_contract, cef_cache, static_audit
+from . import crypto, safeio, cef_contract, cef_cache, static_audit, build_support
 from .protocol import BUILDER
 from .github import Client
 
 
-def materialize(workspace: Path, cfg: dict, platform: str) -> str:
-    contract = cef_contract.port_contract(cfg, platform)
+def materialize(workspace: Path, cfg: dict, platform: str, platform_sha256: str | None = None) -> str:
+    contract = cef_contract.port_contract(cfg, platform, platform_sha256)
     port = workspace / "ports/cef-static"
     if not (port / "portfile.cmake").is_file() or port.is_symlink():
         raise ValueError("CEF acquisition port is missing")
     # This file exists BEFORE vcpkg calculates any ABI, including cache lookup.
     (port / "cef-build.json").write_bytes(crypto.canonical(contract))
-    return cef_contract.build_key(cfg, platform)
+    return cef_contract.build_key(cfg, platform, platform_sha256)
+
+
+def capture_platform_dependencies(root: Path, cfg: dict, platform: str, execute,
+                                  executable: str, install_args: list[str],
+                                  binary_cache: Path | None) -> dict | None:
+    """Build the signed vcpkg closure, then snapshot immutable Linux target inputs."""
+    cef_contract.validate(cfg)
+    if cfg["profile"] != "static-third-party" or platform != "linux":
+        return None
+    probe = root / "cef-platform-probe"
+    if probe.exists():
+        raise ValueError("Strict platform probe already exists")
+    execute(build_support.install_command(executable, ["cef-platform-deps"], install_args,
+                                          binary_cache=binary_cache),
+            stage="preflight", timeout=14400)
+    prefix = root / "installed" / cef_contract.TRIPLETS[platform]
+    pkgconf = shutil.which("pkg-config")
+    if not pkgconf:
+        raise ValueError("Native pkg-config is required to freeze the static platform closure")
+    probe.mkdir()
+    manifest = probe / "platform-inputs.json"
+    snapshot = probe / "target-prefix"
+    receipt = probe / "capture.json"
+    script = root / "cef-recipe/vcpkg/static/platform_prefix.py"
+    execute([sys.executable, str(script), "--installed", str(prefix),
+             "--destination", str(snapshot), "--manifest", str(manifest),
+             "--pkgconf", pkgconf, "--receipt", str(receipt)],
+            stage="preflight", timeout=3600, cwd=root / "cef-recipe")
+    result = crypto.parse(receipt.read_bytes())
+    sha256 = cef_contract.digest(result.get("manifest_sha256"))
+    return {"manifest": manifest, "prefix": snapshot, "sha256": sha256}
 
 
 def binary_key(upstream_sha: str, platform: str, revision: str, triplet: Path) -> str:
@@ -45,19 +76,22 @@ def write_output(name: str, value: bool) -> None:
 
 
 def run_engine(root: Path, cfg: dict, platform: str, execute, environment: dict,
-               input_private: str, revision: str) -> bool:
+               input_private: str, revision: str, platform_probe: dict | None = None) -> bool:
     """Return False only for a clean, persisted unfinished compilation slice."""
     cef_contract.validate(cfg)
     selected = cfg["platforms"][platform]
-    key = materialize(root / "workspace", cfg, platform)
+    strict = cfg["profile"] == "static-third-party"
     if selected["mode"] == "release-import":
-        if cfg["profile"] != "engine-static":
+        if strict:
             raise ValueError("The selected release has no strict platform-dependency qualification")
+        materialize(root / "workspace", cfg, platform)
         return True
-    # Strict mode must fail BEFORE downloading Chromium if its dependency
-    # qualification has not been supplied by a reviewed recipe.
-    if cfg["profile"] != "engine-static":
-        raise ValueError("Source recipe has not yet qualified the static-third-party runtime closure")
+    if strict and platform == "linux" and platform_probe is None:
+        raise ValueError("Strict Linux source build requires a frozen vcpkg platform closure")
+    if (not strict or platform != "linux") and platform_probe is not None:
+        raise ValueError("Unexpected platform closure for this CEF profile")
+    platform_sha256 = platform_probe["sha256"] if platform_probe is not None else None
+    key = materialize(root / "workspace", cfg, platform, platform_sha256)
     recipe = root / "cef-recipe"
     work = root / "cef-work"
     logs = root / "cef-logs"
@@ -69,18 +103,39 @@ def run_engine(root: Path, cfg: dict, platform: str, execute, environment: dict,
     environment["CEF_STATIC_WORK"] = str(work)
     environment["CEF_STATIC_BUILD_TIMEOUT_SECONDS"] = "18000"
     checkpoint = root / "cef-checkpoint"
+    platform_inputs = None
+    platform_args: list[str] = []
+    if platform_probe is not None:
+        platform_inputs = {"manifest": str(work / "platform-inputs.json"),
+                           "prefix": str(work / "target-prefix"),
+                           "sha256": platform_probe["sha256"]}
+        platform_args = ["--platform-manifest", platform_inputs["manifest"],
+                         "--platform-prefix", platform_inputs["prefix"],
+                         "--platform-sha256", platform_inputs["sha256"]]
+        environment.update({"CEF_STATIC_PLATFORM_MANIFEST": platform_inputs["manifest"],
+                            "CEF_STATIC_PLATFORM_PREFIX": platform_inputs["prefix"],
+                            "CEF_STATIC_PLATFORM_SHA256": platform_inputs["sha256"]})
+    if strict:
+        environment["CEF_STATIC_STRICT_THIRD_PARTY"] = "1"
     if selected["mode"] == "source-resume":
         restored = root / "cef-restored-checkpoint"
         cef_cache.fetch(Client(os.environ["BUILD_CACHE_READ_TOKEN"]), selected["checkpoint"], restored,
                         platform=platform, kind="cef-checkpoint", key=key, revision=revision, private=input_private)
+        if platform_probe is not None:
+            shutil.rmtree(Path(platform_probe["prefix"]))
+            Path(platform_probe["manifest"]).unlink()
         execute([sys.executable, str(driver), "restore", "--work", str(work), "--logs", str(logs),
-                 "--contract", key, "--state", str(logs / "restored.json"), "--checkpoint", str(restored)],
+                 "--contract", key, "--state", str(logs / "restored.json"), "--checkpoint", str(restored),
+                 *platform_args],
                 stage="preflight", timeout=7200, cwd=recipe)
         shutil.rmtree(restored)
     elif work.exists() and any(work.iterdir()):
         raise ValueError("Explicit fresh build cannot erase an existing workspace")
     else:
         work.mkdir(parents=True, exist_ok=True)
+        if platform_probe is not None:
+            Path(platform_probe["prefix"]).rename(Path(platform_inputs["prefix"]))
+            Path(platform_probe["manifest"]).rename(Path(platform_inputs["manifest"]))
     execute([sys.executable, str(recipe / "vcpkg/ports/cef-static/source_build.py"), "prepare",
              "--work", str(work), "--logs", str(logs)], stage="preflight", timeout=10800, cwd=recipe)
     if platform == "linux":
@@ -91,7 +146,7 @@ def run_engine(root: Path, cfg: dict, platform: str, execute, environment: dict,
     try:
         execute([sys.executable, str(driver), "slice", "--work", str(work), "--logs", str(logs),
                  "--contract", key, "--state", str(state), "--checkpoint", str(checkpoint),
-                 "--seconds", str(cfg["slice_seconds"]), "--jobs", str(cfg["jobs"])],
+                 "--seconds", str(cfg["slice_seconds"]), "--jobs", str(cfg["jobs"]), *platform_args],
                 stage="install", timeout=cfg["slice_seconds"] + 5400, cwd=recipe)
     except Exception as error:
         failure = error
