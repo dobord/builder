@@ -127,6 +127,14 @@ jobs:
                       break
               if reason:
                   details.append("preflight_reason=" + reason)
+              runtime_module = re.search(
+                  r"Unexpected runtime module in complete platform preflight:\s+([^\r\n]+)",
+                  text,
+              )
+              if runtime_module:
+                  name = pathlib.PurePosixPath(runtime_module.group(1).replace("\\", "/")).name
+                  if re.fullmatch(r"[A-Za-z0-9_.+-]+", name):
+                      details.append("runtime_module=" + name)
               nested = pathlib.Path(os.environ["RUNNER_TEMP"]) / "cef-strict-work/platform-preflight-work/logs"
               if nested.is_dir():
                   nested_logs = sorted(
