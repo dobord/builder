@@ -119,10 +119,25 @@ all three repositories only after review. Keep `PUBLISH_ENABLED=false` for the
 first real two-platform run. No variables, keys, main branches, tags or releases
 are changed by this implementation PR.
 
-Continuation currently uses a NEW signed request from a new private stable tag
-with updated selectors. Do not rerun a checkpoint producer; the canonical worker
-rejects attempts greater than one. Do not reuse a tag to change a signed plan.
-Automated continuation dispatch and cross-repository migration are not enabled.
+Continuation uses a NEW signed request, never a rerun of the checkpoint
+producer. The private source workflow now also supports an explicit manual
+continuation on an existing immutable release tag: run `release-request.yml`
+using that exact tag ref and provide a builder run/attempt for either platform.
+The requester verifies the producer repository/workflow/event, the same approved
+builder revision, completed-success status and the exact GitHub artifact digest.
+It resolves the checkpoint selector itself and, when present, the matching
+encrypted vcpkg binary-cache selector. Operators never type artifact IDs or
+digests and there is no "latest", older-run search, release-import fallback or
+cold-build fallback.
+
+A checkpoint-only builder iteration now seals and uploads already completed
+vcpkg packages before returning, so the next source-resume iteration can reuse
+both the Chromium/Ninja workspace and the dependency package cache. The fresh
+signed plan stored in the source tag remains source-fresh; selectors are added
+only to the newly signed request payload after GitHub provenance validation.
+The canonical worker still rejects producer reruns greater than one.
+Cross-repository/image checkpoint migration and unattended automatic signing
+remain intentionally disabled.
 
 ## Tests
 
