@@ -163,11 +163,13 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn("TARGET CEF::cpp", text)
         self.assertIn("cef_static_deploy_resources(web_engine_view_cef)", text)
         self.assertIn("LFC_UI_CEF_SHARED_TARGET_PAYLOAD", text)
+        self.assertIn("LFC_UI_CEF_ENGINE_INSTALL_FAILURE category=", text)
 
     def test_current_private_source_contract_workflow_pins_gn_gate_revision(self):
         text = (ROOT / ".github/workflows/cef-strict-source-contracts.yml").read_text()
         self.assertIn("repository: dobord/vcpkg", text)
         self.assertIn("ref: c01f6ebc41c9282bee4ed6d409f9a8a4a7a39535", text)
+        self.assertIn("ref: befa5c26c0c608165f27ac348e892305837fd614", text)
         self.assertIn("ref: 457fd41f39cbcff940c7af654da899d44ba5e553", text)
         self.assertNotIn("git -C private-vcpkg/.full-cef apply --check", text)
         self.assertNotIn("strict-import-cef", text)
