@@ -82,6 +82,8 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn('needs: gate',text)
         self.assertIn("if: needs.gate.outputs.ready == 'true'",text)
         self.assertIn('checkpoint\") is not None',text)
+        self.assertIn('- .github/workflows/cef-strict-combined.yml',text)
+        self.assertIn('- secure_release/cef_strict_combined.py',text)
         self.assertIn('- ci/cef-strict-engine-lock.json',text)
         self.assertIn('run: python -m secure_release.cef_strict_combined',text)
         self.assertIn('cef-strict-combined-summary-',text)
