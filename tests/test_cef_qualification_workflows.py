@@ -198,6 +198,8 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn("ref: 52bef1a3c2bfef7d20f2ad9f7f9ce86ad7a91534", text)
         self.assertIn("FREERDP_STATIC_CONFIGURE_FAILURE package=", text)
         self.assertIn(" category=", text)
+        self.assertIn("with_cairo=", text)
+        self.assertIn("cmake_source=", text)
         self.assertNotIn("upload-artifact", text)
 
     def test_lfc_ui_static_freerdp_workflow_is_relocated_and_static(self):
