@@ -34,7 +34,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
     def test_strict_engine_iteration_uploads_only_encrypted_checkpoint(self):
         workflow=(ROOT/'.github/workflows/cef-strict-engine-iteration.yml').read_text()
         worker=(ROOT/'secure_release/cef_strict_iteration.py').read_text()
-        self.assertIn('ref: c04d6056cba2ca019cdd1a3d1222f5c30f795a2b',workflow)
+        self.assertIn('ref: f2495f0da9db29dfea129e2b04a371933b9d2f4d',workflow)
         self.assertIn('run: python -m secure_release.cef_strict_iteration',workflow)
         self.assertIn('Restore reviewed completed-package caches by exact artifact digest',workflow)
         self.assertIn('gh api "repos/dobord/vcpkg/actions/artifacts/$id/zip"',workflow)
@@ -57,7 +57,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertNotIn('print(text',worker)
         lock=(ROOT/'ci/cef-strict-engine-lock.json').read_text()
         self.assertIn('"checkpoint": null',lock)
-        self.assertIn('"vcpkg_commit": "c04d6056cba2ca019cdd1a3d1222f5c30f795a2b"',lock)
+        self.assertIn('"vcpkg_commit": "f2495f0da9db29dfea129e2b04a371933b9d2f4d"',lock)
 
     def test_sdk_dependency_qualification_keeps_private_build_logs_runner_local(self):
         text = (ROOT / ".github/workflows/cef-strict-sdk-deps.yml").read_text()
@@ -146,7 +146,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
     def test_current_private_source_contract_workflow_pins_gn_gate_revision(self):
         text = (ROOT / ".github/workflows/cef-strict-source-contracts.yml").read_text()
         self.assertIn("repository: dobord/vcpkg", text)
-        self.assertIn("ref: c04d6056cba2ca019cdd1a3d1222f5c30f795a2b", text)
+        self.assertIn("ref: f2495f0da9db29dfea129e2b04a371933b9d2f4d", text)
         self.assertIn("ref: 457fd41f39cbcff940c7af654da899d44ba5e553", text)
         self.assertNotIn("git -C private-vcpkg/.full-cef apply --check", text)
         self.assertNotIn("strict-import-cef", text)
