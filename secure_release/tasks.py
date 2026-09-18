@@ -45,7 +45,12 @@ def _artifact_selector(client: Client, platform: str, run: int, attempt: int,
         raise ValueError("invalid CEF continuation selector")
     producer = client.get(f"/repos/{BUILDER}/actions/runs/{run}/attempts/{attempt}")
     check_run(producer, BUILDER, "build-release.yml", builder_sha, attempt,
-              "workflow_dispatch", success=True)
+              "workflow_dispatch", success=False)
+    if producer.get("status") != "completed":
+        raise ValueError("CEF continuation producer is still running")
+    current = client.get(f"/repos/{BUILDER}/actions/runs/{run}")
+    if current.get("run_attempt") != attempt or current.get("status") != "completed":
+        raise ValueError("CEF continuation producer was rerun")
     expected = f"{kind}-{platform}-{run}-{attempt}"
     matches = []
     for artifact in client.artifacts(BUILDER, run):
