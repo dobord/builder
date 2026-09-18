@@ -95,7 +95,11 @@ def validate_plan(plan: dict):
         if not all(isinstance(p, str) and PACKAGE.fullmatch(p) for p in cfg["packages"]):
             raise ValueError("unsafe package argument")
         engines = [p for p in cfg["packages"] if p.split("[", 1)[0] == "cef-static"]
-        if (plan["version"] == 2 and engines != ["cef-static"]) or (plan["version"] == 1 and engines):
+        if plan["version"] == 2:
+            expected = "cef-static[strict-platform]" if plan["cef"]["profile"] == "static-third-party" else "cef-static"
+            if engines != [expected]:
+                raise ValueError("CEF package features must match the signed linkage profile")
+        elif engines:
             raise ValueError("CEF requires one explicit version-2 acquisition contract")
 
 
