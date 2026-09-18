@@ -69,7 +69,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         text = (ROOT / ".github/workflows/cef-strict-sdk-deps.yml").read_text()
         self.assertIn("repository: dobord/lockfreecoro", text)
         self.assertIn("repository: dobord/lfc-ui", text)
-        self.assertIn("ref: d5f62138a9b45c71fb407a48edb0b4cefd5affe6", text)
+        self.assertIn("ref: 99d41d5f1b1b978fdc0d589f7d12f1fc78dd606b", text)
         self.assertIn("persist-credentials: false", text)
         self.assertIn("sdk-deps-install.log", text)
         self.assertIn("sdk-deps-consumer-build.log", text)
@@ -152,13 +152,13 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
 
     def test_freerdp_static_diagnostic_uses_deterministic_audio_revision(self):
         text = (ROOT / ".github/workflows/freerdp-static-diagnostic.yml").read_text()
-        self.assertIn("ref: d5f62138a9b45c71fb407a48edb0b4cefd5affe6", text)
+        self.assertIn("ref: 99d41d5f1b1b978fdc0d589f7d12f1fc78dd606b", text)
         self.assertIn("FREERDP_STATIC_CONFIGURE_FAILURE category=", text)
         self.assertNotIn("upload-artifact", text)
 
     def test_lfc_ui_static_freerdp_workflow_is_relocated_and_static(self):
         text = (ROOT / ".github/workflows/lfc-ui-static-freerdp.yml").read_text()
-        self.assertIn("ref: d5f62138a9b45c71fb407a48edb0b4cefd5affe6", text)
+        self.assertIn("ref: 99d41d5f1b1b978fdc0d589f7d12f1fc78dd606b", text)
         self.assertIn("'lfc-ui[freerdp]'", text)
         self.assertIn("freerdp-server-proxy", text)
         self.assertIn("freerdp-shadow", text)
@@ -184,7 +184,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
     def test_current_private_source_contract_workflow_pins_gn_gate_revision(self):
         text = (ROOT / ".github/workflows/cef-strict-source-contracts.yml").read_text()
         self.assertIn("repository: dobord/vcpkg", text)
-        self.assertIn("ref: d5f62138a9b45c71fb407a48edb0b4cefd5affe6", text)
+        self.assertIn("ref: 99d41d5f1b1b978fdc0d589f7d12f1fc78dd606b", text)
         self.assertIn("ref: 37efc4f9f340992d50d6f3fa41f617c9013fa26b", text)
         self.assertIn("ref: 457fd41f39cbcff940c7af654da899d44ba5e553", text)
         self.assertNotIn("git -C private-vcpkg/.full-cef apply --check", text)
