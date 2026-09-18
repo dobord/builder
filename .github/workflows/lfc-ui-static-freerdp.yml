@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/vcpkg
-          ref: f2495f0da9db29dfea129e2b04a371933b9d2f4d
+          ref: 7c35a1d2c199bca48adb71b1920131b260471e26
           path: private-vcpkg
           token: ${{ secrets.SOURCE_READ_TOKEN }}
           persist-credentials: false
@@ -46,7 +46,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C private-vcpkg rev-parse HEAD)" = "f2495f0da9db29dfea129e2b04a371933b9d2f4d"
+          test "$(git -C private-vcpkg rev-parse HEAD)" = "7c35a1d2c199bca48adb71b1920131b260471e26"
           test "$(git -C private-vcpkg/.freerdp-upstream rev-parse HEAD)" = "9e593bb18ea69cc5095e012465dcd675a822ed0d"
           test "$(git -C private-lfc-ui rev-parse HEAD)" = "85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5"
           mkdir -p private-vcpkg/.freerdp-upstream/downloads
@@ -110,7 +110,37 @@ jobs:
               package = "unknown"
           if not re.fullmatch(r"[a-z0-9+_.-]+", reason):
               reason = "unknown"
-          print(f"LFC_UI_FREERDP_INSTALL_FAILURE package={package} reason={reason}")
+          details = []
+          ffmpeg_root = pathlib.Path(os.environ["GITHUB_WORKSPACE"]) / "private-vcpkg/.freerdp-upstream/buildtrees/ffmpeg"
+          if ffmpeg_root.is_dir():
+              candidates = sorted(
+                  [p for p in ffmpeg_root.rglob("*.log") if p.is_file()],
+                  key=lambda p: p.stat().st_mtime,
+                  reverse=True,
+              )[:12]
+              merged = "\n".join(p.read_text(errors="replace")[-262144:] for p in candidates)
+              token = None
+              for pattern in (
+                  r"ERROR:\s*([A-Za-z0-9+_.-]+)\s+not found",
+                  r"ERROR:\s*([A-Za-z0-9+_.-]+)\s+requested",
+                  r"Package\s+([A-Za-z0-9+_.-]+)\s+was not found",
+                  r"Dependency\s+([A-Za-z0-9+_.-]+)\s+not found",
+              ):
+                  match = re.search(pattern, merged, re.I)
+                  if match and re.fullmatch(r"[A-Za-z0-9+_.-]+", match.group(1)):
+                      token = match.group(1).lower()
+                      break
+              if token:
+                  details.append("ffmpeg_dependency=" + token)
+              for label, pattern in (
+                  ("pkgconfig", r"not found using pkg-config"),
+                  ("compile-test", r"failed to compile"),
+                  ("link-test", r"failed to link"),
+              ):
+                  if re.search(pattern, merged, re.I):
+                      details.append("ffmpeg_reason=" + label)
+                      break
+          print(f"LFC_UI_FREERDP_INSTALL_FAILURE package={package} reason={reason}" + (" " + " ".join(details) if details else ""))
           PY
             exit "$rc"
           fi

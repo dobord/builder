@@ -106,13 +106,15 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
 
     def test_lfc_ui_static_freerdp_workflow_is_relocated_and_static(self):
         text = (ROOT / ".github/workflows/lfc-ui-static-freerdp.yml").read_text()
-        self.assertIn("ref: f2495f0da9db29dfea129e2b04a371933b9d2f4d", text)
+        self.assertIn("ref: 7c35a1d2c199bca48adb71b1920131b260471e26", text)
         self.assertIn("'lfc-ui[freerdp]'", text)
         self.assertIn("freerdp-server-proxy", text)
         self.assertIn("freerdp-shadow", text)
         self.assertIn("LFC_UI_FREERDP_SHARED_TARGET_PAYLOAD", text)
         self.assertIn("-static-libstdc++ -static-libgcc", text)
         self.assertIn("LFC_UI_STATIC_FREERDP_QUALIFIED", text)
+        self.assertIn("ffmpeg_dependency=", text)
+        self.assertIn("buildtrees/ffmpeg", text)
         self.assertNotIn("upload-artifact", text)
 
     def test_lfc_ui_static_cef_workflow_builds_upstream_example(self):
