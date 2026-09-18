@@ -121,7 +121,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
 
     def test_lfc_ui_static_freerdp_workflow_is_relocated_and_static(self):
         text = (ROOT / ".github/workflows/lfc-ui-static-freerdp.yml").read_text()
-        self.assertIn("ref: c9270689c87ef7d2a0aa610b927e67d4eb291b9c", text)
+        self.assertIn("ref: aaed4aa90086389b491b84db2a648e8e34a14266", text)
         self.assertIn("'lfc-ui[freerdp]'", text)
         self.assertIn("freerdp-server-proxy", text)
         self.assertIn("freerdp-shadow", text)
