@@ -108,16 +108,18 @@ def verify_result():
         cfg = payload["plan"].get("cef")
         if cfg is not None:
             evidence = manifest.get("cef", {})
-            if (evidence.get("build_contract_sha256") != cef_contract.build_key(cfg, platform)
+            consumer = evidence.get("consumer", {})
+            expected_key, expected_contract = cef_build.qualified_contract(
+                consumer, cfg, platform)
+            if (evidence.get("build_contract_sha256") != expected_key
                     or evidence.get("profile") != cfg["profile"]):
                 raise ValueError("CEF evidence is not bound to the signed acquisition contract")
-            cef_build.validate_evidence(evidence.get("consumer", {}), cfg, platform)
             import zipfile
             with zipfile.ZipFile(sdk) as archive:
                 path = f"installed/{triplet}/share/cef-static/build-contract.json"
                 if path not in names or archive.getinfo(path).file_size > 32768:
                     raise ValueError("CEF package lacks its ABI-tracked build contract")
-                if crypto.parse(archive.read(path)) != cef_contract.port_contract(cfg, platform):
+                if crypto.parse(archive.read(path)) != expected_contract:
                     raise ValueError("Installed CEF package differs from the signed build plan")
         elif "cef" in manifest or any(n.startswith(f"installed/{triplet}/share/cef-static/") for n in names):
             raise ValueError("Unrequested CEF package or evidence")
