@@ -18,7 +18,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/vcpkg
-          ref: 2b12251d2b2bf118a49762db1eed2d7ab1ea4dd7
+          ref: f6af9c7ab677a0bff6ce2b1c0c64690502bd1ffb
           path: private-vcpkg
           token: ${{ secrets.SOURCE_READ_TOKEN }}
           persist-credentials: false
@@ -34,6 +34,12 @@ jobs:
           ref: 457fd41f39cbcff940c7af654da899d44ba5e553
           path: private-vcpkg/.contract-builder
           persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: dobord/cef
+          ref: e212a7d7e3c427d882731428410a6ca1c48093ef
+          path: strict-import-cef
+          persist-credentials: false
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
         with:
           python-version: '3.12'
@@ -44,13 +50,22 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C private-vcpkg rev-parse HEAD)" = "2b12251d2b2bf118a49762db1eed2d7ab1ea4dd7"
+          test "$(git -C private-vcpkg rev-parse HEAD)" = "f6af9c7ab677a0bff6ce2b1c0c64690502bd1ffb"
           test "$(git -C private-vcpkg/.full-cef rev-parse HEAD)" = "37729fd2b1db127c1658098d69ab63adc70e045f"
           test "$(git -C private-vcpkg/.contract-builder rev-parse HEAD)" = "457fd41f39cbcff940c7af654da899d44ba5e553"
           cd private-vcpkg
           python -I -m unittest discover -s ci/cef/tests -v
           python -I -m unittest discover -s ci/cef-full/tests -v
           python -m py_compile ci/cef-full/verify_prefix.py ci/cef-full/native.py ci/cef-full/gn_check.py
+      - name: Verify Windows strict import backport matches reviewed CEF bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          patch="$GITHUB_WORKSPACE/private-vcpkg/ports/cef-static/strict-windows-release-import.patch"
+          git -C private-vcpkg/.full-cef apply --check "$patch"
+          git -C private-vcpkg/.full-cef apply "$patch"
+          cmp private-vcpkg/.full-cef/vcpkg/integration/install.cmake strict-import-cef/vcpkg/integration/install.cmake
+          cmp private-vcpkg/.full-cef/vcpkg/integration/sdk_import.py strict-import-cef/vcpkg/integration/sdk_import.py
       - name: Verify content-addressed publisher policy snapshot
         env:
           PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/tests/vcpkg_bin_snapshot
