@@ -9,7 +9,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
     def test_full_platform_workflow_is_exact_and_keeps_native_output_private(self):
         text = (ROOT / ".github/workflows/cef-strict-platform-qualification.yml").read_text()
         self.assertIn("repository: dobord/vcpkg", text)
-        self.assertIn("ref: a0ce35082136ac045c8e5cc97de4c0e4e29a5b38", text)
+        self.assertIn("ref: 6d342cd02d3c15fa05bbd4d391c4464998e27d47", text)
         self.assertIn("repository: microsoft/vcpkg", text)
         self.assertIn("ref: 9e593bb18ea69cc5095e012465dcd675a822ed0d", text)
         self.assertIn("repository: dobord/cef", text)
@@ -19,6 +19,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertNotIn("upload-artifact", text)
         self.assertIn("gh api \"repos/dobord/vcpkg/actions/artifacts/$id/zip\"", text)
         self.assertIn("sha256sum -c -", text)
+        self.assertIn('cat "$RUNNER_TEMP/cef-gn-evidence/gn-qualification.json"', text)
         self.assertNotIn("persist-credentials: true", text)
 
     def test_production_build_accepts_trusted_large_disk_runner_labels(self):
