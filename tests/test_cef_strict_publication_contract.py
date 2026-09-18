@@ -91,6 +91,30 @@ class StrictPublicationContractTests(unittest.TestCase):
         self.assertNotEqual(first_key, second_key)
         self.assertNotEqual(first_contract, second_contract)
 
+    def test_embedded_platform_preflight_is_hash_bound(self):
+        cfg = self.strict()
+        value = proof("linux")
+        record = {
+            "schema": 1,
+            "kind": "cef-static-platform-preflight",
+            "status": "success",
+            "full_platform_graph_qualified": True,
+            "cef_runtime_verified": False,
+            "gpu_runtime_qualified": False,
+            "module_count": 36,
+            "manifest_sha256": value["platform_closure"]["manifest_sha256"],
+        }
+        value["platform_closure"]["qualification_sha256"] = cef_build.platform_preflight_digest(record)
+        cef_build.validate_platform_preflight(record, value, cfg, "linux")
+        record["manifest_sha256"] = "f" * 64
+        with self.assertRaises(ValueError):
+            cef_build.validate_platform_preflight(record, value, cfg, "linux")
+
+    def test_platform_preflight_is_linux_strict_only(self):
+        with self.assertRaises(ValueError):
+            cef_build.validate_platform_preflight(
+                {"schema": 1}, proof("windows"), self.strict(), "windows")
+
     def test_invalid_platform_digest_is_rejected_before_publication(self):
         value = proof("linux")
         value["platform_closure"]["manifest_sha256"] = "latest"
