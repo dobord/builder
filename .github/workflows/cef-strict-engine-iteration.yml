@@ -1,0 +1,202 @@
+name: Strict CEF engine iteration
+on:
+  push:
+    branches:
+      - feature/cef-static-integration
+    paths:
+      - .github/workflows/cef-strict-engine-iteration.yml
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: cef-strict-engine-linux
+  cancel-in-progress: false
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: dobord/vcpkg
+          ref: fb0c27ec25ae3d9f297edb8bcd5a36378e38ce2e
+          path: private-vcpkg
+          token: ${{ secrets.SOURCE_READ_TOKEN }}
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: microsoft/vcpkg
+          ref: 9e593bb18ea69cc5095e012465dcd675a822ed0d
+          path: private-vcpkg/.full-upstream
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: dobord/cef
+          ref: 37729fd2b1db127c1658098d69ab63adc70e045f
+          path: private-vcpkg/.full-cef
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.12'
+      - name: Install hash-pinned cache cryptography
+        run: python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r requirements.lock
+      - name: Recover capacity and install native build tools
+        run: |
+          set -euo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /usr/local/.ghcup /opt/ghc
+          sudo apt-get update
+          sudo apt-get install -y gcc-14 g++-14 autoconf autoconf-archive automake libtool pkg-config ninja-build gperf flex bison nasm gettext texinfo libltdl-dev xvfb xauth fonts-dejavu-core ccache
+          df -h /
+      - name: Build and qualify exact 36-module static prefix
+        env:
+          CEF_CONTRACT_SOURCE: ${{ github.workspace }}/private-vcpkg/.full-cef
+        working-directory: private-vcpkg
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "fb0c27ec25ae3d9f297edb8bcd5a36378e38ce2e"
+          test "$(git -C .full-upstream rev-parse HEAD)" = "9e593bb18ea69cc5095e012465dcd675a822ed0d"
+          test "$(git -C .full-cef rev-parse HEAD)" = "37729fd2b1db127c1658098d69ab63adc70e045f"
+          mkdir -p "$RUNNER_TEMP/cef-strict-evidence"
+          python -I -m unittest discover -s ci/cef-full/tests -v >"$RUNNER_TEMP/cef-strict-contract.log" 2>&1
+          python ci/cef-full/native.py --root . --work "$RUNNER_TEMP/cef-platform-work" --evidence "$RUNNER_TEMP/cef-strict-evidence" >"$RUNNER_TEMP/cef-platform-native.log" 2>&1
+      - name: Stage qualified prefix and free vcpkg build space
+        shell: python
+        run: |
+          import json, os, pathlib, shutil
+          temp=pathlib.Path(os.environ["RUNNER_TEMP"])
+          evidence=temp/"cef-strict-evidence"
+          receipt=json.loads((evidence/"native-full.json").read_text())
+          required={"status":"success","kind":"cef-static-platform-preflight",
+                    "full_platform_graph_qualified":True,"module_count":36}
+          if any(receipt.get(k)!=v for k,v in required.items()):
+              raise RuntimeError("complete static platform preflight is not qualified")
+          work=temp/"cef-strict-engine-work"
+          work.mkdir()
+          shutil.move(str(temp/"cef-platform-work/frozen-target-prefix"), work/"target-prefix")
+          shutil.copy2(evidence/"platform-build-inputs.json", work/"platform-inputs.json")
+          (temp/"cef-platform-sha256.txt").write_text(receipt["manifest_sha256"]+"\n")
+          shutil.rmtree(temp/"cef-platform-work")
+          for path in (
+              pathlib.Path("private-vcpkg/.full-upstream/buildtrees"),
+              pathlib.Path("private-vcpkg/.full-upstream/packages"),
+              pathlib.Path("private-vcpkg/.full-upstream/downloads"),
+          ):
+              if path.exists(): shutil.rmtree(path)
+      - name: Compute strict semantic build key
+        shell: python
+        run: |
+          import json, os, pathlib
+          from secure_release import cef_contract
+          temp=pathlib.Path(os.environ["RUNNER_TEMP"])
+          plan=json.loads(pathlib.Path("private-vcpkg/ci/release-plan.json").read_text())
+          sha=temp.joinpath("cef-platform-sha256.txt").read_text().strip()
+          key=cef_contract.build_key(plan["cef"],"linux",sha)
+          temp.joinpath("cef-strict-build-key.txt").write_text(key+"\n")
+      - name: Prepare pinned CEF sources and official Linux prerequisites
+        env:
+          GITHUB_SHA: 37729fd2b1db127c1658098d69ab63adc70e045f
+          CEF_STATIC_BUILD_TIMEOUT_SECONDS: '18000'
+          CEF_STATIC_JOBS: '4'
+        shell: bash
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/cef-strict-engine-work"
+          logs="$RUNNER_TEMP/cef-strict-engine-logs"
+          python private-vcpkg/.full-cef/vcpkg/ports/cef-static/source_build.py prepare --work "$work" --logs "$logs" >"$RUNNER_TEMP/cef-source-prepare.log" 2>&1
+          sudo "$work/download/chromium/src/build/install-build-deps.sh" --no-prompt --no-arm --no-chromeos-fonts >"$RUNNER_TEMP/cef-install-build-deps.log" 2>&1
+          df -h /
+      - name: Run bounded strict GN Ninja compilation slice
+        id: slice
+        env:
+          GITHUB_SHA: 37729fd2b1db127c1658098d69ab63adc70e045f
+          CEF_STATIC_STRICT_THIRD_PARTY: '1'
+          CEF_STATIC_BUILD_TIMEOUT_SECONDS: '18000'
+          CEF_STATIC_JOBS: '4'
+        shell: bash
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/cef-strict-engine-work"
+          logs="$RUNNER_TEMP/cef-strict-engine-logs"
+          key="$(cat "$RUNNER_TEMP/cef-strict-build-key.txt")"
+          sha="$(cat "$RUNNER_TEMP/cef-platform-sha256.txt")"
+          python private-vcpkg/.full-cef/vcpkg/integration/driver.py slice             --work "$work" --logs "$logs" --contract "$key"             --state "$RUNNER_TEMP/cef-strict-iteration.json"             --checkpoint "$RUNNER_TEMP/cef-strict-checkpoint"             --seconds 9000 --jobs 4             --platform-manifest "$work/platform-inputs.json"             --platform-prefix "$work/target-prefix"             --platform-sha256 "$sha"             >"$RUNNER_TEMP/cef-engine-slice.log" 2>&1
+          python - <<'PY'
+          import json,os,pathlib
+          temp=pathlib.Path(os.environ["RUNNER_TEMP"])
+          value=json.loads((temp/"cef-strict-iteration.json").read_text())
+          if value.get("checkpoint_ready") is not True:
+              raise RuntimeError("strict engine slice did not produce a checkpoint")
+          ready=value.get("ready") is True
+          with open(os.environ["GITHUB_OUTPUT"],"a") as out:
+              out.write("ready="+str(ready).lower()+"\n")
+          summary={"schema":1,"status":value.get("status"),"ready":ready,
+                   "checkpoint_ready":True,"progress":value.get("progress",{}),
+                   "platform_sha256":(temp/"cef-platform-sha256.txt").read_text().strip(),
+                   "build_key":(temp/"cef-strict-build-key.txt").read_text().strip(),
+                   "vcpkg_commit":"fb0c27ec25ae3d9f297edb8bcd5a36378e38ce2e",
+                   "cef_recipe_commit":"37729fd2b1db127c1658098d69ab63adc70e045f"}
+          (temp/"cef-strict-iteration-summary.json").write_text(json.dumps(summary,sort_keys=True,indent=2)+"\n")
+          PY
+      - name: Verify strict CEF runtime if compilation completed
+        if: steps.slice.outputs.ready == 'true'
+        env:
+          GITHUB_SHA: 37729fd2b1db127c1658098d69ab63adc70e045f
+          CEF_STATIC_STRICT_THIRD_PARTY: '1'
+          CEF_STATIC_BUILD_TIMEOUT_SECONDS: '18000'
+          CEF_STATIC_JOBS: '4'
+        shell: bash
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/cef-strict-engine-work"
+          logs="$RUNNER_TEMP/cef-strict-engine-logs"
+          sha="$(cat "$RUNNER_TEMP/cef-platform-sha256.txt")"
+          python private-vcpkg/.full-cef/vcpkg/ports/cef-static/source_build.py build             --work "$work" --logs "$logs" --jobs 4             --platform-manifest "$work/platform-inputs.json"             --platform-prefix "$work/target-prefix"             --platform-sha256 "$sha"             >"$RUNNER_TEMP/cef-engine-runtime.log" 2>&1
+          python - <<'PY'
+          import json,os,pathlib
+          p=pathlib.Path(os.environ["RUNNER_TEMP"])/"cef-strict-engine-logs/engine-build-receipt.json"
+          v=json.loads(p.read_text())
+          if not (v.get("source_build_verified") is True
+                  and v.get("engine_linkage")=="static"
+                  and v.get("platform_build_inputs")
+                  and v.get("platform_graph",{}).get("status")=="static-platform-graph-verified"
+                  and v.get("smoke",{}).get("third_party_modules_static") is True):
+              raise RuntimeError("strict CEF runtime receipt is incomplete")
+          print("STRICT_CEF_ENGINE_RUNTIME_VERIFIED")
+          PY
+      - name: Encrypt checkpoint with builder input recipient
+        if: ${{ !cancelled() && steps.slice.outcome == 'success' }}
+        env:
+          BUILDER_INPUT_PRIVATE_KEY: ${{ secrets.BUILDER_INPUT_PRIVATE_KEY }}
+        shell: python
+        run: |
+          import os,pathlib
+          from secure_release import cef_cache,crypto
+          temp=pathlib.Path(os.environ["RUNNER_TEMP"])
+          key=(temp/"cef-strict-build-key.txt").read_text().strip()
+          base=cef_cache.context("cef-checkpoint","linux",key,
+              int(os.environ["GITHUB_RUN_ID"]),int(os.environ["GITHUB_RUN_ATTEMPT"]),
+              os.environ["GITHUB_SHA"],"index")
+          cef_cache.seal(temp/"cef-strict-checkpoint",
+              temp/"cef-strict-checkpoint-encrypted",
+              crypto.public_text(os.environ["BUILDER_INPUT_PRIVATE_KEY"]),base)
+      - name: Upload encrypted strict checkpoint
+        if: ${{ !cancelled() && steps.slice.outcome == 'success' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: cef-strict-checkpoint-linux-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/cef-strict-checkpoint-encrypted/*.enc
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+      - name: Upload non-sensitive iteration summary
+        if: ${{ !cancelled() && steps.slice.outcome == 'success' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: cef-strict-iteration-summary-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/cef-strict-iteration-summary.json
+          retention-days: 7
+          if-no-files-found: error
