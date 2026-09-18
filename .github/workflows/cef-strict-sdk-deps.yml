@@ -77,21 +77,27 @@ jobs:
       - name: Bootstrap and install exact Linux SDK dependency graph
         if: runner.os == 'Linux'
         shell: bash
+        env:
+          CC: gcc-14
+          CXX: g++-14
         run: |
           set -euo pipefail
           upstream="$GITHUB_WORKSPACE/private-vcpkg/.sdk-upstream"
           installed="$RUNNER_TEMP/strict-sdk-installed"
           bash "$upstream/bootstrap-vcpkg.sh" -disableMetrics
-          "$upstream/vcpkg" install 'lockfreecoro[auth,grpc,h264,io-uring,opus,postgresql,process,protobuf,saml,sqlite,vp8,vp9]' 'lfc-ui[atspi,lockfreecoro,opengl,vulkan]' 'dbus[core]' --triplet=x64-linux-static-release --host-triplet=x64-linux-static-release --overlay-ports="$GITHUB_WORKSPACE/private-vcpkg/ports" --overlay-triplets="$GITHUB_WORKSPACE/private-vcpkg/triplets" --x-install-root="$installed" --binarysource=clear
+          "$upstream/vcpkg" install 'lockfreecoro[auth,grpc,h264,io-uring,opus,postgresql,process,protobuf,saml,sqlite,vp8,vp9]' 'lfc-ui[atspi,lockfreecoro,opengl,vulkan]' 'dbus[core]' --triplet=x64-linux-static-release --host-triplet=x64-linux-static-release --overlay-ports="$GITHUB_WORKSPACE/private-vcpkg/ports" --overlay-triplets="$GITHUB_WORKSPACE/private-vcpkg/triplets" --x-install-root="$installed" --binarysource=clear --clean-buildtrees-after-build --clean-packages-after-build
           mkdir -p "$RUNNER_TEMP/export"
           "$upstream/vcpkg" export lockfreecoro lfc-ui dbus --triplet=x64-linux-static-release --host-triplet=x64-linux-static-release --overlay-ports="$GITHUB_WORKSPACE/private-vcpkg/ports" --overlay-triplets="$GITHUB_WORKSPACE/private-vcpkg/triplets" --x-install-root="$installed" --raw --output=sdk-deps --output-dir="$RUNNER_TEMP/export"
-          prefix="$RUNNER_TEMP/export/sdk-deps/installed/x64-linux-static-release"
+          sdk="$RUNNER_TEMP/export/sdk-deps"
+          prefix="$sdk/installed/x64-linux-static-release"
+          mkdir -p "$sdk/triplets"
+          cp "$GITHUB_WORKSPACE/private-vcpkg/triplets/x64-linux-static-release.cmake" "$sdk/triplets/x64-linux-static-release.cmake"
           if find "$prefix/lib" "$prefix/bin" -type f \( -name '*.so' -o -name '*.so.*' \) -print -quit | grep -q .; then
             echo "shared target payload found" >&2
             find "$prefix/lib" "$prefix/bin" -type f \( -name '*.so' -o -name '*.so.*' \) -print | head -50 >&2
             exit 1
           fi
-          cmake -S "$GITHUB_WORKSPACE/private-vcpkg/ci/smoke" -B "$RUNNER_TEMP/sdk-consumer" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$prefix" -DCMAKE_FIND_USE_PACKAGE_REGISTRY=OFF -DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=OFF
+          cmake -S "$GITHUB_WORKSPACE/private-vcpkg/ci/smoke" -B "$RUNNER_TEMP/sdk-consumer" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DCMAKE_TOOLCHAIN_FILE="$sdk/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-linux-static-release -DVCPKG_HOST_TRIPLET=x64-linux-static-release -DVCPKG_MANIFEST_MODE=OFF
           cmake --build "$RUNNER_TEMP/sdk-consumer" --parallel 2
           ctest --test-dir "$RUNNER_TEMP/sdk-consumer" --output-on-failure --timeout 60
       - name: Bootstrap and install exact Windows SDK dependency graph
@@ -113,7 +119,9 @@ jobs:
             "--overlay-ports=$env:GITHUB_WORKSPACE/private-vcpkg/ports",
             "--overlay-triplets=$env:GITHUB_WORKSPACE/private-vcpkg/triplets",
             "--x-install-root=$installed",
-            '--binarysource=clear'
+            '--binarysource=clear',
+            '--clean-buildtrees-after-build',
+            '--clean-packages-after-build'
           )
           & $vcpkg @installArgs
           if ($LASTEXITCODE -ne 0) { throw 'vcpkg install failed' }
@@ -130,7 +138,11 @@ jobs:
           )
           & $vcpkg @exportArgs
           if ($LASTEXITCODE -ne 0) { throw 'vcpkg export failed' }
-          $prefix = Join-Path $export 'sdk-deps/installed/x64-windows-static-release'
+          $sdk = Join-Path $export 'sdk-deps'
+          $prefix = Join-Path $sdk 'installed/x64-windows-static-release'
+          $triplets = Join-Path $sdk 'triplets'
+          New-Item -ItemType Directory -Force $triplets | Out-Null
+          Copy-Item "$env:GITHUB_WORKSPACE/private-vcpkg/triplets/x64-windows-static-release.cmake" (Join-Path $triplets 'x64-windows-static-release.cmake')
           $shared = @(Get-ChildItem (Join-Path $prefix 'lib'),(Join-Path $prefix 'bin') -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -ieq '.dll' })
           if ($shared.Count -ne 0) { throw ('shared target payload found: ' + (($shared | Select-Object -First 20 -ExpandProperty FullName) -join ', ')) }
           $consumer = Join-Path $env:RUNNER_TEMP 'sdk-consumer'
@@ -138,10 +150,12 @@ jobs:
             '-S',"$env:GITHUB_WORKSPACE/private-vcpkg/ci/smoke",
             '-B',$consumer,
             '-G','Visual Studio 17 2022','-A','x64',
-            "-DCMAKE_PREFIX_PATH=$prefix",
-            '-DCMAKE_FIND_USE_PACKAGE_REGISTRY=OFF',
-            '-DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=OFF',
-            '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded'
+            '-DCMAKE_BUILD_TYPE=Release',
+            '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded',
+            "-DCMAKE_TOOLCHAIN_FILE=$sdk/scripts/buildsystems/vcpkg.cmake",
+            '-DVCPKG_TARGET_TRIPLET=x64-windows-static-release',
+            '-DVCPKG_HOST_TRIPLET=x64-windows-static-release',
+            '-DVCPKG_MANIFEST_MODE=OFF'
           )
           & cmake @cmakeArgs
           if ($LASTEXITCODE -ne 0) { throw 'consumer configure failed' }
