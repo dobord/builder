@@ -123,6 +123,16 @@ class AuditTests(unittest.TestCase):
             self.assertFalse(report['target_archives_static'])
             self.assertEqual(report['violations'][0]['reason'], 'unqualified-archive-members')
 
+    def test_named_long_idata_member_can_prove_reviewed_os_import(self):
+        payload = coff(b'.idata$2')
+        data = ar(payload, b'bcryptprimitives.dll/')
+        result = audit.inspect_archive(
+            io.BytesIO(data), len(data), 'windows',
+            allow_windows_os_imports=True)
+        self.assertTrue(result['qualified_objects_only'])
+        self.assertEqual(result['kinds'], {'coff-os-import': 1})
+        self.assertEqual(result['system_imports'], {'bcryptprimitives.dll': 1})
+
     def test_long_idata_import_never_inherits_short_os_allowance(self):
         payload = coff(b'.idata$2')
         data = ar(payload)
