@@ -69,6 +69,8 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn("sdk-deps-consumer-build.log", text)
         self.assertIn("SDK_DEPS_LINUX_QUALIFIED", text)
         self.assertIn("SDK_DEPS_WINDOWS_QUALIFIED", text)
+        self.assertIn("SDK_DEPS_LINUX_INSTALL_FAILURE package=", text)
+        self.assertIn("SDK_DEPS_WINDOWS_INSTALL_FAILURE package=", text)
         self.assertNotIn("upload-artifact", text)
         self.assertNotIn("cat $RUNNER_TEMP/sdk-deps", text)
 
