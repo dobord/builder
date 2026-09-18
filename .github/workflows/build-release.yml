@@ -98,7 +98,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y autoconf autoconf-archive automake g++-14 libgl1-mesa-dev libtool ninja-build nasm xvfb xauth libglib2.0-dev libnss3-dev libnspr4-dev libatk1.0-dev libatk-bridge2.0-dev libcups2-dev libx11-dev libxcomposite-dev libxdamage-dev libxext-dev libxfixes-dev libxrandr-dev libxrender-dev libxtst-dev libxi-dev libxkbcommon-dev libgbm-dev libdrm-dev libexpat1-dev uuid-dev libxcb1-dev libpci-dev libudev-dev libcairo2-dev libpango1.0-dev libasound2-dev zlib1g-dev libatspi2.0-dev libxshmfence-dev
+          sudo apt-get install -y autoconf autoconf-archive automake gcc-14 g++-14 libtool pkg-config ninja-build nasm gperf flex bison gettext texinfo xvfb xauth libglib2.0-dev libnss3-dev libnspr4-dev libatk1.0-dev libatk-bridge2.0-dev libcups2-dev libx11-dev libxcomposite-dev libxdamage-dev libxext-dev libxfixes-dev libxrandr-dev libxrender-dev libxtst-dev libxi-dev libxkbcommon-dev libgbm-dev libdrm-dev libexpat1-dev uuid-dev libxcb1-dev libpci-dev libudev-dev libcairo2-dev libpango1.0-dev libasound2-dev zlib1g-dev libatspi2.0-dev libxshmfence-dev
           nasm -v
       - name: Download this attempt's encrypted source bundle
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
