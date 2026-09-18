@@ -86,7 +86,7 @@ jobs:
           installed="$RUNNER_TEMP/strict-sdk-installed"
           bash "$upstream/bootstrap-vcpkg.sh" -disableMetrics >"$RUNNER_TEMP/sdk-deps-bootstrap.log" 2>&1
           set +e
-          "$upstream/vcpkg" install 'lockfreecoro[auth,grpc,h264,io-uring,opus,postgresql,process,protobuf,saml,sqlite,vp8,vp9]' 'lfc-ui[atspi,lockfreecoro,opengl,vulkan]' 'dbus[core]' --triplet=x64-linux-static-release --host-triplet=x64-linux-static-release --overlay-ports="$GITHUB_WORKSPACE/private-vcpkg/ports" --overlay-triplets="$GITHUB_WORKSPACE/private-vcpkg/triplets" --x-install-root="$installed" --binarysource=clear --clean-buildtrees-after-build --clean-packages-after-build >"$RUNNER_TEMP/sdk-deps-install.log" 2>&1
+          "$upstream/vcpkg" install 'lockfreecoro[auth,grpc,h264,io-uring,opus,postgresql,process,protobuf,saml,sqlite,vp8,vp9]' 'lfc-ui[lockfreecoro]' --triplet=x64-linux-static-release --host-triplet=x64-linux-static-release --overlay-ports="$GITHUB_WORKSPACE/private-vcpkg/ports" --overlay-triplets="$GITHUB_WORKSPACE/private-vcpkg/triplets" --x-install-root="$installed" --binarysource=clear --clean-buildtrees-after-build --clean-packages-after-build >"$RUNNER_TEMP/sdk-deps-install.log" 2>&1
           rc=$?
           set -e
           if [ "$rc" -ne 0 ]; then
@@ -137,7 +137,7 @@ jobs:
             exit "$rc"
           fi
           mkdir -p "$RUNNER_TEMP/export"
-          if ! "$upstream/vcpkg" export lockfreecoro lfc-ui dbus --triplet=x64-linux-static-release --host-triplet=x64-linux-static-release --overlay-ports="$GITHUB_WORKSPACE/private-vcpkg/ports" --overlay-triplets="$GITHUB_WORKSPACE/private-vcpkg/triplets" --x-install-root="$installed" --raw --output=sdk-deps --output-dir="$RUNNER_TEMP/export" >"$RUNNER_TEMP/sdk-deps-export.log" 2>&1; then
+          if ! "$upstream/vcpkg" export lockfreecoro lfc-ui --triplet=x64-linux-static-release --host-triplet=x64-linux-static-release --overlay-ports="$GITHUB_WORKSPACE/private-vcpkg/ports" --overlay-triplets="$GITHUB_WORKSPACE/private-vcpkg/triplets" --x-install-root="$installed" --raw --output=sdk-deps --output-dir="$RUNNER_TEMP/export" >"$RUNNER_TEMP/sdk-deps-export.log" 2>&1; then
             echo "SDK_DEPS_LINUX_EXPORT_FAILED" >&2
             exit 1
           fi
@@ -166,7 +166,7 @@ jobs:
           $installArgs = @(
             'install',
             'lockfreecoro[auth,grpc,h264,opus,postgresql,process,protobuf,saml,sqlite,vp8,vp9]',
-            'lfc-ui[lockfreecoro,opengl,vulkan]',
+            'lfc-ui[lockfreecoro]',
             '--triplet=x64-windows-static-release',
             '--host-triplet=x64-windows-static-release',
             "--overlay-ports=$env:GITHUB_WORKSPACE/private-vcpkg/ports",
