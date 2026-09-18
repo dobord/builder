@@ -9,7 +9,7 @@ permissions:
   contents: read
 concurrency:
   group: cef-strict-platform-qualification
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   qualify-linux:
     runs-on: ubuntu-24.04
