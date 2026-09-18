@@ -27,6 +27,21 @@ class LocalSdkRetrievalTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "provenance"):
             _artifact([wrong_source], 42, 3, "b" * 40, "windows")
 
+    def test_windows_wrapper_delegates_to_authenticated_fetcher(self):
+        script = (Path(__file__).resolve().parents[1] / "fetch-vcpkg.ps1").read_text()
+        self.assertIn("secure_release.fetch_sdk_local", script)
+        self.assertIn("GH_TOKEN", script)
+        self.assertIn("gh.Source auth token", script)
+        self.assertIn("--private-key", script)
+        self.assertIn("--request-verify-key", script)
+        self.assertIn("--builder-sha", script)
+        self.assertIn("--run", script)
+        self.assertIn("--attempt", script)
+        self.assertIn("--require-hashes", script)
+        self.assertIn("GITHUB_ACTIONS", script)
+        self.assertIn("callerDirectory", script)
+        self.assertNotIn("Get-Content $PrivateKey", script)
+
     def test_sdk_layout_requires_toolchain_and_static_library(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
