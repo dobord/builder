@@ -357,7 +357,9 @@ def build():
     execute(configure, stage="consumer-configure", timeout=600)
     execute(["cmake", "--build", str(out), "--config", "Release", "--parallel", "2"], stage="consumer-build", timeout=1800)
     execute(["ctest", "--test-dir", str(out), "-C", "Release", "--output-on-failure", "--timeout", "60"], stage="consumer-test", timeout=180)
-    cef_proof = cef_build.verify_consumer(root, cfg, platform, execute, platform_sha256) if cfg is not None else None
+    cef_proof = cef_build.verify_consumer(
+        root, cfg, platform, execute, platform_sha256, platform_probe
+    ) if cfg is not None else None
     bundle = root / "result"
     bundle.mkdir()
     shutil.copyfile(package, bundle / "sdk.zip")
