@@ -198,7 +198,7 @@ def main() -> None:
             if not (
                 receipt.get("source_build_verified") is True
                 and receipt.get("engine_linkage") == "static"
-                and receipt.get("platform_build_inputs", {}).get("manifest_sha256") == platform_sha
+                and receipt.get("platform_build_inputs", {}).get("sha256") == platform_sha
                 and receipt.get("platform_graph", {}).get("status")
                     == "static-platform-graph-verified"
                 and receipt.get("smoke", {}).get("third_party_modules_static") is True
