@@ -96,7 +96,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn('- secure_release/cef_strict_combined.py',text)
         self.assertIn('- ci/cef-strict-engine-lock.json',text)
         self.assertIn('ref: d5f62138a9b45c71fb407a48edb0b4cefd5affe6',text)
-        self.assertIn('ref: 99d41d5f1b1b978fdc0d589f7d12f1fc78dd606b',text)
+        self.assertIn('ref: 87b76306a659e148aa5ee149d86301006ea9646e',text)
         self.assertIn('path: private-engine-vcpkg',text)
         self.assertIn('run: python -m secure_release.cef_strict_combined',text)
         self.assertIn('cef-strict-combined-summary-',text)
@@ -192,7 +192,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
     def test_current_private_source_contract_workflow_pins_gn_gate_revision(self):
         text = (ROOT / ".github/workflows/cef-strict-source-contracts.yml").read_text()
         self.assertIn("repository: dobord/vcpkg", text)
-        self.assertIn("ref: 99d41d5f1b1b978fdc0d589f7d12f1fc78dd606b", text)
+        self.assertIn("ref: 87b76306a659e148aa5ee149d86301006ea9646e", text)
         self.assertIn("ref: 37efc4f9f340992d50d6f3fa41f617c9013fa26b", text)
         self.assertIn("ref: 457fd41f39cbcff940c7af654da899d44ba5e553", text)
         self.assertNotIn("git -C private-vcpkg/.full-cef apply --check", text)
