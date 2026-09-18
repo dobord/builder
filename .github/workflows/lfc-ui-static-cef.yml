@@ -114,7 +114,16 @@ jobs:
             @'
           import os, pathlib, re
           path = pathlib.Path(os.environ["LFC_UI_CEF_DIAG_LOG"])
-          text = path.read_text(errors="replace")[-1048576:]
+          pieces = [path.read_text(errors="replace")[-1048576:]]
+          upstream = pathlib.Path(os.environ["GITHUB_WORKSPACE"]) / "private-vcpkg/.lfc-cef-upstream/buildtrees/cef-static"
+          if upstream.is_dir():
+              candidates = sorted(
+                  [p for p in upstream.rglob("*.log") if p.is_file()],
+                  key=lambda p: p.stat().st_mtime,
+                  reverse=True,
+              )[:16]
+              pieces.extend(p.read_text(errors="replace")[-1048576:] for p in candidates)
+          text = "\n".join(pieces)
           category, package = "unknown", "cef-static"
           for pattern in (
               r"error: building ([a-z0-9][a-z0-9+_.-]*):",
@@ -131,12 +140,16 @@ jobs:
           else:
               checks = (
                   ("download-timeout", r"timed out|TimeoutError|socket\.timeout"),
-                  ("download-redirect", r"Untrusted release redirect|redirect.*(?:rejected|forbidden)"),
-                  ("download-tls", r"SSL|CERTIFICATE_VERIFY_FAILED|TLS"),
-                  ("download-connection", r"Remote end closed|connection (?:reset|aborted|refused)|URLError"),
-                  ("artifact-integrity", r"(?:sha256|hash|checksum|digest|size).*(?:mismatch|failed|invalid|exceeds)"),
+                  ("download-redirect", r"Untrusted release redirect"),
+                  ("download-tls", r"CERTIFICATE_VERIFY_FAILED|SSLError|TLSV1"),
+                  ("download-connection", r"Remote end closed|ConnectionResetError|ConnectionAbortedError|ConnectionRefusedError|URLError"),
+                  ("asset-size", r"Release asset exceeds its locked size|Invalid asset size"),
+                  ("asset-digest", r"Release asset digest/size mismatch|digest mismatch|hash mismatch|checksum mismatch"),
+                  ("asset-missing", r"Missing or redirected release asset"),
+                  ("archive-layout", r"Invalid SDK inventory|Invalid transport parts|Invalid helper inventory|Unexpected file in CEF package prefix|Missing required CEF payload|Non-relocatable archive"),
+                  ("release-contract", r"Invalid SDK lock|Unsupported SDK lock|Wrong source triplet|This release payload cannot be used|strict_requalification_required|requalification"),
+                  ("disk", r"Insufficient package disk space"),
                   ("patch", r"patch failed|does not apply|corrupt patch|malformed patch"),
-                  ("release-contract", r"release.*(?:lock|contract)|strict_requalification_required|requalification"),
                   ("configure", r"(?:cmake|configure).*(?:error|failed)"),
                   ("compile", r"(?:FAILED:|fatal error:|ninja: build stopped)"),
                   ("download", r"(?:download|urllib|urlopen|release asset).*(?:failed|error)"),
