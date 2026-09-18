@@ -28,11 +28,13 @@ class ContinuationAPI:
         self.assert_repo = None
 
     def get(self, path):
-        attempt = int(path.rsplit("/", 1)[1])
-        return {"repository": {"id": 1372874997}, "head_repository": {"id": 1372874997},
-                "path": ".github/workflows/build-release.yml", "head_sha": self.builder_sha,
-                "run_attempt": attempt, "event": "workflow_dispatch",
-                "status": "completed", "conclusion": "success"}
+        if "/attempts/" in path:
+            attempt = int(path.rsplit("/", 1)[1])
+            return {"repository": {"id": 1372874997}, "head_repository": {"id": 1372874997},
+                    "path": ".github/workflows/build-release.yml", "head_sha": self.builder_sha,
+                    "run_attempt": attempt, "event": "workflow_dispatch",
+                    "status": "completed", "conclusion": "failure"}
+        return {"run_attempt": 2, "status": "completed"}
 
     def artifacts(self, repo, run):
         self.assert_repo = repo
