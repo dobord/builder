@@ -53,6 +53,8 @@ jobs:
           test "$(git -C private-vcpkg rev-parse HEAD)" = "d11cde21fd7aae08297f3bd5942edc5e293c5b7a"
           test "$(git -C private-vcpkg/.full-cef rev-parse HEAD)" = "ff3ccfea536393e43fce28f650e0bd538345d23e"
           test "$(git -C private-vcpkg/.contract-builder rev-parse HEAD)" = "457fd41f39cbcff940c7af654da899d44ba5e553"
+          cmp triplets/x64-linux-static-release.cmake private-vcpkg/triplets/x64-linux-static-release.cmake
+          cmp triplets/x64-windows-static-release.cmake private-vcpkg/triplets/x64-windows-static-release.cmake
           cd private-vcpkg
           python -I -m unittest discover -s ci/cef/tests -v
           python -I -m unittest discover -s ci/cef-full/tests -v
