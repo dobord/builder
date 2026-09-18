@@ -9,11 +9,11 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
     def test_full_platform_workflow_is_exact_and_keeps_native_output_private(self):
         text = (ROOT / ".github/workflows/cef-strict-platform-qualification.yml").read_text()
         self.assertIn("repository: dobord/vcpkg", text)
-        self.assertIn("ref: c04d6056cba2ca019cdd1a3d1222f5c30f795a2b", text)
+        self.assertIn("ref: 00fd194d4b672e559804be757c253b172f674507", text)
         self.assertIn("repository: microsoft/vcpkg", text)
         self.assertIn("ref: 9e593bb18ea69cc5095e012465dcd675a822ed0d", text)
         self.assertIn("repository: dobord/cef", text)
-        self.assertIn("ref: a8ecc4717a402ca5fc31051da00386bd50591ea3", text)
+        self.assertIn("ref: befa5c26c0c608165f27ac348e892305837fd614", text)
         self.assertIn('>"$RUNNER_TEMP/cef-strict-native.log" 2>&1', text)
         self.assertNotIn("actions/cache", text)
         self.assertNotIn("upload-artifact", text)
