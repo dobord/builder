@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/vcpkg
-          ref: 9b8c4b30b943375eaca5ac177d79a26df8035ba7
+          ref: 4f12b0e731f68be7d3d28623f0e45d56951fa746
           path: private-vcpkg
           token: ${{ secrets.SOURCE_READ_TOKEN }}
           persist-credentials: false
@@ -34,7 +34,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/cef
-          ref: 37729fd2b1db127c1658098d69ab63adc70e045f
+          ref: ff3ccfea536393e43fce28f650e0bd538345d23e
           path: private-vcpkg/.full-cef
           persist-credentials: false
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
@@ -43,9 +43,9 @@ jobs:
       - name: Verify exact Windows qualification revisions
         shell: pwsh
         run: |
-          if ((git -C private-vcpkg rev-parse HEAD) -ne '9b8c4b30b943375eaca5ac177d79a26df8035ba7') { throw 'vcpkg revision mismatch' }
+          if ((git -C private-vcpkg rev-parse HEAD) -ne '4f12b0e731f68be7d3d28623f0e45d56951fa746') { throw 'vcpkg revision mismatch' }
           if ((git -C private-vcpkg/.windows-upstream rev-parse HEAD) -ne '9e593bb18ea69cc5095e012465dcd675a822ed0d') { throw 'upstream revision mismatch' }
-          if ((git -C private-vcpkg/.full-cef rev-parse HEAD) -ne '37729fd2b1db127c1658098d69ab63adc70e045f') { throw 'CEF revision mismatch' }
+          if ((git -C private-vcpkg/.full-cef rev-parse HEAD) -ne 'ff3ccfea536393e43fce28f650e0bd538345d23e') { throw 'CEF revision mismatch' }
       - name: Install pinned CMake
         run: |
           python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r build-tools.lock
