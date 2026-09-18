@@ -95,7 +95,7 @@ class StrictPublicationContractTests(unittest.TestCase):
                         "full_platform_graph_qualified": True,
                         "cef_runtime_verified": False,
                         "gpu_runtime_qualified": False,
-                        "module_count": 36,
+                        "module_count": 37,
                         "manifest_sha256": "b" * 64,
                     }, sort_keys=True, separators=(",", ":")) + "\n")
 
@@ -141,7 +141,7 @@ class StrictPublicationContractTests(unittest.TestCase):
             "full_platform_graph_qualified": True,
             "cef_runtime_verified": False,
             "gpu_runtime_qualified": False,
-            "module_count": 36,
+            "module_count": 37,
             "manifest_sha256": value["platform_closure"]["manifest_sha256"],
         }
         value["platform_closure"]["qualification_sha256"] = cef_build.platform_preflight_digest(record)
