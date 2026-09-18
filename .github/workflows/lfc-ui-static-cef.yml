@@ -18,7 +18,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/vcpkg
-          ref: c60e7b532c546e2ac882a39be0303c8ec6a60eaa
+          ref: 7dfb0fa94673df0ed792f7256ba1f1d67817f7fc
           path: private-vcpkg
           token: ${{ secrets.SOURCE_READ_TOKEN }}
           persist-credentials: false
@@ -52,7 +52,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          if ((git -C private-vcpkg rev-parse HEAD) -ne 'c60e7b532c546e2ac882a39be0303c8ec6a60eaa') { throw 'vcpkg revision mismatch' }
+          if ((git -C private-vcpkg rev-parse HEAD) -ne '7dfb0fa94673df0ed792f7256ba1f1d67817f7fc') { throw 'vcpkg revision mismatch' }
           if ((git -C private-vcpkg/.lfc-cef-upstream rev-parse HEAD) -ne '9e593bb18ea69cc5095e012465dcd675a822ed0d') { throw 'upstream revision mismatch' }
           if ((git -C private-cef rev-parse HEAD) -ne '6a36621ea5493a94d7e79dc388746bbb8829b1d2') { throw 'CEF revision mismatch' }
           if ((git -C private-lfc-ui rev-parse HEAD) -ne '85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5') { throw 'lfc-ui revision mismatch' }
@@ -62,6 +62,14 @@ jobs:
           git -C private-cef -c core.autocrlf=false archive --format=tar.gz 6a36621ea5493a94d7e79dc388746bbb8829b1d2 -o (Join-Path $downloads 'cef-static-6a36621ea5493a94d7e79dc388746bbb8829b1d2.tar.gz')
           if (-not (Test-Path (Join-Path $downloads 'lfc-ui-85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5.tar.gz'))) { throw 'lfc-ui archive missing' }
           if (-not (Test-Path (Join-Path $downloads 'cef-static-6a36621ea5493a94d7e79dc388746bbb8829b1d2.tar.gz'))) { throw 'CEF recipe archive missing' }
+      - name: Verify lfc-ui overlay patches against exact source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git -C private-lfc-ui apply --check "$env:GITHUB_WORKSPACE/private-vcpkg/ports/lfc-ui/use-installed-lockfreecoro.patch"
+          if ($LASTEXITCODE -ne 0) { throw 'LFC_UI_LOCKFREECORO_PATCH_FAILED' }
+          git -C private-lfc-ui apply --check "$env:GITHUB_WORKSPACE/private-vcpkg/ports/lfc-ui/use-installed-static-cef.patch"
+          if ($LASTEXITCODE -ne 0) { throw 'LFC_UI_STATIC_CEF_PATCH_FAILED' }
       - name: Materialize exact strict Windows CEF contract
         shell: pwsh
         run: |
@@ -98,6 +106,8 @@ jobs:
             "--x-install-root=$installed",
             '--binarysource=clear'
           )
+          & $vcpkg install 'cef-static[strict-platform]' @common *> (Join-Path $env:RUNNER_TEMP 'lfc-ui-cef-engine-install.log')
+          if ($LASTEXITCODE -ne 0) { throw 'LFC_UI_CEF_ENGINE_INSTALL_FAILED' }
           & $vcpkg install 'lfc-ui[cef]' @common *> (Join-Path $env:RUNNER_TEMP 'lfc-ui-cef-install.log')
           if ($LASTEXITCODE -ne 0) { throw 'LFC_UI_CEF_INSTALL_FAILED' }
           $export = Join-Path $env:RUNNER_TEMP 'lfc-ui-cef-export'
