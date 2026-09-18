@@ -26,6 +26,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn("preflight_reason=", text)
         self.assertIn("preflight_stage=", text)
         self.assertIn("missing_library=", text)
+        self.assertIn("runtime_module=", text)
 
     def test_production_build_accepts_trusted_large_disk_runner_labels(self):
         text=(ROOT/'.github/workflows/build-release.yml').read_text()
