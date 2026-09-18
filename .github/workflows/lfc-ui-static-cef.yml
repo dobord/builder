@@ -90,14 +90,19 @@ jobs:
           $cache = Join-Path $upstream 'downloads/cef-static-assets'
           $env:CEF_RELEASE_CACHE = $cache
           @'
-          import pathlib, sys, urllib.error
+          import os, pathlib, sys, urllib.error
           recipe = pathlib.Path("private-cef").resolve()
           sys.path.insert(0, str(recipe / "vcpkg/integration"))
           import sdk_import
           lock = sdk_import.read_json(recipe / "vcpkg/integration/release.lock.json")
-          cache = pathlib.Path(__import__("os").environ["CEF_RELEASE_CACHE"]).resolve()
+          cache = pathlib.Path(os.environ["CEF_RELEASE_CACHE"]).resolve()
+          prefix = pathlib.Path(os.environ["RUNNER_TEMP"]).resolve() / "cef-release-preflight-prefix"
           try:
-              sdk_import.obtain(lock, "x64-windows-static-release", cache)
+              directory = sdk_import.obtain(lock, "x64-windows-static-release", cache)
+              sdk_import.install_bundle(
+                  lock, "x64-windows-static-release", directory, prefix,
+                  required_profile="static-third-party",
+              )
           except urllib.error.HTTPError as error:
               print("CEF_RELEASE_PREFLIGHT_FAILURE category=http-" + str(error.code))
               raise SystemExit(1)
@@ -128,8 +133,61 @@ jobs:
               print("CEF_RELEASE_PREFLIGHT_FAILURE category=python-" + category)
               raise SystemExit(1)
           print("CEF_RELEASE_PREFLIGHT_ACQUIRED")
+          print("CEF_RELEASE_PREFLIGHT_INSTALLED")
           '@ | python -
           if ($LASTEXITCODE -ne 0) { throw 'CEF_RELEASE_PREFLIGHT_FAILED' }
+      - name: Preflight standalone CEF C++ support archive
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $prefix = Join-Path $env:RUNNER_TEMP 'cef-release-preflight-prefix'
+          $build = Join-Path $env:RUNNER_TEMP 'cef-cpp-support-preflight'
+          $log = Join-Path $env:RUNNER_TEMP 'cef-cpp-support-preflight-configure.log'
+          $args = @(
+            '-S',"$env:GITHUB_WORKSPACE/private-cef/vcpkg/ports/cef-static/cpp_support",
+            '-B',$build,
+            '-G','Visual Studio 17 2022','-A','x64',
+            '-DCEF_RECIPE_SOURCE=' + (Join-Path $env:GITHUB_WORKSPACE 'private-cef'),
+            '-DCEF_PACKAGE_PREFIX=' + $prefix
+          )
+          & cmake @args *> $log
+          if ($LASTEXITCODE -ne 0) {
+            $env:CEF_CPP_PREFLIGHT_LOG = $log
+            @'
+          import os, pathlib, re
+          text=pathlib.Path(os.environ["CEF_CPP_PREFLIGHT_LOG"]).read_text(errors="replace")[-262144:]
+          category="configure"
+          checks=(
+              ("recipe-source",r"CEF_RECIPE_SOURCE must name"),
+              ("package-prefix",r"CEF_PACKAGE_PREFIX must contain"),
+              ("compiler",r"No CMAKE_CXX_COMPILER|CXX compiler identification is unknown"),
+              ("generator",r"generator.*(?:not found|does not match|could not)"),
+          )
+          for label,pattern in checks:
+              if re.search(pattern,text,re.I):
+                  category=label
+                  break
+          print("CEF_CPP_SUPPORT_PREFLIGHT_FAILURE category=" + category)
+          '@ | python -
+            exit 1
+          }
+          $buildLog = Join-Path $env:RUNNER_TEMP 'cef-cpp-support-preflight-build.log'
+          & cmake --build $build --config Release --parallel 2 *> $buildLog
+          if ($LASTEXITCODE -ne 0) {
+            $env:CEF_CPP_PREFLIGHT_LOG = $buildLog
+            @'
+          import os, pathlib, re
+          text=pathlib.Path(os.environ["CEF_CPP_PREFLIGHT_LOG"]).read_text(errors="replace")[-262144:]
+          category="compile"
+          if re.search(r"cannot open include file|No such file or directory",text,re.I):
+              category="missing-header"
+          elif re.search(r"unresolved external symbol|undefined reference",text,re.I):
+              category="link"
+          print("CEF_CPP_SUPPORT_PREFLIGHT_FAILURE category=" + category)
+          '@ | python -
+            exit 1
+          }
+          Write-Host 'CEF_CPP_SUPPORT_PREFLIGHT_QUALIFIED'
       - name: Install and export lfc-ui cef feature
         shell: pwsh
         run: |
