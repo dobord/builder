@@ -8,11 +8,17 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import re
 import shutil
+import stat
 import subprocess
 import sys
+import tempfile
+import zipfile
 
-from . import cef_cache, cef_contract, crypto
+from . import cef_cache, cef_contract, crypto, safeio
+from .github import Client
+from .protocol import BUILDER, check_run
 
 VCPKG = "fb0c27ec25ae3d9f297edb8bcd5a36378e38ce2e"
 UPSTREAM = "9e593bb18ea69cc5095e012465dcd675a822ed0d"
@@ -47,6 +53,107 @@ def output(name: str, value: bool) -> None:
     if target:
         with open(target, "a", encoding="utf-8") as stream:
             stream.write(f"{name}={str(value).lower()}\n")
+
+
+def qualification_lock(workspace: Path) -> dict:
+    path = workspace / "ci/cef-strict-engine-lock.json"
+    value = json.loads(path.read_text())
+    if (not isinstance(value, dict)
+            or set(value) != {"schema", "platform", "vcpkg_commit", "upstream_commit",
+                              "cef_recipe_commit", "checkpoint"}
+            or value["schema"] != 1 or value["platform"] != "linux"
+            or value["vcpkg_commit"] != VCPKG or value["upstream_commit"] != UPSTREAM
+            or value["cef_recipe_commit"] != CEF):
+        raise ValueError("Invalid strict CEF qualification lock")
+    selected = value["checkpoint"]
+    if selected is not None:
+        if (not isinstance(selected, dict)
+                or set(selected) != {"run", "attempt", "producer_sha",
+                                     "artifact_id", "artifact_sha256"}
+                or type(selected["run"]) is not int or selected["run"] < 1
+                or type(selected["attempt"]) is not int or selected["attempt"] < 1
+                or type(selected["artifact_id"]) is not int or selected["artifact_id"] < 1
+                or not re.fullmatch(r"[0-9a-f]{40}", selected["producer_sha"])
+                or not re.fullmatch(r"[0-9a-f]{64}", selected["artifact_sha256"])):
+            raise ValueError("Invalid strict CEF qualification checkpoint selector")
+    return value
+
+
+def restore_checkpoint(selected: dict, destination: Path, build_key: str,
+                       private_key: str) -> dict:
+    api = Client(os.environ["GITHUB_TOKEN"])
+    run, attempt, revision = (
+        selected["run"], selected["attempt"], selected["producer_sha"]
+    )
+    producer = api.get(f"/repos/{BUILDER}/actions/runs/{run}/attempts/{attempt}")
+    check_run(
+        producer, BUILDER, "cef-strict-engine-iteration.yml", revision,
+        attempt, "push", success=False
+    )
+    if producer.get("status") != "completed":
+        raise ValueError("Strict CEF checkpoint producer is still running")
+    current = api.get(f"/repos/{BUILDER}/actions/runs/{run}")
+    if (current.get("run_attempt") != attempt or current.get("status") != "completed"
+            or current.get("head_sha") != revision):
+        raise ValueError("Strict CEF checkpoint producer changed or was rerun")
+    expected_name = f"cef-strict-checkpoint-linux-{run}-{attempt}"
+    matches = [
+        item for item in api.artifacts(BUILDER, run)
+        if item.get("id") == selected["artifact_id"]
+    ]
+    if len(matches) != 1:
+        raise ValueError("Selected strict CEF checkpoint artifact is missing")
+    artifact = matches[0]
+    if (artifact.get("name") != expected_name or artifact.get("expired") is not False
+            or artifact.get("digest") != "sha256:" + selected["artifact_sha256"]
+            or artifact.get("workflow_run", {}).get("id") != run
+            or artifact.get("workflow_run", {}).get("head_sha") != revision):
+        raise ValueError("Strict CEF checkpoint artifact provenance mismatch")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(
+            prefix=".strict-cef-fetch-", dir=destination.parent) as folder:
+        root = Path(folder)
+        archive = root / "artifact.zip"
+        api.download(
+            f"/repos/{BUILDER}/actions/artifacts/{artifact['id']}/zip",
+            archive, selected["artifact_sha256"], max_size=cef_cache.MAX_TOTAL
+        )
+        encrypted = root / "ciphertext"
+        encrypted.mkdir()
+        with zipfile.ZipFile(archive) as stream:
+            infos = stream.infolist()
+            if not 0 < len(infos) <= cef_cache.MAX_ENTRIES + 1:
+                raise ValueError("Invalid strict CEF encrypted checkpoint transport")
+            seen = set()
+            total = 0
+            for info in infos:
+                name = info.filename
+                if (not re.fullmatch(r"(?:index|part[0-9]{6})\.enc", name)
+                        or name in seen or info.is_dir() or info.flag_bits & 1
+                        or stat.S_IFMT(info.external_attr >> 16) not in (0, stat.S_IFREG)):
+                    raise ValueError("Unsafe strict CEF encrypted checkpoint member")
+                seen.add(name)
+                total += info.file_size
+                if total > cef_cache.MAX_TOTAL:
+                    raise ValueError("Strict CEF encrypted checkpoint exceeds limit")
+            if shutil.disk_usage(root).free <= total + 1024**3:
+                raise ValueError("Insufficient space for strict CEF checkpoint transport")
+            for info in infos:
+                target = encrypted / info.filename
+                with stream.open(info) as source, target.open("xb") as output_stream:
+                    shutil.copyfileobj(source, output_stream, 1024 * 1024)
+        result = cef_cache.unseal(
+            encrypted, destination, private_key,
+            cef_cache.context(
+                "cef-checkpoint", "linux", build_key, run, attempt, revision, "index"
+            )
+        )
+    stable = api.get(f"/repos/{BUILDER}/actions/runs/{run}")
+    if (stable.get("run_attempt") != attempt or stable.get("status") != "completed"
+            or stable.get("head_sha") != revision):
+        shutil.rmtree(destination, ignore_errors=True)
+        raise ValueError("Strict CEF checkpoint producer changed during restore")
+    return result
 
 
 def main() -> None:
@@ -121,19 +228,57 @@ def main() -> None:
         summary["platform_sha256"] = platform_sha
         summary["platform_graph_qualified"] = True
 
-        engine_work.mkdir()
-        shutil.move(str(platform_work / "frozen-target-prefix"), engine_work / "target-prefix")
-        shutil.copy2(evidence / "platform-build-inputs.json", engine_work / "platform-inputs.json")
-        shutil.rmtree(platform_work)
-        # The frozen prefix is now the only target dependency input Chromium needs.
-        for path in (upstream / "buildtrees", upstream / "packages", upstream / "downloads"):
-            if path.exists():
-                shutil.rmtree(path)
-
         plan = json.loads((registry / "ci/release-plan.json").read_text())
         cfg = plan["cef"]
         build_key = cef_contract.build_key(cfg, "linux", platform_sha)
         summary["build_key"] = build_key
+        lock = qualification_lock(workspace)
+        selected = lock["checkpoint"]
+        if selected is None:
+            engine_work.mkdir()
+            shutil.move(
+                str(platform_work / "frozen-target-prefix"),
+                engine_work / "target-prefix"
+            )
+            shutil.copy2(
+                evidence / "platform-build-inputs.json",
+                engine_work / "platform-inputs.json"
+            )
+            summary["mode"] = "source-fresh"
+        else:
+            # The fresh prefix already proved the exact content hash. The
+            # checkpoint carries the same target files and clocks used by Ninja.
+            shutil.rmtree(platform_work)
+            restored_package = temp / "cef-strict-restored-checkpoint"
+            restore_checkpoint(
+                selected, restored_package, build_key,
+                os.environ["BUILDER_INPUT_PRIVATE_KEY"]
+            )
+            restore_state = temp / "cef-strict-restore.json"
+            recipe_env_restore = dict(clean_env)
+            recipe_env_restore["GITHUB_SHA"] = CEF
+            run(
+                [sys.executable, recipe / "vcpkg/integration/driver.py", "restore",
+                 "--work", engine_work, "--logs", engine_logs,
+                 "--contract", build_key, "--state", restore_state,
+                 "--checkpoint", restored_package,
+                 "--platform-manifest", engine_work / "platform-inputs.json",
+                 "--platform-prefix", engine_work / "target-prefix",
+                 "--platform-sha256", platform_sha],
+                cwd=recipe, env=recipe_env_restore,
+                log=temp / "cef-checkpoint-restore.log", timeout=7200
+            )
+            shutil.rmtree(restored_package)
+            summary["mode"] = "source-resume"
+            summary["restored_from_run"] = selected["run"]
+            summary["restored_from_attempt"] = selected["attempt"]
+        if platform_work.exists():
+            shutil.rmtree(platform_work)
+        # The frozen/restored prefix is now the only target dependency input
+        # Chromium needs; discard transient vcpkg producer state before sync.
+        for path in (upstream / "buildtrees", upstream / "packages", upstream / "downloads"):
+            if path.exists():
+                shutil.rmtree(path)
 
         recipe_env = dict(clean_env)
         # The CEF integration receipt records the reviewed recipe revision, while
