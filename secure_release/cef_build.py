@@ -171,7 +171,8 @@ def run_engine(root: Path, cfg: dict, platform: str, execute, environment: dict,
     return True
 
 
-def verify_consumer(root: Path, cfg: dict, platform: str, execute) -> dict:
+def verify_consumer(root: Path, cfg: dict, platform: str, execute,
+                    platform_sha256: str | None = None) -> dict:
     """Run a NEW relocated combined consumer; upstream receipts are provenance only."""
     recipe = root / "cef-recipe"
     name = "cef_static_combined_smoke" + (".exe" if platform == "windows" else "")
@@ -196,7 +197,7 @@ def verify_consumer(root: Path, cfg: dict, platform: str, execute) -> dict:
     state = logs / "consumer.json"
     command = [sys.executable, str(recipe / "vcpkg/integration/driver.py"), "verify-consumer",
                "--work", str(root / "cef-work"), "--logs", str(logs),
-               "--contract", cef_contract.build_key(cfg, platform), "--state", str(state),
+               "--contract", cef_contract.build_key(cfg, platform, platform_sha256), "--state", str(state),
                "--executable", str(deployed / name)]
     for folder in (root / "installed", root / "consumer-sdk", root / "cef-work",
                    root / "export/sdk", root / "smoke-build"):
@@ -204,30 +205,64 @@ def verify_consumer(root: Path, cfg: dict, platform: str, execute) -> dict:
             command.extend(["--hide", str(folder)])
     execute(command, stage="consumer-test", timeout=900, cwd=recipe)
     proof = crypto.parse(state.read_bytes())
-    validate_evidence(proof, cfg, platform)
+    if cfg["profile"] == "static-third-party":
+        if platform == "linux":
+            inventory = root / "consumer-sdk" / "installed" / cef_contract.TRIPLETS[platform] / "share/cef-static/static-platform-inventory.json"
+            if not inventory.is_file() or inventory.is_symlink():
+                raise ValueError("Strict Linux SDK is missing the exported platform inventory")
+            value = crypto.parse(inventory.read_bytes())
+            if (value.get("schema") != 1 or value.get("kind") != "external-vcpkg-archives"
+                    or value.get("manifest_sha256") != platform_sha256
+                    or not isinstance(value.get("archives"), list) or not value["archives"]):
+                raise ValueError("Strict Linux platform inventory does not match the build contract")
+            proof["platform_closure"] = {"kind": "linux-frozen-vcpkg",
+                                         "manifest_sha256": platform_sha256,
+                                         "inventory_sha256": crypto.digest(inventory),
+                                         "archive_count": len(value["archives"])}
+        else:
+            proof["platform_closure"] = {"kind": "windows-native-os-abi", "manifest_sha256": None}
     # The final ZIP (not the pre-export installed tree) is the audit input.
     # Detailed paths stay in encrypted diagnostics. A clean structural audit
     # does not upgrade the engine-only runtime profile.
     report = static_audit.inspect_sdk(root / "sdk.zip", platform)
     (logs / "target-archive-audit.json").write_bytes(crypto.canonical(report))
     proof["target_archive_audit"] = static_audit.summarize(report)
+    validate_evidence(proof, cfg, platform)
     return proof
 
 
 def validate_evidence(proof: dict, cfg: dict, platform: str) -> None:
     """Used by both the build driver and independent private publisher."""
     cef_contract.validate(cfg)
-    if cfg["profile"] != "engine-static":
-        raise ValueError("A strict profile needs a separately qualified platform closure")
+    strict = cfg["profile"] == "static-third-party"
     if (proof.get("schema") != 1 or proof.get("kind") != "consumer-verification"
             or proof.get("engine_linkage") != "static" or proof.get("capi_only") is not True
             or proof.get("system_libraries_static") is not False or proof.get("sandbox_verified") is not False):
         raise ValueError("Invalid CEF consumer evidence")
+    if strict:
+        if proof.get("third_party_libraries_static") is not True:
+            raise ValueError("Strict CEF consumer did not prove static third-party runtime linkage")
+        closure = proof.get("platform_closure", {})
+        if platform == "linux":
+            if (closure.get("kind") != "linux-frozen-vcpkg"
+                    or not isinstance(closure.get("archive_count"), int) or closure["archive_count"] < 1
+                    or not isinstance(closure.get("manifest_sha256"), str)
+                    or not isinstance(closure.get("inventory_sha256"), str)):
+                raise ValueError("Strict Linux CEF platform closure evidence is incomplete")
+        elif closure != {"kind": "windows-native-os-abi", "manifest_sha256": None}:
+            raise ValueError("Strict Windows CEF platform closure evidence is incomplete")
+    elif proof.get("third_party_libraries_static") not in (None, False):
+        raise ValueError("Engine-only proof cannot claim strict third-party linkage")
+    audit = proof.get("target_archive_audit", {})
+    if (audit.get("kind") != "target-archive-audit-summary" or audit.get("target_archives_static") is not True
+            or audit.get("violation_count") != 0):
+        raise ValueError("Final SDK archive audit is incomplete")
     sha256 = cef_contract.digest(proof.get("executable_sha256"))
     smoke = proof.get("smoke", {})
     if (smoke.get("cef") != "152.0.6+g708dc14+chromium-152.0.7977.83"
             or smoke.get("engine") != "static" or smoke.get("interface") != "capi"
-            or not all(smoke.get(field) is True for field in ("javascript", "paint", "browser_modules_clean", "renderer_modules_clean"))):
+            or not all(smoke.get(field) is True for field in ("javascript", "paint", "browser_modules_clean", "renderer_modules_clean"))
+            or (strict and smoke.get("third_party_modules_static") is not True)):
         raise ValueError("CEF runtime validation is incomplete")
     browser, renderer = smoke.get("browser_pid"), smoke.get("renderer_pid")
     if type(browser) is not int or type(renderer) is not int or min(browser, renderer) < 1 or browser == renderer:
