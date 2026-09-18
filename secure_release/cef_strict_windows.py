@@ -17,7 +17,7 @@ import zipfile
 
 from . import build_support, cef_build, cef_contract, crypto, static_audit
 
-VCPKG = "324c4c677119df4f4d4b8beced7ef4623afc2512"
+VCPKG = "c60e7b532c546e2ac882a39be0303c8ec6a60eaa"
 UPSTREAM = "9e593bb18ea69cc5095e012465dcd675a822ed0d"
 CEF = "6a36621ea5493a94d7e79dc388746bbb8829b1d2"
 TRIPLET = "x64-windows-static-release"
