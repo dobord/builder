@@ -231,6 +231,21 @@ def verify_consumer(root: Path, cfg: dict, platform: str, execute,
     return proof
 
 
+
+def qualified_contract(proof: dict, cfg: dict, platform: str) -> tuple[str, dict]:
+    """Bind publication to the exact strict Linux frozen-prefix digest.
+
+    Runtime evidence is validated before its closure digest is trusted. Windows
+    and engine-static builds deliberately carry no external platform digest.
+    """
+    validate_evidence(proof, cfg, platform)
+    platform_sha256 = None
+    if cfg["profile"] == "static-third-party" and platform == "linux":
+        platform_sha256 = cef_contract.digest(proof["platform_closure"]["manifest_sha256"])
+    return (cef_contract.build_key(cfg, platform, platform_sha256),
+            cef_contract.port_contract(cfg, platform, platform_sha256))
+
+
 def validate_evidence(proof: dict, cfg: dict, platform: str) -> None:
     """Used by both the build driver and independent private publisher."""
     cef_contract.validate(cfg)
