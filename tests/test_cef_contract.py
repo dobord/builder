@@ -101,7 +101,7 @@ class ContractTests(unittest.TestCase):
         self.assertNotEqual(strict_a, strict_b)
         self.assertNotEqual(strict_a, original)
 
-    def test_strict_profile_linux_is_source_only_but_windows_may_requalify_release(self):
+    def test_strict_profile_requires_source_builds_on_both_platforms(self):
         cfg = config()
         cfg["profile"] = "static-third-party"
         contract.validate(cfg)
@@ -110,36 +110,25 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(
             contract.port_contract(cfg, "linux", "a" * 64)["platform_sha256"],
             "a" * 64)
-        self.assertIsNone(contract.port_contract(cfg, "windows")["platform_sha256"])
-
-        cfg["platforms"]["windows"]["mode"] = "release-import"
-        cfg["release_lock"] = release_lock()
-        contract.validate(cfg)
         windows = contract.port_contract(cfg, "windows")
-        self.assertEqual(windows["mode"], "release-import")
-        self.assertEqual(windows["release_lock"], cfg["release_lock"])
-        linux = contract.port_contract(cfg, "linux", "a" * 64)
-        self.assertEqual(linux["mode"], "source")
-        self.assertIsNone(linux["release_lock"])
+        self.assertEqual(windows["mode"], "source")
+        self.assertIsNone(windows["platform_sha256"])
+        self.assertIsNone(windows["release_lock"])
 
-        bad = copy.deepcopy(cfg)
-        bad["platforms"]["linux"]["mode"] = "release-import"
-        bad["platforms"]["linux"]["checkpoint"] = None
-        with self.assertRaises(ValueError):
-            contract.validate(bad)
+        for platform in ("linux", "windows"):
+            bad = copy.deepcopy(cfg)
+            bad["platforms"][platform]["mode"] = "release-import"
+            bad["release_lock"] = release_lock()
+            with self.subTest(platform=platform), self.assertRaises(ValueError):
+                contract.validate(bad)
 
-    def test_strict_windows_release_import_is_marked_for_new_runtime_audit(self):
+    def test_strict_windows_release_import_is_rejected(self):
         cfg = config()
         cfg["profile"] = "static-third-party"
         cfg["platforms"]["windows"]["mode"] = "release-import"
         cfg["release_lock"] = release_lock()
-        environment = {}
-        with patch.object(cef_build, "materialize", return_value="f" * 64) as materialize:
-            self.assertTrue(cef_build.run_engine(
-                Path("/synthetic"), cfg, "windows", None, environment,
-                "private", "c" * 40, None))
-        materialize.assert_called_once()
-        self.assertEqual(environment["CEF_STATIC_STRICT_THIRD_PARTY"], "1")
+        with self.assertRaises(ValueError):
+            contract.validate(cfg)
 
     def test_explicit_resume_only(self):
         cfg = config()
