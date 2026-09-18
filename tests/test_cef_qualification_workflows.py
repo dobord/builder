@@ -36,6 +36,8 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         worker=(ROOT/'secure_release/cef_strict_iteration.py').read_text()
         self.assertIn('ref: 6746bb33a98f92e43a931069bb5e2ee8e2db5b02',workflow)
         self.assertIn('run: python -m secure_release.cef_strict_iteration',workflow)
+        self.assertIn('- secure_release/cef_strict_iteration.py',workflow)
+        self.assertIn('- ci/cef-strict-engine-lock.json',workflow)
         self.assertIn('Restore reviewed completed-package caches by exact artifact digest',workflow)
         self.assertIn('gh api "repos/dobord/vcpkg/actions/artifacts/$id/zip"',workflow)
         self.assertIn('sha256sum -c -',workflow)
