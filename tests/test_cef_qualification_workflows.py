@@ -118,6 +118,26 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn('process.send_signal(signal.SIGTERM)',worker)
         self.assertIn('lfc_ui_freerdp_proxy_listener_verified',worker)
 
+    def test_windows_engine_iteration_is_dormant_encrypted_and_exact(self):
+        workflow = (ROOT / ".github/workflows/cef-windows-engine-iteration.yml").read_text()
+        worker = (ROOT / "secure_release/cef_windows_iteration.py").read_text()
+        self.assertIn("workflow_dispatch:", workflow)
+        self.assertIn("- ci/cef-windows-engine-lock.json", workflow)
+        self.assertNotIn("- secure_release/cef_windows_iteration.py", workflow)
+        self.assertIn("ref: d5f62138a9b45c71fb407a48edb0b4cefd5affe6", workflow)
+        self.assertIn("ref: 37efc4f9f340992d50d6f3fa41f617c9013fa26b", workflow)
+        self.assertIn("cef-windows-engine-checkpoint-encrypted/*.enc", workflow)
+        self.assertNotIn("cef-windows-engine-work/**", workflow)
+        self.assertIn('VCPKG = "d5f62138a9b45c71fb407a48edb0b4cefd5affe6"', worker)
+        self.assertIn('CEF = "37efc4f9f340992d50d6f3fa41f617c9013fa26b"', worker)
+        self.assertIn('"cef-checkpoint", "windows"', worker)
+        self.assertIn("cef_cache.seal(", worker)
+        self.assertIn("cef_cache.unseal(", worker)
+        self.assertIn('"slice"', worker)
+        self.assertIn('"restore"', worker)
+        self.assertIn("check_run(", worker)
+        self.assertIn("runtime_verified", worker)
+
     def test_windows_msvc_stl_full_source_gate_builds_lfc_ui_example(self):
         text = (ROOT / ".github/workflows/cef-windows-source-msvc-stl.yml").read_text()
         self.assertIn("ref: 37efc4f9f340992d50d6f3fa41f617c9013fa26b", text)
