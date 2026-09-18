@@ -34,6 +34,13 @@ jobs:
           ref: dee44a002606796afc3837ccca7120f62898691d
           path: private-vcpkg/.contract-builder
           persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: dobord/vcpkg-bin
+          ref: b65ae0f43200ededcaa37acd824fff31b1c86cc9
+          path: publisher
+          token: ${{ secrets.SOURCE_READ_TOKEN }}
+          persist-credentials: false
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
         with:
           python-version: '3.12'
@@ -51,3 +58,12 @@ jobs:
           python -I -m unittest discover -s ci/cef/tests -v
           python -I -m unittest discover -s ci/cef-full/tests -v
           python -m py_compile ci/cef-full/verify_prefix.py ci/cef-full/native.py ci/cef-full/gn_check.py
+      - name: Verify exact publisher revision and publication policy contracts
+        working-directory: publisher
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "b65ae0f43200ededcaa37acd824fff31b1c86cc9"
+          python -m unittest discover -s ci/tests -v
