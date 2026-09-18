@@ -181,6 +181,25 @@ def main() -> None:
                 archive.write(path, "installed/" + TRIPLET + "/" + path.relative_to(prefix).as_posix())
     audit = static_audit.inspect_sdk(sdk_zip, "windows")
     proof["target_archive_audit"] = static_audit.summarize(audit)
+    if audit["violations"]:
+        diagnostic = {
+            "schema": 1,
+            "status": "failed",
+            "kind": "cef-strict-windows-release-requalification",
+            "vcpkg_commit": VCPKG,
+            "upstream_commit": UPSTREAM,
+            "cef_recipe_commit": CEF,
+            "failure_stage": "archive-audit",
+            "failure_type": "ValueError",
+            "target_archive_audit": proof["target_archive_audit"],
+            "violations": [
+                {"path": item["path"], "reason": item["reason"]}
+                for item in audit["violations"][:16]
+            ],
+        }
+        (temp / "cef-strict-windows-summary.json").write_text(
+            json.dumps(diagnostic, sort_keys=True, indent=2) + "\n", encoding="utf-8"
+        )
     cef_build.validate_evidence(proof, cfg, "windows")
 
     summary = {
@@ -217,7 +236,15 @@ if __name__ == "__main__":
         main()
     except BaseException as error:
         temp = Path(os.environ.get("RUNNER_TEMP", ".")).resolve()
-        summary = {
+        path = temp / "cef-strict-windows-summary.json"
+        if path.is_file():
+            try:
+                summary = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError, TypeError):
+                summary = {}
+        else:
+            summary = {}
+        summary.update({
             "schema": 1,
             "status": "failed",
             "kind": "cef-strict-windows-release-requalification",
@@ -225,11 +252,11 @@ if __name__ == "__main__":
             "upstream_commit": UPSTREAM,
             "cef_recipe_commit": CEF,
             "failure_type": type(error).__name__,
-        }
+        })
         message = str(error)
         match = re.search(r"failed at ([A-Za-z0-9_.-]+)\Z", message)
         summary["failure_stage"] = match.group(1) if match else "validation"
-        (temp / "cef-strict-windows-summary.json").write_text(
+        path.write_text(
             json.dumps(summary, sort_keys=True, indent=2) + "\n", encoding="utf-8"
         )
         raise
