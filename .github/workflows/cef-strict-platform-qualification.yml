@@ -82,7 +82,39 @@ jobs:
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/cef-strict-evidence"
           python -I -m unittest discover -s ci/cef-full/tests -v >"$RUNNER_TEMP/cef-strict-contract.log" 2>&1
+          set +e
           python ci/cef-full/native.py             --root .             --work "$RUNNER_TEMP/cef-strict-work"             --evidence "$RUNNER_TEMP/cef-strict-evidence"             --binary-cache "$RUNNER_TEMP/cef-cache/core"             --binary-cache "$RUNNER_TEMP/cef-cache/cups"             --binary-cache "$RUNNER_TEMP/cef-cache/gbm"             >"$RUNNER_TEMP/cef-strict-native.log" 2>&1
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ]; then
+            python - <<'PY'
+          import json, os, pathlib, re
+          root = pathlib.Path(os.environ["RUNNER_TEMP"]) / "cef-strict-evidence"
+          report = json.loads((root / "native-full.json").read_text())
+          logs = sorted(root.glob("[0-9][0-9]-command.log"))
+          command = logs[-1].stem.split("-", 1)[0] if logs else "unknown"
+          package = "unknown"
+          if logs:
+              text = logs[-1].read_text(errors="replace")
+              patterns = (
+                  r"error: building ([a-z0-9][a-z0-9+_.-]*):",
+                  r"BUILD_FAILED[^\n]*?([a-z0-9][a-z0-9+_.-]+):x64-linux-static-release",
+                  r"([a-z0-9][a-z0-9+_.-]+):x64-linux-static-release failed",
+              )
+              for pattern in patterns:
+                  match = re.search(pattern, text, re.I)
+                  if match:
+                      package = match.group(1).lower()
+                      break
+          error_type = report.get("error_type", "unknown")
+          if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_.]*", str(error_type)):
+              error_type = "unknown"
+          if not re.fullmatch(r"[a-z0-9][a-z0-9+_.-]*|unknown", package):
+              package = "unknown"
+          print(f"CEF_PLATFORM_NATIVE_FAILURE command={command} error_type={error_type} package={package}")
+          PY
+            exit "$rc"
+          fi
           python -c 'import json,os,pathlib; v=json.loads((pathlib.Path(os.environ["RUNNER_TEMP"])/"cef-strict-evidence/native-full.json").read_text()); assert v.get("status")=="success" and v.get("full_platform_graph_qualified") is True and v.get("module_count")==37; print("STRICT_CEF_FULL_PLATFORM_QUALIFIED")'
       - name: Generate and audit real Chromium GN graph against frozen prefix
         shell: bash
