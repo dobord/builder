@@ -6,7 +6,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 SNAPSHOT = ROOT / "tests/vcpkg_bin_snapshot"
-EXPECTED_COMMIT = "f04718eae6ce124741994d0920e46ce0a3ec33ad"
+EXPECTED_COMMIT = "e407d6b853d908b659bea8565f8a607ce5ff637d"
 
 
 def committed_blob_sha(relative: str) -> str:
@@ -57,7 +57,7 @@ class PublisherSnapshotTests(unittest.TestCase):
         policy = json.loads((SNAPSHOT / "cef-policy.json").read_text())
         self.assertEqual(policy["schema"], 1)
         self.assertEqual(policy["required_profile"], "static-third-party")
-        self.assertEqual(policy["admitted_contracts"], {"linux": [], "windows": []})
+        self.assertEqual(policy["admitted_contracts"], {"linux": [], "windows": ["3dbe67fc128a861af4daf42e12f10a6a6d05e718d931df30152a519e24c3c530"]})
 
 
 if __name__ == "__main__":

@@ -68,7 +68,7 @@ jobs:
       - name: Verify content-addressed publisher policy snapshot
         env:
           PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/tests/vcpkg_bin_snapshot
-          PUBLISHER_POLICY_COMMIT: f04718eae6ce124741994d0920e46ce0a3ec33ad
+          PUBLISHER_POLICY_COMMIT: e407d6b853d908b659bea8565f8a607ce5ff637d
         shell: bash
         run: |
           set -euo pipefail
