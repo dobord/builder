@@ -69,19 +69,69 @@ def qualification_lock(workspace: Path) -> dict:
     if selected is not None:
         if (not isinstance(selected, dict)
                 or set(selected) != {"run", "attempt", "producer_sha",
-                                     "artifact_id", "artifact_sha256"}
+                                     "artifact_id", "artifact_sha256",
+                                     "summary_artifact_id", "summary_artifact_sha256",
+                                     "build_key", "platform_sha256"}
                 or type(selected["run"]) is not int or selected["run"] < 1
                 or type(selected["attempt"]) is not int or selected["attempt"] < 1
                 or type(selected["artifact_id"]) is not int or selected["artifact_id"] < 1
+                or type(selected["summary_artifact_id"]) is not int
+                or selected["summary_artifact_id"] < 1
                 or not re.fullmatch(r"[0-9a-f]{40}", selected["producer_sha"])
-                or not re.fullmatch(r"[0-9a-f]{64}", selected["artifact_sha256"])):
+                or not re.fullmatch(r"[0-9a-f]{64}", selected["artifact_sha256"])
+                or not re.fullmatch(r"[0-9a-f]{64}", selected["summary_artifact_sha256"])
+                or not re.fullmatch(r"[0-9a-f]{64}", selected["build_key"])
+                or not re.fullmatch(r"[0-9a-f]{64}", selected["platform_sha256"])):
             raise ValueError("Invalid strict CEF qualification checkpoint selector")
+    return value
+
+
+def verify_producer_summary(api: Client, selected: dict) -> dict:
+    run, revision = selected["run"], selected["producer_sha"]
+    expected = f"cef-strict-iteration-summary-{run}-{selected['attempt']}"
+    matches = [
+        item for item in api.artifacts(BUILDER, run)
+        if item.get("id") == selected["summary_artifact_id"]
+    ]
+    if len(matches) != 1:
+        raise ValueError("Selected strict CEF summary artifact is missing")
+    artifact = matches[0]
+    if (artifact.get("name") != expected or artifact.get("expired") is not False
+            or artifact.get("digest") != "sha256:" + selected["summary_artifact_sha256"]
+            or artifact.get("workflow_run", {}).get("id") != run
+            or artifact.get("workflow_run", {}).get("head_sha") != revision):
+        raise ValueError("Strict CEF summary artifact provenance mismatch")
+    with tempfile.TemporaryDirectory(prefix=".strict-cef-summary-") as folder:
+        root = Path(folder)
+        archive = root / "summary.zip"
+        api.download(
+            f"/repos/{BUILDER}/actions/artifacts/{artifact['id']}/zip",
+            archive, selected["summary_artifact_sha256"], max_size=4 * 1024**2
+        )
+        extracted = root / "payload"
+        safeio.extract_zip(archive, extracted)
+        files = [path for path in extracted.rglob("*") if path.is_file()]
+        if len(files) != 1 or files[0].name != "cef-strict-iteration-summary.json":
+            raise ValueError("Unexpected strict CEF summary artifact members")
+        value = crypto.parse(files[0].read_bytes())
+    if (not isinstance(value, dict) or value.get("schema") != 1
+            or value.get("status") != "success"
+            or value.get("checkpoint_ready") is not True
+            or value.get("platform_graph_qualified") is not True
+            or value.get("build_key") != selected["build_key"]
+            or value.get("platform_sha256") != selected["platform_sha256"]
+            or value.get("vcpkg_commit") != VCPKG
+            or value.get("cef_recipe_commit") != CEF):
+        raise ValueError("Strict CEF producer summary does not qualify the selected checkpoint")
     return value
 
 
 def restore_checkpoint(selected: dict, destination: Path, build_key: str,
                        private_key: str) -> dict:
     api = Client(os.environ["GITHUB_TOKEN"])
+    verify_producer_summary(api, selected)
+    if build_key != selected["build_key"]:
+        raise ValueError("Strict CEF checkpoint build key differs from producer summary")
     run, attempt, revision = (
         selected["run"], selected["attempt"], selected["producer_sha"]
     )
@@ -206,35 +256,31 @@ def main() -> None:
             cwd=registry, env=contract_env,
             log=temp / "cef-strict-contract.log", timeout=300
         )
-        run(
-            [sys.executable, "ci/cef-full/native.py", "--root", ".",
-             "--work", platform_work, "--evidence", evidence],
-            cwd=registry, env=clean_env,
-            log=temp / "cef-platform-native.log", timeout=10800
-        )
-        platform_receipt = json.loads((evidence / "native-full.json").read_text())
-        required = {
-            "schema": 1,
-            "kind": "cef-static-platform-preflight",
-            "status": "success",
-            "full_platform_graph_qualified": True,
-            "cef_runtime_verified": False,
-            "gpu_runtime_qualified": False,
-            "module_count": 36,
-        }
-        if any(platform_receipt.get(key) != value for key, value in required.items()):
-            raise RuntimeError("Complete static platform graph is not qualified")
-        platform_sha = cef_contract.digest(platform_receipt.get("manifest_sha256"))
-        summary["platform_sha256"] = platform_sha
-        summary["platform_graph_qualified"] = True
-
         plan = json.loads((registry / "ci/release-plan.json").read_text())
         cfg = plan["cef"]
-        build_key = cef_contract.build_key(cfg, "linux", platform_sha)
-        summary["build_key"] = build_key
         lock = qualification_lock(workspace)
         selected = lock["checkpoint"]
         if selected is None:
+            run(
+                [sys.executable, "ci/cef-full/native.py", "--root", ".",
+                 "--work", platform_work, "--evidence", evidence],
+                cwd=registry, env=clean_env,
+                log=temp / "cef-platform-native.log", timeout=10800
+            )
+            platform_receipt = json.loads((evidence / "native-full.json").read_text())
+            required = {
+                "schema": 1,
+                "kind": "cef-static-platform-preflight",
+                "status": "success",
+                "full_platform_graph_qualified": True,
+                "cef_runtime_verified": False,
+                "gpu_runtime_qualified": False,
+                "module_count": 36,
+            }
+            if any(platform_receipt.get(key) != value for key, value in required.items()):
+                raise RuntimeError("Complete static platform graph is not qualified")
+            platform_sha = cef_contract.digest(platform_receipt.get("manifest_sha256"))
+            build_key = cef_contract.build_key(cfg, "linux", platform_sha)
             engine_work.mkdir()
             shutil.move(
                 str(platform_work / "frozen-target-prefix"),
@@ -244,11 +290,14 @@ def main() -> None:
                 evidence / "platform-build-inputs.json",
                 engine_work / "platform-inputs.json"
             )
-            summary["mode"] = "source-fresh"
-        else:
-            # The fresh prefix already proved the exact content hash. The
-            # checkpoint carries the same target files and clocks used by Ninja.
             shutil.rmtree(platform_work)
+            summary["mode"] = "source-fresh"
+            summary["platform_graph_qualified"] = True
+        else:
+            platform_sha = cef_contract.digest(selected["platform_sha256"])
+            build_key = cef_contract.digest(selected["build_key"])
+            if cef_contract.build_key(cfg, "linux", platform_sha) != build_key:
+                raise ValueError("Locked strict CEF build key no longer matches the signed plan")
             restored_package = temp / "cef-strict-restored-checkpoint"
             restore_checkpoint(
                 selected, restored_package, build_key,
@@ -272,10 +321,11 @@ def main() -> None:
             summary["mode"] = "source-resume"
             summary["restored_from_run"] = selected["run"]
             summary["restored_from_attempt"] = selected["attempt"]
-        if platform_work.exists():
-            shutil.rmtree(platform_work)
-        # The frozen/restored prefix is now the only target dependency input
-        # Chromium needs; discard transient vcpkg producer state before sync.
+            summary["platform_graph_qualified"] = True
+        summary["platform_sha256"] = platform_sha
+        summary["build_key"] = build_key
+        # A fresh qualification may have transient vcpkg producer state; a
+        # resume does not need any package rebuild at all.
         for path in (upstream / "buildtrees", upstream / "packages", upstream / "downloads"):
             if path.exists():
                 shutil.rmtree(path)
