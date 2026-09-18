@@ -20,6 +20,32 @@ def selection():
     return {"run": 12, "attempt": 1, "artifact_id": 456, "artifact_sha256": "d" * 64}
 
 
+def release_lock():
+    return {
+        "schema": 1,
+        "tag": "cef-locked",
+        "tested_commit": "b" * 40,
+        "platforms": {
+            "x64-linux-static-release": {
+                "source_triplet": "x64-linux",
+                "manifest": {
+                    "name": "linux.manifest.json",
+                    "size": 1024,
+                    "sha256": "1" * 64,
+                },
+            },
+            "x64-windows-static-release": {
+                "source_triplet": "x64-windows-static",
+                "manifest": {
+                    "name": "windows.manifest.json",
+                    "size": 1024,
+                    "sha256": "2" * 64,
+                },
+            },
+        },
+    }
+
+
 
 class ContinuationAPI:
     def __init__(self, builder_sha="b" * 40, include_binary=True):
@@ -75,18 +101,32 @@ class ContractTests(unittest.TestCase):
         self.assertNotEqual(strict_a, strict_b)
         self.assertNotEqual(strict_a, original)
 
-    def test_strict_profile_is_source_only_and_linux_digest_bound(self):
+    def test_strict_profile_linux_is_source_only_but_windows_may_requalify_release(self):
         cfg = config()
         cfg["profile"] = "static-third-party"
         contract.validate(cfg)
         with self.assertRaises(ValueError):
             contract.build_key(cfg, "linux")
-        self.assertEqual(contract.port_contract(cfg, "linux", "a" * 64)["platform_sha256"], "a" * 64)
+        self.assertEqual(
+            contract.port_contract(cfg, "linux", "a" * 64)["platform_sha256"],
+            "a" * 64)
         self.assertIsNone(contract.port_contract(cfg, "windows")["platform_sha256"])
+
         cfg["platforms"]["windows"]["mode"] = "release-import"
-        cfg["release_lock"] = {"schema": 1, "tag": "x", "tested_commit": "b" * 40, "platforms": {}}
+        cfg["release_lock"] = release_lock()
+        contract.validate(cfg)
+        windows = contract.port_contract(cfg, "windows")
+        self.assertEqual(windows["mode"], "release-import")
+        self.assertEqual(windows["release_lock"], cfg["release_lock"])
+        linux = contract.port_contract(cfg, "linux", "a" * 64)
+        self.assertEqual(linux["mode"], "source")
+        self.assertIsNone(linux["release_lock"])
+
+        bad = copy.deepcopy(cfg)
+        bad["platforms"]["linux"]["mode"] = "release-import"
+        bad["platforms"]["linux"]["checkpoint"] = None
         with self.assertRaises(ValueError):
-            contract.validate(cfg)
+            contract.validate(bad)
 
     def test_explicit_resume_only(self):
         cfg = config()
