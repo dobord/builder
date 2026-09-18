@@ -1,0 +1,38 @@
+name: Strict CEF GN diagnostic contracts
+on:
+  push:
+    branches:
+      - feature/cef-static-integration
+    paths:
+      - .github/workflows/cef-gn-diagnostic-contracts.yml
+permissions:
+  contents: read
+jobs:
+  contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: dobord/vcpkg
+          ref: 6d342cd02d3c15fa05bbd4d391c4464998e27d47
+          path: private-vcpkg
+          token: ${{ secrets.SOURCE_READ_TOKEN }}
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: dobord/cef
+          ref: 37729fd2b1db127c1658098d69ab63adc70e045f
+          path: private-vcpkg/.full-cef
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.12'
+      - name: Run current full-graph source contracts
+        env:
+          CEF_CONTRACT_SOURCE: ${{ github.workspace }}/private-vcpkg/.full-cef
+        working-directory: private-vcpkg
+        run: python -I -m unittest discover -s ci/cef-full/tests -v
