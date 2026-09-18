@@ -1,6 +1,5 @@
 name: Resumable Windows CEF engine iteration
 on:
-  workflow_dispatch: {}
   push:
     branches:
       - feature/cef-static-integration
@@ -15,7 +14,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   windows:
-    runs-on: ${{ fromJSON(vars.CEF_STATIC_WINDOWS_RUNNER_LABELS || '["windows-2022"]') }}
+    runs-on: windows-2022
     timeout-minutes: 340
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
