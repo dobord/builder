@@ -18,14 +18,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/vcpkg
-          ref: 6cf8e0133e7a1ac0a5e5c3fc53e13747c085a5c6
+          ref: 4f12b0e731f68be7d3d28623f0e45d56951fa746
           path: private-vcpkg
           token: ${{ secrets.SOURCE_READ_TOKEN }}
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/cef
-          ref: 37729fd2b1db127c1658098d69ab63adc70e045f
+          ref: ff3ccfea536393e43fce28f650e0bd538345d23e
           path: private-vcpkg/.full-cef
           persist-credentials: false
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c

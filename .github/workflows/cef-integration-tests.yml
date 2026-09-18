@@ -48,7 +48,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/cef
-          ref: 37729fd2b1db127c1658098d69ab63adc70e045f
+          ref: ff3ccfea536393e43fce28f650e0bd538345d23e
           path: cef-recipe
           persist-credentials: false
       - name: Test pinned CEF contracts

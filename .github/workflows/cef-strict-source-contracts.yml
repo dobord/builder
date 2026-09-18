@@ -18,14 +18,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/vcpkg
-          ref: 9b8c4b30b943375eaca5ac177d79a26df8035ba7
+          ref: 4f12b0e731f68be7d3d28623f0e45d56951fa746
           path: private-vcpkg
           token: ${{ secrets.SOURCE_READ_TOKEN }}
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/cef
-          ref: 37729fd2b1db127c1658098d69ab63adc70e045f
+          ref: ff3ccfea536393e43fce28f650e0bd538345d23e
           path: private-vcpkg/.full-cef
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -50,8 +50,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C private-vcpkg rev-parse HEAD)" = "9b8c4b30b943375eaca5ac177d79a26df8035ba7"
-          test "$(git -C private-vcpkg/.full-cef rev-parse HEAD)" = "37729fd2b1db127c1658098d69ab63adc70e045f"
+          test "$(git -C private-vcpkg rev-parse HEAD)" = "4f12b0e731f68be7d3d28623f0e45d56951fa746"
+          test "$(git -C private-vcpkg/.full-cef rev-parse HEAD)" = "ff3ccfea536393e43fce28f650e0bd538345d23e"
           test "$(git -C private-vcpkg/.contract-builder rev-parse HEAD)" = "457fd41f39cbcff940c7af654da899d44ba5e553"
           cd private-vcpkg
           python -I -m unittest discover -s ci/cef/tests -v
