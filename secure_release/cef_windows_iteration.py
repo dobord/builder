@@ -301,6 +301,17 @@ def main() -> None:
         else:
             summary["mode"] = "source-fresh"
 
+        stage = "source-prepare"
+        run(
+            [
+                sys.executable,
+                recipe / "vcpkg/ports/cef-static/source_build.py", "prepare",
+                "--work", engine_work, "--logs", engine_logs,
+            ],
+            cwd=recipe, env=recipe_env,
+            log=temp / "cef-windows-source-prepare.log", timeout=10800,
+        )
+
         stage = "compile-slice"
         state = temp / "cef-windows-engine-state.json"
         slice_result = run(

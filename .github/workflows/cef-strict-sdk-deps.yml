@@ -32,7 +32,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/vcpkg
-          ref: 99d41d5f1b1b978fdc0d589f7d12f1fc78dd606b
+          ref: 36ae23cf2ff8d27549e3992e814e697dc7e2865e
           path: private-vcpkg
           token: ${{ secrets.SOURCE_READ_TOKEN }}
           persist-credentials: false
@@ -60,7 +60,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C private-vcpkg rev-parse HEAD)" = "99d41d5f1b1b978fdc0d589f7d12f1fc78dd606b"
+          test "$(git -C private-vcpkg rev-parse HEAD)" = "36ae23cf2ff8d27549e3992e814e697dc7e2865e"
           test "$(git -C private-vcpkg/.sdk-upstream rev-parse HEAD)" = "9e593bb18ea69cc5095e012465dcd675a822ed0d"
           test "$(git -C private-lockfreecoro rev-parse HEAD)" = "24038aed3a0be642adb60e71bd994ae8f0d90140"
           test "$(git -C private-lfc-ui rev-parse HEAD)" = "85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5"
@@ -244,7 +244,11 @@ jobs:
           New-Item -ItemType Directory -Force $triplets | Out-Null
           Copy-Item "$env:GITHUB_WORKSPACE/private-vcpkg/triplets/x64-windows-static-release.cmake" (Join-Path $triplets 'x64-windows-static-release.cmake')
           $shared = @(Get-ChildItem (Join-Path $prefix 'lib'),(Join-Path $prefix 'bin') -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -ieq '.dll' })
-          if ($shared.Count -ne 0) { throw 'SDK_DEPS_WINDOWS_SHARED_TARGET_PAYLOAD' }
+          if ($shared.Count -ne 0) {
+            $names = @($shared | ForEach-Object { $_.Name } | Sort-Object -Unique | Select-Object -First 20)
+            Write-Host ("SDK_DEPS_WINDOWS_SHARED_TARGET_PAYLOAD count=" + $shared.Count + " names=" + ($names -join ','))
+            exit 1
+          }
           $consumer = Join-Path $env:RUNNER_TEMP 'sdk-consumer'
           $cmakeArgs = @(
             '-S',"$env:GITHUB_WORKSPACE/private-vcpkg/ci/smoke",

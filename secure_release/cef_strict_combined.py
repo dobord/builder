@@ -22,7 +22,7 @@ from . import build_support, cef_build, cef_contract, crypto, safeio
 from . import cef_strict_iteration
 
 ENGINE_VCPKG = "d5f62138a9b45c71fb407a48edb0b4cefd5affe6"
-SDK_VCPKG = "87b76306a659e148aa5ee149d86301006ea9646e"
+SDK_VCPKG = "36ae23cf2ff8d27549e3992e814e697dc7e2865e"
 UPSTREAM = "9e593bb18ea69cc5095e012465dcd675a822ed0d"
 CEF = "37efc4f9f340992d50d6f3fa41f617c9013fa26b"
 LOCKFREECORO = "24038aed3a0be642adb60e71bd994ae8f0d90140"
@@ -85,7 +85,7 @@ def verify_engine_registry_delta(engine: Path, sdk: Path) -> None:
         raise ValueError("Registry baseline changed outside FreeRDP")
     if (old_freerdp.get("baseline"), old_freerdp.get("port-version")) != ("3.31.1", 10):
         raise ValueError("Unexpected engine-registry FreeRDP baseline")
-    if (new_freerdp.get("baseline"), new_freerdp.get("port-version")) != ("3.31.1", 11):
+    if (new_freerdp.get("baseline"), new_freerdp.get("port-version")) != ("3.31.1", 12):
         raise ValueError("Unexpected final-registry FreeRDP baseline")
 
 
