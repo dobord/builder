@@ -64,7 +64,7 @@ jobs:
         run: python -m secure_release cleanup
   build:
     needs: prepare
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ fromJSON(matrix.runner_labels) }}
     timeout-minutes: 350
     permissions:
       contents: read
@@ -74,9 +74,9 @@ jobs:
       matrix:
         include:
           - platform: linux
-            os: ubuntu-24.04
+            runner_labels: ${{ vars.CEF_STATIC_LINUX_RUNNER_LABELS || '["ubuntu-24.04"]' }}
           - platform: windows
-            os: windows-2022
+            runner_labels: ${{ vars.CEF_STATIC_WINDOWS_RUNNER_LABELS || '["windows-2022"]' }}
     env:
       TARGET_PLATFORM: ${{ matrix.platform }}
     steps:
