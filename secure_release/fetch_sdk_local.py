@@ -106,6 +106,7 @@ def _validate_sdk(sdk: Path, triplet: str) -> None:
     for name in names:
         low = name.casefold()
         if (safeio.forbidden_sdk_tree(name)
+                or safeio.shared_target_payload(name)
                 or low.endswith((".pdb", ".cpp", ".cxx", ".cc", ".log", ".dmp"))):
             raise ValueError("forbidden SDK file")
 
