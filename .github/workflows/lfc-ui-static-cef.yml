@@ -82,6 +82,54 @@ jobs:
           key = cef_build.materialize(root, cfg, "windows")
           print("LFC_UI_CEF_BUILD_CONTRACT=" + key)
           '@ | python -
+      - name: Preflight exact locked CEF release transport
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $upstream = Join-Path $env:GITHUB_WORKSPACE 'private-vcpkg/.lfc-cef-upstream'
+          $cache = Join-Path $upstream 'downloads/cef-static-assets'
+          $env:CEF_RELEASE_CACHE = $cache
+          @'
+          import pathlib, sys, urllib.error
+          recipe = pathlib.Path("private-cef").resolve()
+          sys.path.insert(0, str(recipe / "vcpkg/integration"))
+          import sdk_import
+          lock = sdk_import.read_json(recipe / "vcpkg/integration/release.lock.json")
+          cache = pathlib.Path(__import__("os").environ["CEF_RELEASE_CACHE"]).resolve()
+          try:
+              sdk_import.obtain(lock, "x64-windows-static-release", cache)
+          except urllib.error.HTTPError as error:
+              print("CEF_RELEASE_PREFLIGHT_FAILURE category=http-" + str(error.code))
+              raise SystemExit(1)
+          except urllib.error.URLError as error:
+              reason = type(error.reason).__name__.lower()
+              category = "url-" + reason if reason.replace("_", "").isalnum() else "urlerror"
+              print("CEF_RELEASE_PREFLIGHT_FAILURE category=" + category)
+              raise SystemExit(1)
+          except TimeoutError:
+              print("CEF_RELEASE_PREFLIGHT_FAILURE category=timeout")
+              raise SystemExit(1)
+          except ValueError as error:
+              message = str(error)
+              known = (
+                  ("Untrusted release redirect", "redirect"),
+                  ("Release asset exceeds its locked size", "asset-size"),
+                  ("Release asset digest/size mismatch", "asset-digest"),
+                  ("Missing or redirected release asset", "asset-missing"),
+                  ("Invalid asset", "asset-invalid"),
+                  ("Invalid SDK", "sdk-invalid"),
+              )
+              category = next((label for prefix, label in known if message.startswith(prefix)), "valueerror")
+              print("CEF_RELEASE_PREFLIGHT_FAILURE category=" + category)
+              raise SystemExit(1)
+          except Exception as error:
+              name = type(error).__name__.lower()
+              category = name if name.replace("_", "").isalnum() else "exception"
+              print("CEF_RELEASE_PREFLIGHT_FAILURE category=python-" + category)
+              raise SystemExit(1)
+          print("CEF_RELEASE_PREFLIGHT_ACQUIRED")
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw 'CEF_RELEASE_PREFLIGHT_FAILED' }
       - name: Install and export lfc-ui cef feature
         shell: pwsh
         run: |
