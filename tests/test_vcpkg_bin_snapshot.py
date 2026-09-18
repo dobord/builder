@@ -1,6 +1,6 @@
 """Integrity guard for the exact vcpkg-bin policy snapshot used on builder Actions."""
 from pathlib import Path
-import hashlib
+import subprocess
 import json
 import unittest
 
@@ -9,8 +9,11 @@ SNAPSHOT = ROOT / "tests/vcpkg_bin_snapshot"
 EXPECTED_COMMIT = "f04718eae6ce124741994d0920e46ce0a3ec33ad"
 
 
-def git_blob_sha(data: bytes) -> str:
-    return hashlib.sha1(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest()
+def committed_blob_sha(relative: str) -> str:
+    return subprocess.check_output(
+        ["git", "-C", str(ROOT), "rev-parse", "HEAD:" + relative],
+        text=True, timeout=30,
+    ).strip()
 
 
 class PublisherSnapshotTests(unittest.TestCase):
@@ -35,7 +38,11 @@ class PublisherSnapshotTests(unittest.TestCase):
             self.assertEqual(record["source"], source)
             path = ROOT / relative
             self.assertTrue(path.is_file() and not path.is_symlink())
-            self.assertEqual(git_blob_sha(path.read_bytes()), record["github_blob_sha"])
+            self.assertEqual(committed_blob_sha(relative), record["github_blob_sha"])
+            subprocess.run(
+                ["git", "-C", str(ROOT), "diff", "--quiet", "HEAD", "--", relative],
+                check=True, timeout=30,
+            )
 
     def test_snapshot_workflows_pin_the_green_builder(self):
         expected = "457fd41f39cbcff940c7af654da899d44ba5e553"
