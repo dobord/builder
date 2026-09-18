@@ -59,12 +59,8 @@ def validate(cfg: dict) -> None:
     if cfg["profile"] == "static-third-party":
         require(cfg["platforms"]["linux"]["mode"].startswith("source-"),
                 "static-third-party Linux requires source acquisition with the frozen platform graph")
-        require(cfg["platforms"]["windows"]["mode"].startswith("source-")
-                or cfg["platforms"]["windows"]["mode"] == "release-import",
-                "static-third-party Windows requires source acquisition or locked release reuse")
-        if cfg["platforms"]["windows"]["mode"] == "release-import":
-            require(lock is not None,
-                    "strict Windows release reuse requires the exact immutable release lock")
+        require(cfg["platforms"]["windows"]["mode"].startswith("source-"),
+                "static-third-party Windows requires source acquisition")
     if release:
         require(isinstance(lock, dict) and set(lock) == {"schema", "tag", "tested_commit", "platforms"}, "Invalid CEF release lock")
         require(type(lock["schema"]) is int and lock["schema"] == 1, "Unsupported release lock")
