@@ -140,17 +140,19 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $prefix = Join-Path $env:RUNNER_TEMP 'cef-release-preflight-prefix'
+          $prefix = (Resolve-Path (Join-Path $env:RUNNER_TEMP 'cef-release-preflight-prefix')).Path
+          $recipe = (Resolve-Path (Join-Path $env:GITHUB_WORKSPACE 'private-cef')).Path
+          $source = (Resolve-Path (Join-Path $recipe 'vcpkg/ports/cef-static/cpp_support')).Path
           $build = Join-Path $env:RUNNER_TEMP 'cef-cpp-support-preflight'
           $log = Join-Path $env:RUNNER_TEMP 'cef-cpp-support-preflight-configure.log'
-          $args = @(
-            '-S',"$env:GITHUB_WORKSPACE/private-cef/vcpkg/ports/cef-static/cpp_support",
+          $cmakeArgs = @(
+            '-S',$source,
             '-B',$build,
             '-G','Visual Studio 17 2022','-A','x64',
-            '-DCEF_RECIPE_SOURCE=' + (Join-Path $env:GITHUB_WORKSPACE 'private-cef'),
-            '-DCEF_PACKAGE_PREFIX=' + $prefix
+            "-DCEF_RECIPE_SOURCE=$recipe",
+            "-DCEF_PACKAGE_PREFIX=$prefix"
           )
-          & cmake @args *> $log
+          & cmake @cmakeArgs *> $log
           if ($LASTEXITCODE -ne 0) {
             $env:CEF_CPP_PREFLIGHT_LOG = $log
             @'
