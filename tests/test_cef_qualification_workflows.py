@@ -55,8 +55,8 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
     def test_current_private_source_contract_workflow_pins_gn_gate_revision(self):
         text = (ROOT / ".github/workflows/cef-strict-source-contracts.yml").read_text()
         self.assertIn("repository: dobord/vcpkg", text)
-        self.assertIn("ref: a0ce35082136ac045c8e5cc97de4c0e4e29a5b38", text)
-        self.assertIn("ref: dee44a002606796afc3837ccca7120f62898691d", text)
+        self.assertIn("ref: 3a436a80d3b0e1cde76d2aa9d4120a4dcc8c8170", text)
+        self.assertIn("ref: 457fd41f39cbcff940c7af654da899d44ba5e553", text)
         self.assertIn("python -I -m unittest discover -s ci/cef-full/tests -v", text)
         self.assertIn("ci/cef-full/gn_check.py", text)
         self.assertNotIn("upload-artifact", text)
