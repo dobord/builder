@@ -166,6 +166,17 @@ class ContractTests(unittest.TestCase):
             key = cef_build.materialize(root, strict, "linux", "f" * 64)
             self.assertEqual(key, contract.build_key(strict, "linux", "f" * 64))
 
+    def test_source_capacity_rejects_standard_hosted_disk_before_build(self):
+        cfg = config()
+        usage = type("Usage", (), {"free": 14 * 1024**3})()
+        with patch.object(cef_build.shutil, "disk_usage", return_value=usage):
+            with self.assertRaisesRegex(RuntimeError, "80 GiB"):
+                cef_build.require_source_capacity(Path("/tmp"), cfg, "linux")
+        usage = type("Usage", (), {"free": 80 * 1024**3})()
+        with patch.object(cef_build.shutil, "disk_usage", return_value=usage):
+            cef_build.require_source_capacity(Path("/tmp"), cfg, "linux")
+            cef_build.require_source_capacity(Path("/tmp"), cfg, "windows")
+
     def test_no_credentials_in_worker_environment(self):
         with patch.dict("os.environ", {"GITHUB_TOKEN": "secret", "GITHUB_RUN_ID": "12", "GITHUB_REF": "refs/heads/main"}):
             env = cef_build.worker_environment({}, "a" * 40)
