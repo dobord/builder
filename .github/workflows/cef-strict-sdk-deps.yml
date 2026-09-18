@@ -85,9 +85,43 @@ jobs:
           upstream="$GITHUB_WORKSPACE/private-vcpkg/.sdk-upstream"
           installed="$RUNNER_TEMP/strict-sdk-installed"
           bash "$upstream/bootstrap-vcpkg.sh" -disableMetrics >"$RUNNER_TEMP/sdk-deps-bootstrap.log" 2>&1
-          if ! "$upstream/vcpkg" install 'lockfreecoro[auth,grpc,h264,io-uring,opus,postgresql,process,protobuf,saml,sqlite,vp8,vp9]' 'lfc-ui[atspi,lockfreecoro,opengl,vulkan]' 'dbus[core]' --triplet=x64-linux-static-release --host-triplet=x64-linux-static-release --overlay-ports="$GITHUB_WORKSPACE/private-vcpkg/ports" --overlay-triplets="$GITHUB_WORKSPACE/private-vcpkg/triplets" --x-install-root="$installed" --binarysource=clear --clean-buildtrees-after-build --clean-packages-after-build >"$RUNNER_TEMP/sdk-deps-install.log" 2>&1; then
-            echo "SDK_DEPS_LINUX_INSTALL_FAILED" >&2
-            exit 1
+          set +e
+          "$upstream/vcpkg" install 'lockfreecoro[auth,grpc,h264,io-uring,opus,postgresql,process,protobuf,saml,sqlite,vp8,vp9]' 'lfc-ui[atspi,lockfreecoro,opengl,vulkan]' 'dbus[core]' --triplet=x64-linux-static-release --host-triplet=x64-linux-static-release --overlay-ports="$GITHUB_WORKSPACE/private-vcpkg/ports" --overlay-triplets="$GITHUB_WORKSPACE/private-vcpkg/triplets" --x-install-root="$installed" --binarysource=clear --clean-buildtrees-after-build --clean-packages-after-build >"$RUNNER_TEMP/sdk-deps-install.log" 2>&1
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ]; then
+            python - <<'PY'
+          import os, pathlib, re
+          text=(pathlib.Path(os.environ["RUNNER_TEMP"])/"sdk-deps-install.log").read_text(errors="replace")[-1048576:]
+          package="unknown"
+          for pattern in (
+              r"error: building ([a-z0-9][a-z0-9+_.-]*):",
+              r"BUILD_FAILED[^\n]*?([a-z0-9][a-z0-9+_.-]+):x64-linux-static-release",
+              r"([a-z0-9][a-z0-9+_.-]+):x64-linux-static-release failed",
+          ):
+              match=re.search(pattern,text,re.I)
+              if match:
+                  package=match.group(1).lower()
+                  break
+          reason="unknown"
+          checks=(
+              ("patch",r"patch failed|does not apply|corrupt patch|malformed patch"),
+              ("missing-cmake-package",r"Could not find a package configuration file provided by"),
+              ("missing-dependency",r"(?:Dependency|Run-time dependency).*?(?:not found|found:\s*NO)"),
+              ("download",r"(?:download|curl|http).*?(?:failed|error|404|403|502|503|504)"),
+              ("configure",r"(?:configuring .* failed|CMake Error|meson\.build:\d+:\d+: ERROR:)"),
+              ("compile",r"(?:FAILED:|fatal error:|ninja: build stopped|make: \*\*\*)"),
+              ("post-build-validation",r"post-build validation|Found unexpected shared"),
+          )
+          for label,pattern in checks:
+              if re.search(pattern,text,re.I):
+                  reason=label
+                  break
+          if not re.fullmatch(r"[a-z0-9][a-z0-9+_.-]*|unknown",package):
+              package="unknown"
+          print(f"SDK_DEPS_LINUX_INSTALL_FAILURE package={package} reason={reason}")
+          PY
+            exit "$rc"
           fi
           mkdir -p "$RUNNER_TEMP/export"
           if ! "$upstream/vcpkg" export lockfreecoro lfc-ui dbus --triplet=x64-linux-static-release --host-triplet=x64-linux-static-release --overlay-ports="$GITHUB_WORKSPACE/private-vcpkg/ports" --overlay-triplets="$GITHUB_WORKSPACE/private-vcpkg/triplets" --x-install-root="$installed" --raw --output=sdk-deps --output-dir="$RUNNER_TEMP/export" >"$RUNNER_TEMP/sdk-deps-export.log" 2>&1; then
@@ -129,8 +163,42 @@ jobs:
             '--clean-buildtrees-after-build',
             '--clean-packages-after-build'
           )
-          & $vcpkg @installArgs *> (Join-Path $env:RUNNER_TEMP 'sdk-deps-install.log')
-          if ($LASTEXITCODE -ne 0) { throw 'SDK_DEPS_WINDOWS_INSTALL_FAILED' }
+          $installLog = Join-Path $env:RUNNER_TEMP 'sdk-deps-install.log'
+          & $vcpkg @installArgs *> $installLog
+          $installRc = $LASTEXITCODE
+          if ($installRc -ne 0) {
+            $env:SDK_DEPS_DIAG_LOG = $installLog
+            @'
+          import os, pathlib, re
+          text=pathlib.Path(os.environ["SDK_DEPS_DIAG_LOG"]).read_text(errors="replace")[-1048576:]
+          package="unknown"
+          for pattern in (
+              r"error: building ([a-z0-9][a-z0-9+_.-]*):",
+              r"BUILD_FAILED[^\n]*?([a-z0-9][a-z0-9+_.-]+):x64-windows-static-release",
+              r"([a-z0-9][a-z0-9+_.-]+):x64-windows-static-release failed",
+          ):
+              match=re.search(pattern,text,re.I)
+              if match:
+                  package=match.group(1).lower()
+                  break
+          reason="unknown"
+          for label,pattern in (
+              ("patch",r"patch failed|does not apply|corrupt patch|malformed patch"),
+              ("missing-cmake-package",r"Could not find a package configuration file provided by"),
+              ("download",r"(?:download|curl|http).*?(?:failed|error|404|403|502|503|504)"),
+              ("configure",r"(?:configuring .* failed|CMake Error)"),
+              ("compile",r"(?:FAILED:|fatal error:|ninja: build stopped|MSB[0-9]+)"),
+              ("post-build-validation",r"post-build validation|Found unexpected shared"),
+          ):
+              if re.search(pattern,text,re.I):
+                  reason=label
+                  break
+          if not re.fullmatch(r"[a-z0-9][a-z0-9+_.-]*|unknown",package):
+              package="unknown"
+          print(f"SDK_DEPS_WINDOWS_INSTALL_FAILURE package={package} reason={reason}")
+          '@ | python -
+            exit $installRc
+          }
           $export = Join-Path $env:RUNNER_TEMP 'export'
           New-Item -ItemType Directory -Force $export | Out-Null
           $exportArgs = @(
