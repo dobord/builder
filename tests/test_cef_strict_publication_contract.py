@@ -55,6 +55,8 @@ def proof(platform: str) -> dict:
             "kind": "linux-frozen-vcpkg",
             "manifest_sha256": "b" * 64,
             "inventory_sha256": "c" * 64,
+            "qualification_sha256": "e" * 64,
+            "full_platform_graph_qualified": True,
             "archive_count": 36,
         }
         if platform == "linux"
