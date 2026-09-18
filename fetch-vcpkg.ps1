@@ -24,7 +24,23 @@ if ($env:GITHUB_ACTIONS -eq 'true') {
 }
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
+$callerDirectory = (Get-Location).Path
 $privateKeyPath = (Resolve-Path -LiteralPath $PrivateKey).Path
+$requestVerifyKeyPath = if ([string]::IsNullOrWhiteSpace($RequestVerifyKey)) {
+    $null
+} else {
+    (Resolve-Path -LiteralPath $RequestVerifyKey).Path
+}
+$outputPath = if ([string]::IsNullOrWhiteSpace($Output)) {
+    $null
+} else {
+    [IO.Path]::GetFullPath($Output, $callerDirectory)
+}
+$workDirPath = if ([string]::IsNullOrWhiteSpace($WorkDir)) {
+    $null
+} else {
+    [IO.Path]::GetFullPath($WorkDir, $callerDirectory)
+}
 
 if ([string]::IsNullOrWhiteSpace($env:GH_TOKEN) -and
     [string]::IsNullOrWhiteSpace($env:GITHUB_TOKEN)) {
@@ -63,14 +79,14 @@ try {
         '--private-key', $privateKeyPath
     )
 
-    if (-not [string]::IsNullOrWhiteSpace($RequestVerifyKey)) {
-        $arguments += @('--request-verify-key', (Resolve-Path -LiteralPath $RequestVerifyKey).Path)
+    if ($null -ne $requestVerifyKeyPath) {
+        $arguments += @('--request-verify-key', $requestVerifyKeyPath)
     }
-    if (-not [string]::IsNullOrWhiteSpace($Output)) {
-        $arguments += @('--output', [IO.Path]::GetFullPath($Output))
+    if ($null -ne $outputPath) {
+        $arguments += @('--output', $outputPath)
     }
-    if (-not [string]::IsNullOrWhiteSpace($WorkDir)) {
-        $arguments += @('--work-dir', [IO.Path]::GetFullPath($WorkDir))
+    if ($null -ne $workDirPath) {
+        $arguments += @('--work-dir', $workDirPath)
     }
     if ($Run -gt 0) {
         $arguments += @('--run', [string]$Run)
