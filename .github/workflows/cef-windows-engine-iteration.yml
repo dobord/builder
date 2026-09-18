@@ -1,5 +1,6 @@
 name: Resumable Windows CEF engine iteration
 on:
+  workflow_dispatch: {}
   push:
     branches:
       - feature/cef-static-integration
@@ -14,7 +15,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   windows:
-    runs-on: windows-2022
+    runs-on: ${{ fromJSON(vars.CEF_STATIC_WINDOWS_RUNNER_LABELS || '["windows-2022"]') }}
     timeout-minutes: 340
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -51,32 +52,28 @@ jobs:
       - name: Validate Windows iteration worker syntax
         run: |
           python -m py_compile secure_release/cef_windows_iteration.py
-      - name: Schema-probe exact Windows CEF compilation slice
-        if: ${{ false }}
+      - name: Run exact Windows CEF compilation slice
+        id: iteration
         env:
           BUILDER_INPUT_PRIVATE_KEY: ${{ secrets.BUILDER_INPUT_PRIVATE_KEY }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           python -m secure_release.cef_windows_iteration
-      - name: Probe encrypted checkpoint artifact schema
-        if: ${{ always() }}
+      - name: Upload encrypted Windows CEF checkpoint
+        if: ${{ !cancelled() && steps.iteration.outputs.checkpoint_ready == 'true' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: cef-windows-engine-checkpoint-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/cef-windows-engine-checkpoint-encrypted/*.enc
-          if-no-files-found: ignore
+          if-no-files-found: error
           retention-days: 7
           compression-level: 0
-      - name: Probe summary artifact schema
+      - name: Upload non-sensitive Windows iteration summary
         if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: cef-windows-engine-summary-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/cef-windows-engine-summary.json
-          if-no-files-found: ignore
+          if-no-files-found: error
           retention-days: 7
           compression-level: 0
-      - name: Confirm schema phase
-        shell: pwsh
-        run: |
-          Write-Host 'CEF_WINDOWS_ITERATION_PHASE2_VALID'
