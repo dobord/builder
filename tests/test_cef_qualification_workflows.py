@@ -207,7 +207,8 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn("ref: 52bef1a3c2bfef7d20f2ad9f7f9ce86ad7a91534", text)
         self.assertIn("FREERDP_STATIC_CONFIGURE_FAILURE package=", text)
         self.assertIn(" category=", text)
-        self.assertIn("with_cairo=", text)
+        self.assertIn('"WITH_CAIRO"', text)
+        self.assertIn('key.lower() + "=" + match.group(1).lower()', text)
         self.assertIn("cmake_source=", text)
         self.assertNotIn("upload-artifact", text)
 
