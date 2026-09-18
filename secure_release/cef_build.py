@@ -40,15 +40,27 @@ def capture_platform_dependencies(root: Path, cfg: dict, platform: str, execute,
     probe.mkdir()
     manifest = probe / "platform-inputs.json"
     snapshot = probe / "target-prefix"
-    receipt = probe / "capture.json"
-    script = root / "cef-recipe/vcpkg/static/platform_prefix.py"
+    receipt = probe / "qualification.json"
+    native_work = probe / "native-work"
+    script = root / "workspace/ci/cef-full/verify_prefix.py"
+    if not script.is_file() or script.is_symlink():
+        raise ValueError("Signed workspace lacks the complete CEF platform preflight")
     execute([sys.executable, str(script), "--installed", str(prefix),
              "--destination", str(snapshot), "--manifest", str(manifest),
-             "--pkgconf", pkgconf, "--receipt", str(receipt)],
-            stage="preflight", timeout=3600, cwd=root / "cef-recipe")
+             "--receipt", str(receipt), "--cef-recipe", str(root / "cef-recipe"),
+             "--work", str(native_work)],
+            stage="preflight", timeout=3600, cwd=root / "workspace")
     result = crypto.parse(receipt.read_bytes())
+    if (result.get("schema") != 1 or result.get("kind") != "cef-static-platform-preflight"
+            or result.get("status") != "success"
+            or result.get("full_platform_graph_qualified") is not True
+            or result.get("cef_runtime_verified") is not False
+            or result.get("gpu_runtime_qualified") is not False
+            or result.get("module_count") != 36):
+        raise ValueError("Complete CEF platform preflight did not qualify the signed dependency graph")
     sha256 = cef_contract.digest(result.get("manifest_sha256"))
-    return {"manifest": manifest, "prefix": snapshot, "sha256": sha256}
+    return {"manifest": manifest, "prefix": snapshot, "sha256": sha256,
+            "qualification": receipt, "qualification_sha256": crypto.digest(receipt)}
 
 
 def binary_key(upstream_sha: str, platform: str, revision: str, triplet: Path) -> str:
