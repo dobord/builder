@@ -1,0 +1,151 @@
+name: Strict SDK dependency qualification
+on:
+  push:
+    branches:
+      - feature/cef-static-integration
+    paths:
+      - .github/workflows/cef-strict-sdk-deps.yml
+permissions:
+  contents: read
+concurrency:
+  group: cef-strict-sdk-deps
+  cancel-in-progress: true
+jobs:
+  deps:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            platform: linux
+            triplet: x64-linux-static-release
+          - os: windows-2022
+            platform: windows
+            triplet: x64-windows-static-release
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 300
+    env:
+      VCPKG_DISABLE_METRICS: '1'
+      VCPKG_MAX_CONCURRENCY: '2'
+      VCPKG_BINARY_SOURCES: clear
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: dobord/vcpkg
+          ref: d11cde21fd7aae08297f3bd5942edc5e293c5b7a
+          path: private-vcpkg
+          token: ${{ secrets.SOURCE_READ_TOKEN }}
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: microsoft/vcpkg
+          ref: 9e593bb18ea69cc5095e012465dcd675a822ed0d
+          path: private-vcpkg/.sdk-upstream
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: dobord/lockfreecoro
+          ref: 24038aed3a0be642adb60e71bd994ae8f0d90140
+          path: private-lockfreecoro
+          token: ${{ secrets.SOURCE_READ_TOKEN }}
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: dobord/lfc-ui
+          ref: 85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5
+          path: private-lfc-ui
+          token: ${{ secrets.SOURCE_READ_TOKEN }}
+          persist-credentials: false
+      - name: Verify and prefetch exact private source archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C private-vcpkg rev-parse HEAD)" = "d11cde21fd7aae08297f3bd5942edc5e293c5b7a"
+          test "$(git -C private-vcpkg/.sdk-upstream rev-parse HEAD)" = "9e593bb18ea69cc5095e012465dcd675a822ed0d"
+          test "$(git -C private-lockfreecoro rev-parse HEAD)" = "24038aed3a0be642adb60e71bd994ae8f0d90140"
+          test "$(git -C private-lfc-ui rev-parse HEAD)" = "85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5"
+          mkdir -p private-vcpkg/.sdk-upstream/downloads
+          git -C private-lockfreecoro -c core.autocrlf=false archive --format=tar.gz 24038aed3a0be642adb60e71bd994ae8f0d90140 -o "$GITHUB_WORKSPACE/private-vcpkg/.sdk-upstream/downloads/lockfreecoro-24038aed3a0be642adb60e71bd994ae8f0d90140.tar.gz"
+          git -C private-lfc-ui -c core.autocrlf=false archive --format=tar.gz 85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5 -o "$GITHUB_WORKSPACE/private-vcpkg/.sdk-upstream/downloads/lfc-ui-85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5.tar.gz"
+          test -s private-vcpkg/.sdk-upstream/downloads/lockfreecoro-24038aed3a0be642adb60e71bd994ae8f0d90140.tar.gz
+          test -s private-vcpkg/.sdk-upstream/downloads/lfc-ui-85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5.tar.gz
+      - name: Install Linux native build prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-14 g++-14 autoconf autoconf-archive automake libtool pkg-config ninja-build nasm gperf flex bison gettext texinfo libltdl-dev
+      - name: Bootstrap and install exact Linux SDK dependency graph
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          upstream="$GITHUB_WORKSPACE/private-vcpkg/.sdk-upstream"
+          installed="$RUNNER_TEMP/strict-sdk-installed"
+          bash "$upstream/bootstrap-vcpkg.sh" -disableMetrics
+          "$upstream/vcpkg" install 'lockfreecoro[auth,grpc,h264,io-uring,opus,postgresql,process,protobuf,saml,sqlite,vp8,vp9]' 'lfc-ui[atspi,lockfreecoro,opengl,vulkan]' 'dbus[core]' --triplet=x64-linux-static-release --host-triplet=x64-linux-static-release --overlay-ports="$GITHUB_WORKSPACE/private-vcpkg/ports" --overlay-triplets="$GITHUB_WORKSPACE/private-vcpkg/triplets" --x-install-root="$installed" --binarysource=clear
+          mkdir -p "$RUNNER_TEMP/export"
+          "$upstream/vcpkg" export lockfreecoro lfc-ui dbus --triplet=x64-linux-static-release --host-triplet=x64-linux-static-release --overlay-ports="$GITHUB_WORKSPACE/private-vcpkg/ports" --overlay-triplets="$GITHUB_WORKSPACE/private-vcpkg/triplets" --x-install-root="$installed" --raw --output=sdk-deps --output-dir="$RUNNER_TEMP/export"
+          prefix="$RUNNER_TEMP/export/sdk-deps/installed/x64-linux-static-release"
+          if find "$prefix/lib" "$prefix/bin" -type f \( -name '*.so' -o -name '*.so.*' \) -print -quit | grep -q .; then
+            echo "shared target payload found" >&2
+            find "$prefix/lib" "$prefix/bin" -type f \( -name '*.so' -o -name '*.so.*' \) -print | head -50 >&2
+            exit 1
+          fi
+          cmake -S "$GITHUB_WORKSPACE/private-vcpkg/ci/smoke" -B "$RUNNER_TEMP/sdk-consumer" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$prefix" -DCMAKE_FIND_USE_PACKAGE_REGISTRY=OFF -DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=OFF
+          cmake --build "$RUNNER_TEMP/sdk-consumer" --parallel 2
+          ctest --test-dir "$RUNNER_TEMP/sdk-consumer" --output-on-failure --timeout 60
+      - name: Bootstrap and install exact Windows SDK dependency graph
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $upstream = Join-Path $env:GITHUB_WORKSPACE 'private-vcpkg/.sdk-upstream'
+          $installed = Join-Path $env:RUNNER_TEMP 'strict-sdk-installed'
+          & cmd.exe /d /c (Join-Path $upstream 'bootstrap-vcpkg.bat') -disableMetrics
+          if ($LASTEXITCODE -ne 0) { throw 'vcpkg bootstrap failed' }
+          $vcpkg = Join-Path $upstream 'vcpkg.exe'
+          $installArgs = @(
+            'install',
+            'lockfreecoro[auth,grpc,h264,opus,postgresql,process,protobuf,saml,sqlite,vp8,vp9]',
+            'lfc-ui[lockfreecoro,opengl,vulkan]',
+            '--triplet=x64-windows-static-release',
+            '--host-triplet=x64-windows-static-release',
+            "--overlay-ports=$env:GITHUB_WORKSPACE/private-vcpkg/ports",
+            "--overlay-triplets=$env:GITHUB_WORKSPACE/private-vcpkg/triplets",
+            "--x-install-root=$installed",
+            '--binarysource=clear'
+          )
+          & $vcpkg @installArgs
+          if ($LASTEXITCODE -ne 0) { throw 'vcpkg install failed' }
+          $export = Join-Path $env:RUNNER_TEMP 'export'
+          New-Item -ItemType Directory -Force $export | Out-Null
+          $exportArgs = @(
+            'export','lockfreecoro','lfc-ui',
+            '--triplet=x64-windows-static-release',
+            '--host-triplet=x64-windows-static-release',
+            "--overlay-ports=$env:GITHUB_WORKSPACE/private-vcpkg/ports",
+            "--overlay-triplets=$env:GITHUB_WORKSPACE/private-vcpkg/triplets",
+            "--x-install-root=$installed",
+            '--raw','--output=sdk-deps',"--output-dir=$export"
+          )
+          & $vcpkg @exportArgs
+          if ($LASTEXITCODE -ne 0) { throw 'vcpkg export failed' }
+          $prefix = Join-Path $export 'sdk-deps/installed/x64-windows-static-release'
+          $shared = @(Get-ChildItem (Join-Path $prefix 'lib'),(Join-Path $prefix 'bin') -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -ieq '.dll' })
+          if ($shared.Count -ne 0) { throw ('shared target payload found: ' + (($shared | Select-Object -First 20 -ExpandProperty FullName) -join ', ')) }
+          $consumer = Join-Path $env:RUNNER_TEMP 'sdk-consumer'
+          $cmakeArgs = @(
+            '-S',"$env:GITHUB_WORKSPACE/private-vcpkg/ci/smoke",
+            '-B',$consumer,
+            '-G','Visual Studio 17 2022','-A','x64',
+            "-DCMAKE_PREFIX_PATH=$prefix",
+            '-DCMAKE_FIND_USE_PACKAGE_REGISTRY=OFF',
+            '-DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=OFF',
+            '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded'
+          )
+          & cmake @cmakeArgs
+          if ($LASTEXITCODE -ne 0) { throw 'consumer configure failed' }
+          & cmake --build $consumer --config Release --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw 'consumer build failed' }
+          & ctest --test-dir $consumer -C Release --output-on-failure --timeout 60
+          if ($LASTEXITCODE -ne 0) { throw 'consumer test failed' }
