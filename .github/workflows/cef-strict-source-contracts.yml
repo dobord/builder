@@ -57,13 +57,10 @@ jobs:
           python -I -m unittest discover -s ci/cef/tests -v
           python -I -m unittest discover -s ci/cef-full/tests -v
           python -m py_compile ci/cef-full/verify_prefix.py ci/cef-full/native.py ci/cef-full/gn_check.py
-      - name: Verify Windows strict import backport matches reviewed CEF bytes
+      - name: Verify Windows strict import is integrated in reviewed CEF bytes
         shell: bash
         run: |
           set -euo pipefail
-          patch="$GITHUB_WORKSPACE/private-vcpkg/ports/cef-static/strict-windows-release-import.patch"
-          git -C private-vcpkg/.full-cef apply --check "$patch"
-          git -C private-vcpkg/.full-cef apply "$patch"
           cmp private-vcpkg/.full-cef/vcpkg/integration/install.cmake strict-import-cef/vcpkg/integration/install.cmake
           cmp private-vcpkg/.full-cef/vcpkg/integration/sdk_import.py strict-import-cef/vcpkg/integration/sdk_import.py
       - name: Verify content-addressed publisher policy snapshot
