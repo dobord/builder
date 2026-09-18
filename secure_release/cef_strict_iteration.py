@@ -48,6 +48,39 @@ def run(command, *, cwd: Path, env: dict, log: Path, timeout: int,
     return result
 
 
+def classify_private_log(path: Path) -> tuple[str, str]:
+    """Return only bounded failure identity; never expose private build output."""
+    if not path.is_file() or path.stat().st_size > 64 * 1024**2:
+        return "missing-log", "unknown"
+    text = path.read_text(encoding="utf-8", errors="replace")[-8 * 1024**2:]
+    package = "unknown"
+    for pattern in (
+        r"error: building ([a-z0-9][a-z0-9+_.-]*):",
+        r"BUILD_FAILED[^\n]*?([a-z0-9][a-z0-9+_.-]+):x64-linux-static-release",
+        r"([a-z0-9][a-z0-9+_.-]+):x64-linux-static-release failed",
+    ):
+        match = re.search(pattern, text, re.I)
+        if match:
+            package = match.group(1).lower()
+            break
+    checks = (
+        ("patch", r"patch failed|does not apply|corrupt patch|malformed patch"),
+        ("missing-header", r"fatal error:\s*[A-Za-z0-9_+./-]+:\s*No such file"),
+        ("missing-library", r"(?:cannot find|unable to find)\s+-l[A-Za-z0-9_+.-]+"),
+        ("missing-dependency", r"(?:Dependency|Could NOT find|Package).*?(?:not found|found:\s*NO)"),
+        ("undefined-reference", r"undefined reference to"),
+        ("multiple-definition", r"multiple definition of"),
+        ("configure", r"CMake Error|meson\.build:\d+:\d+: ERROR:|configure.*(?:failed|error)"),
+        ("compile", r"(?:^|\n)FAILED:|ninja: build stopped|compilation terminated"),
+        ("post-build-validation", r"post-build validation|Found unexpected shared"),
+        ("timeout", r"timed out|TimeoutExpired"),
+    )
+    category = next((label for label, pattern in checks if re.search(pattern, text, re.I)), "unknown")
+    if not re.fullmatch(r"[a-z0-9][a-z0-9+_.-]*", package):
+        package = "unknown"
+    return category, package
+
+
 def output(name: str, value: bool) -> None:
     target = os.environ.get("GITHUB_OUTPUT")
     if target:
@@ -285,6 +318,7 @@ def main() -> None:
             cache_args = []
             for cache in reviewed_binary_caches(temp):
                 cache_args.extend(["--binary-cache", cache])
+            stage = "platform-preflight"
             run(
                 [sys.executable, "ci/cef-full/native.py", "--root", ".",
                  "--work", platform_work, "--evidence", evidence, *cache_args],
@@ -463,6 +497,10 @@ def main() -> None:
         summary["status"] = "failed"
         summary["failure_stage"] = locals().get("stage", "preflight")
         summary["failure_type"] = type(error).__name__
+        if summary["failure_stage"] == "platform-preflight":
+            category, package = classify_private_log(temp / "cef-platform-native.log")
+            summary["failure_category"] = category
+            summary["failure_package"] = package
         raise
     finally:
         summary_path.write_text(
