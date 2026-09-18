@@ -50,3 +50,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-14 g++-14 autoconf autoconf-archive automake libtool pkg-config ninja-build gperf flex bison nasm gettext texinfo libltdl-dev xvfb xauth fonts-dejavu-core
           df -h /
+      - name: Qualify exact complete static platform graph
+        shell: bash
+        env:
+          CEF_CONTRACT_SOURCE: ${{ github.workspace }}/private-vcpkg/.full-cef
+        working-directory: private-vcpkg
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/cef-strict-evidence"
+          python -I -m unittest discover -s ci/cef-full/tests -v >"$RUNNER_TEMP/cef-strict-contract.log" 2>&1
+          python ci/cef-full/native.py --root . --work "$RUNNER_TEMP/cef-strict-work" --evidence "$RUNNER_TEMP/cef-strict-evidence" >"$RUNNER_TEMP/cef-strict-native.log" 2>&1
+          python -c 'import json,os,pathlib; v=json.loads((pathlib.Path(os.environ["RUNNER_TEMP"])/"cef-strict-evidence/native-full.json").read_text()); assert v.get("status")=="success" and v.get("full_platform_graph_qualified") is True and v.get("module_count")==36; print("STRICT_CEF_FULL_PLATFORM_QUALIFIED")'
