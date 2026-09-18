@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/vcpkg
-          ref: a0ce35082136ac045c8e5cc97de4c0e4e29a5b38
+          ref: 6d342cd02d3c15fa05bbd4d391c4464998e27d47
           path: private-vcpkg
           token: ${{ secrets.SOURCE_READ_TOKEN }}
           persist-credentials: false
@@ -44,7 +44,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C private-vcpkg rev-parse HEAD)" = "a0ce35082136ac045c8e5cc97de4c0e4e29a5b38"
+          test "$(git -C private-vcpkg rev-parse HEAD)" = "6d342cd02d3c15fa05bbd4d391c4464998e27d47"
           test "$(git -C private-vcpkg/.full-upstream rev-parse HEAD)" = "9e593bb18ea69cc5095e012465dcd675a822ed0d"
           test "$(git -C private-vcpkg/.full-cef rev-parse HEAD)" = "37729fd2b1db127c1658098d69ab63adc70e045f"
       - name: Recover hosted-runner capacity and install native tools
@@ -90,5 +90,10 @@ jobs:
         run: |
           set -euo pipefail
           sha="$(python -c 'import json,os,pathlib; p=pathlib.Path(os.environ["RUNNER_TEMP"])/"cef-strict-evidence/native-full.json"; print(json.loads(p.read_text())["manifest_sha256"])')"
+          set +e
           python ci/cef-full/gn_check.py             --cef-recipe .full-cef             --manifest "$RUNNER_TEMP/cef-strict-evidence/platform-build-inputs.json"             --prefix "$RUNNER_TEMP/cef-strict-work/frozen-target-prefix"             --manifest-sha256 "$sha"             --work "$RUNNER_TEMP/cef-gn-work"             --evidence "$RUNNER_TEMP/cef-gn-evidence"             --jobs 4
+          rc=$?
+          set -e
+          cat "$RUNNER_TEMP/cef-gn-evidence/gn-qualification.json"
+          test "$rc" -eq 0
           python -c 'import json,os,pathlib; v=json.loads((pathlib.Path(os.environ["RUNNER_TEMP"])/"cef-gn-evidence/gn-qualification.json").read_text()); assert v.get("status")=="success" and v.get("gn_graph_qualified") is True and v.get("engine_link_verified") is False and v.get("engine_runtime_verified") is False; print("STRICT_CEF_GN_GRAPH_QUALIFIED")'
