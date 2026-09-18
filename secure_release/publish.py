@@ -109,6 +109,8 @@ def verify_result():
         if cfg is not None:
             evidence = manifest.get("cef", {})
             consumer = evidence.get("consumer", {})
+            cef_build.validate_platform_preflight(
+                evidence.get("platform_preflight"), consumer, cfg, platform)
             expected_key, expected_contract = cef_build.qualified_contract(
                 consumer, cfg, platform)
             if (evidence.get("build_contract_sha256") != expected_key
