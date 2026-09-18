@@ -7,10 +7,13 @@ on:
       - .github/workflows/cef-strict-platform-qualification.yml
 permissions:
   contents: read
+concurrency:
+  group: cef-strict-platform-qualification
+  cancel-in-progress: false
 jobs:
   qualify-linux:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 300
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -18,7 +21,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/vcpkg
-          ref: 8fd1ca83ba365f3fe3884d86f7ef6608c2095f2b
+          ref: a0ce35082136ac045c8e5cc97de4c0e4e29a5b38
           path: private-vcpkg
           token: ${{ secrets.SOURCE_READ_TOKEN }}
           persist-credentials: false
@@ -41,7 +44,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C private-vcpkg rev-parse HEAD)" = "8fd1ca83ba365f3fe3884d86f7ef6608c2095f2b"
+          test "$(git -C private-vcpkg rev-parse HEAD)" = "a0ce35082136ac045c8e5cc97de4c0e4e29a5b38"
           test "$(git -C private-vcpkg/.full-upstream rev-parse HEAD)" = "9e593bb18ea69cc5095e012465dcd675a822ed0d"
           test "$(git -C private-vcpkg/.full-cef rev-parse HEAD)" = "37729fd2b1db127c1658098d69ab63adc70e045f"
       - name: Recover hosted-runner capacity and install native tools
@@ -50,6 +53,37 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-14 g++-14 autoconf autoconf-archive automake libtool pkg-config ninja-build gperf flex bison nasm gettext texinfo libltdl-dev xvfb xauth fonts-dejavu-core
           df -h /
+      - name: Restore locked core package cache
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          repository: dobord/vcpkg
+          run-id: 35253194739
+          name: cef-core-core-35253194739-1
+          github-token: ${{ secrets.SOURCE_READ_TOKEN }}
+          path: ${{ runner.temp }}/cef-cache/core
+      - name: Restore locked CUPS package cache
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          repository: dobord/vcpkg
+          run-id: 35256931873
+          name: cef-final-cups-35256931873-1
+          github-token: ${{ secrets.SOURCE_READ_TOKEN }}
+          path: ${{ runner.temp }}/cef-cache/cups
+      - name: Restore locked GBM package cache
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          repository: dobord/vcpkg
+          run-id: 35255316311
+          name: cef-final-gbm-35255316311-1
+          github-token: ${{ secrets.SOURCE_READ_TOKEN }}
+          path: ${{ runner.temp }}/cef-cache/gbm
+      - name: Verify restored cache payloads are non-empty
+        shell: bash
+        run: |
+          set -euo pipefail
+          for d in core cups gbm; do
+            find "$RUNNER_TEMP/cef-cache/$d" -type f -name '*.zip' -print -quit | grep -q .
+          done
       - name: Qualify exact complete static platform graph
         shell: bash
         env:
@@ -59,5 +93,13 @@ jobs:
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/cef-strict-evidence"
           python -I -m unittest discover -s ci/cef-full/tests -v >"$RUNNER_TEMP/cef-strict-contract.log" 2>&1
-          python ci/cef-full/native.py --root . --work "$RUNNER_TEMP/cef-strict-work" --evidence "$RUNNER_TEMP/cef-strict-evidence" >"$RUNNER_TEMP/cef-strict-native.log" 2>&1
+          python ci/cef-full/native.py             --root .             --work "$RUNNER_TEMP/cef-strict-work"             --evidence "$RUNNER_TEMP/cef-strict-evidence"             --binary-cache "$RUNNER_TEMP/cef-cache/core"             --binary-cache "$RUNNER_TEMP/cef-cache/cups"             --binary-cache "$RUNNER_TEMP/cef-cache/gbm"             >"$RUNNER_TEMP/cef-strict-native.log" 2>&1
           python -c 'import json,os,pathlib; v=json.loads((pathlib.Path(os.environ["RUNNER_TEMP"])/"cef-strict-evidence/native-full.json").read_text()); assert v.get("status")=="success" and v.get("full_platform_graph_qualified") is True and v.get("module_count")==36; print("STRICT_CEF_FULL_PLATFORM_QUALIFIED")'
+      - name: Generate and audit real Chromium GN graph against frozen prefix
+        shell: bash
+        working-directory: private-vcpkg
+        run: |
+          set -euo pipefail
+          sha="$(python -c 'import json,os,pathlib; p=pathlib.Path(os.environ["RUNNER_TEMP"])/"cef-strict-evidence/native-full.json"; print(json.loads(p.read_text())["manifest_sha256"])')"
+          python ci/cef-full/gn_check.py             --cef-recipe .full-cef             --manifest "$RUNNER_TEMP/cef-strict-evidence/platform-build-inputs.json"             --prefix "$RUNNER_TEMP/cef-strict-work/frozen-target-prefix"             --manifest-sha256 "$sha"             --work "$RUNNER_TEMP/cef-gn-work"             --evidence "$RUNNER_TEMP/cef-gn-evidence"             --jobs 4
+          python -c 'import json,os,pathlib; v=json.loads((pathlib.Path(os.environ["RUNNER_TEMP"])/"cef-gn-evidence/gn-qualification.json").read_text()); assert v.get("status")=="success" and v.get("gn_graph_qualified") is True and v.get("engine_link_verified") is False and v.get("engine_runtime_verified") is False; print("STRICT_CEF_GN_GRAPH_QUALIFIED")'
