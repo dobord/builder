@@ -238,6 +238,7 @@ def main() -> None:
         "vcpkg_commit": VCPKG,
         "upstream_commit": UPSTREAM,
         "cef_recipe_commit": CEF,
+        "gn_graph_qualified": False,
     }
     clean_env = {
         key: value for key, value in os.environ.items()
@@ -350,6 +351,29 @@ def main() -> None:
             log=temp / "cef-install-build-deps.log", timeout=1800
         )
 
+        stage = "gn-check"
+        run(
+            [sys.executable, recipe / "vcpkg/ports/cef-static/source_build.py",
+             "check", "--work", engine_work, "--logs", engine_logs, "--jobs", "4",
+             "--platform-manifest", engine_work / "platform-inputs.json",
+             "--platform-prefix", engine_work / "target-prefix",
+             "--platform-sha256", platform_sha],
+            cwd=recipe, env=recipe_env,
+            log=temp / "cef-engine-gn-check.log", timeout=7200
+        )
+        graph_receipt = json.loads(
+            (engine_logs / "platform-graph-receipt.json").read_text()
+        )
+        if (graph_receipt.get("schema") != 1
+                or graph_receipt.get("status") != "static-platform-graph-verified"
+                or graph_receipt.get("runtime_verified") is not False
+                or graph_receipt.get("manifest_sha256") != platform_sha
+                or not isinstance(graph_receipt.get("archives"), list)
+                or not graph_receipt["archives"]):
+            raise RuntimeError("Strict CEF GN graph qualification is incomplete")
+        summary["gn_graph_qualified"] = True
+
+        stage = "compile-slice"
         state = temp / "cef-strict-iteration.json"
         slice_result = run(
             [sys.executable, recipe / "vcpkg/integration/driver.py", "slice",
@@ -362,6 +386,8 @@ def main() -> None:
             cwd=recipe, env=recipe_env,
             log=temp / "cef-engine-slice.log", timeout=14400, check=False
         )
+        summary["slice_exit_code"] = slice_result.returncode
+        summary["slice_state_present"] = state.is_file()
         state_value = json.loads(state.read_text()) if state.is_file() else {}
         if state_value.get("checkpoint_ready") is True and checkpoint.is_dir():
             base = cef_cache.context(
@@ -378,6 +404,7 @@ def main() -> None:
         if slice_result.returncode:
             raise RuntimeError("Strict CEF compilation slice failed")
         if state_value.get("ready") is True:
+            stage = "engine-runtime"
             summary["ready"] = True
             output("ready", True)
             run(
@@ -409,8 +436,10 @@ def main() -> None:
                 ) if key in progress
             }
         summary["status"] = "success"
-    except BaseException:
+    except BaseException as error:
         summary["status"] = "failed"
+        summary["failure_stage"] = locals().get("stage", "preflight")
+        summary["failure_type"] = type(error).__name__
         raise
     finally:
         summary_path.write_text(
