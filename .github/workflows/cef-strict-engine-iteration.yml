@@ -50,6 +50,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-14 g++-14 autoconf autoconf-archive automake libtool pkg-config ninja-build gperf flex bison nasm gettext texinfo libltdl-dev xvfb xauth fonts-dejavu-core ccache
           df -h /
+      - name: Validate strict iteration worker syntax
+        run: python -m py_compile secure_release/cef_strict_iteration.py
       - name: Run exact strict platform and Chromium iteration
         id: strict
         env:
