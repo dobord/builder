@@ -196,6 +196,15 @@ def main() -> None:
                 {"path": item["path"], "reason": item["reason"]}
                 for item in audit["violations"][:16]
             ],
+            "unqualified_archives": [
+                {
+                    "path": item["path"],
+                    "kinds": item["kinds"],
+                    "unqualified_samples": item["unqualified_samples"][:8],
+                }
+                for item in audit["archives"]
+                if not item["qualified_objects_only"]
+            ][:8],
         }
         (temp / "cef-strict-windows-summary.json").write_text(
             json.dumps(diagnostic, sort_keys=True, indent=2) + "\n", encoding="utf-8"
