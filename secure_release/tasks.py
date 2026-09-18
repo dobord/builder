@@ -360,6 +360,12 @@ def build():
     cef_proof = cef_build.verify_consumer(
         root, cfg, platform, execute, platform_sha256, platform_probe
     ) if cfg is not None else None
+    platform_preflight = None
+    if cfg is not None and cfg["profile"] == "static-third-party" and platform == "linux":
+        if platform_probe is None:
+            raise ValueError("Strict Linux result lost its platform preflight")
+        platform_preflight = crypto.parse(platform_probe["qualification"].read_bytes())
+        cef_build.validate_platform_preflight(platform_preflight, cef_proof, cfg, platform)
     bundle = root / "result"
     bundle.mkdir()
     shutil.copyfile(package, bundle / "sdk.zip")
@@ -372,6 +378,8 @@ def build():
     if cfg is not None:
         manifest["cef"] = {"build_contract_sha256": cef_contract.build_key(cfg, platform, platform_sha256),
                            "profile": cfg["profile"], "consumer": cef_proof}
+        if platform_preflight is not None:
+            manifest["cef"]["platform_preflight"] = platform_preflight
     (bundle / "manifest.json").write_bytes(crypto.canonical(manifest))
     safeio.pack_tar(bundle, root / "result.tgz")
     context = file_context(payload["release_id"], payload["salt"], int(env("GITHUB_RUN_ID")), int(env("GITHUB_RUN_ATTEMPT")), env("GITHUB_SHA"), "sdk", platform)
