@@ -175,6 +175,16 @@ def forbidden_sdk_tree(name: str) -> bool:
             or (len(lowered) >= 3 and lowered[0] == "installed" and lowered[2] == "debug"))
 
 
+def shared_target_payload(name: str) -> bool:
+    """Reject shared libraries only in target bin/lib, not host tools."""
+    pieces = [p.casefold() for p in parts(name)]
+    if len(pieces) < 4 or pieces[0] != "installed" or pieces[2] not in {"bin", "lib"}:
+        return False
+    filename = pieces[-1]
+    return (filename.endswith((".dll", ".dylib"))
+            or ".so" in filename)
+
+
 def sdk_zip(root: Path, archive: Path) -> None:
     """Package the export only, with normalized portable ZIP metadata."""
     banned_suffix = {".pdb", ".ilk", ".obj", ".o", ".pch", ".idb", ".ipch", ".dmp", ".log"}
@@ -184,6 +194,8 @@ def sdk_zip(root: Path, archive: Path) -> None:
             rel = item.relative_to(root)
             if forbidden_sdk_tree(rel.as_posix()):
                 raise ValueError("workspace or debug tree in SDK")
+            if shared_target_payload(rel.as_posix()):
+                raise ValueError("shared target payload in static SDK")
             if item.suffix.casefold() in banned_suffix or item.name.casefold() in banned_names:
                 continue
             if item.suffix.casefold() in {".c", ".cc", ".cpp", ".cxx"}:
