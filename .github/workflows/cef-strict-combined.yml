@@ -45,7 +45,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/vcpkg
-          ref: 99d41d5f1b1b978fdc0d589f7d12f1fc78dd606b
+          ref: 87b76306a659e148aa5ee149d86301006ea9646e
           path: private-vcpkg
           token: ${{ secrets.SOURCE_READ_TOKEN }}
           persist-credentials: false
