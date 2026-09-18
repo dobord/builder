@@ -54,8 +54,10 @@ jobs:
       - name: Verify content-addressed publisher policy snapshot
         env:
           PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/tests/vcpkg_bin_snapshot
+          PUBLISHER_POLICY_COMMIT: 5cd04365f4b20fd383bfd77beca03e9c45b084f4
         shell: bash
         run: |
           set -euo pipefail
+          python -c 'import json,os,pathlib; v=json.loads(pathlib.Path("tests/vcpkg_bin_snapshot/LOCK.json").read_text()); assert v["commit"] == os.environ["PUBLISHER_POLICY_COMMIT"]'
           python -m unittest tests.test_vcpkg_bin_snapshot -v
           python -m unittest discover -s tests/vcpkg_bin_snapshot -p 'test_*.py' -v
