@@ -84,8 +84,8 @@ py -m pip install --require-hashes --only-binary=:all: -r requirements.lock
 $env:GH_TOKEN = gh auth token
 py -m secure_release.fetch_sdk_local `
   --platform windows `
-  --private-key C:\secure\vcpkg-release-keys\artifact-output-private.json `
-  --request-verify-key C:\secure\vcpkg-release-keys\request-verify-public.json `
+  --private-key C:\secure\vcpkg-release-keys\artifact-private.json `
+  --request-verify-key C:\secure\vcpkg-release-keys\request-signing-public.json `
   --output C:\sdk\vcpkg-windows-static.zip
 ```
 
