@@ -8,6 +8,7 @@ evidence may qualify static-third-party on Windows.
 from __future__ import annotations
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -39,7 +40,7 @@ def run(command, *, cwd: Path, env: dict, log: Path, timeout: int) -> None:
             stderr=subprocess.STDOUT, timeout=timeout
         )
     if result.returncode:
-        raise RuntimeError("strict Windows CEF qualification subprocess failed")
+        raise RuntimeError("strict Windows CEF qualification subprocess failed at " + log.stem)
 
 
 def clean_environment() -> dict:
@@ -212,4 +213,23 @@ def hashlib_sha(path: Path) -> str:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except BaseException as error:
+        temp = Path(os.environ.get("RUNNER_TEMP", ".")).resolve()
+        summary = {
+            "schema": 1,
+            "status": "failed",
+            "kind": "cef-strict-windows-release-requalification",
+            "vcpkg_commit": VCPKG,
+            "upstream_commit": UPSTREAM,
+            "cef_recipe_commit": CEF,
+            "failure_type": type(error).__name__,
+        }
+        message = str(error)
+        match = re.search(r"failed at ([A-Za-z0-9_.-]+)\Z", message)
+        summary["failure_stage"] = match.group(1) if match else "validation"
+        (temp / "cef-strict-windows-summary.json").write_text(
+            json.dumps(summary, sort_keys=True, indent=2) + "\n", encoding="utf-8"
+        )
+        raise
