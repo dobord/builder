@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/vcpkg
-          ref: c60e7b532c546e2ac882a39be0303c8ec6a60eaa
+          ref: 736b290cf7338c26565c831d48c8ef52b8a353a5
           path: private-vcpkg
           token: ${{ secrets.SOURCE_READ_TOKEN }}
           persist-credentials: false
@@ -36,7 +36,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/cef
-          ref: 6a36621ea5493a94d7e79dc388746bbb8829b1d2
+          ref: c74fc487b25fc6e3dbbdd4d02c4e963735a66b96
           path: private-vcpkg/.full-cef
           persist-credentials: false
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c

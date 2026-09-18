@@ -1,8 +1,8 @@
 {
   "schema": 1,
   "platform": "linux",
-  "vcpkg_commit": "c60e7b532c546e2ac882a39be0303c8ec6a60eaa",
+  "vcpkg_commit": "736b290cf7338c26565c831d48c8ef52b8a353a5",
   "upstream_commit": "9e593bb18ea69cc5095e012465dcd675a822ed0d",
-  "cef_recipe_commit": "6a36621ea5493a94d7e79dc388746bbb8829b1d2",
+  "cef_recipe_commit": "c74fc487b25fc6e3dbbdd4d02c4e963735a66b96",
   "checkpoint": null
 }
