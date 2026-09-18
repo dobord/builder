@@ -110,8 +110,15 @@ separate unsupported claims.
 The aggregate SDK limit remains 1900 MiB and the safe archive limit 12 GiB. A
 larger SDK fails explicitly; multipart final-SDK publication is not implemented.
 Source sync, checkpoint compression/encryption and final qualification need time
-outside the compilation slice; large first builds may need smaller slice budgets
-and runners with more disk. The source recipe's 80 GiB startup check still applies.
+outside the compilation slice; large first builds may need smaller slice budgets.
+The source recipe's 80 GiB startup check still applies. Standard GitHub-hosted
+Linux/Windows runners are intentionally only fallbacks and are too small for a
+real Chromium source build. The public builder accepts trusted repository
+variables `CEF_STATIC_LINUX_RUNNER_LABELS` and
+`CEF_STATIC_WINDOWS_RUNNER_LABELS`, each containing a JSON runner-label array
+(for example a reviewed larger/self-hosted runner group). Runner selection is an
+operational resource choice and does not enter the CEF package ABI; the source,
+toolchain, target-prefix and checkpoint identities remain independently checked.
 
 Review and merge the CEF adapter, private vcpkg port/consumer, builder and private
 publisher changes together. Set one reviewed `BUILDER_COMMIT_SHA` consistently in
