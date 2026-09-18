@@ -117,7 +117,7 @@ class AuditTests(unittest.TestCase):
                 archive = report['archives'][0]
                 if expected:
                     self.assertEqual(archive['system_imports'], {dll: 1})
-                    self.assertEqual(archive['kinds'], {'coff-os-import': 1})
+                    self.assertEqual(archive['kinds'], {'coff-object': 1, 'coff-os-import': 1})
                 else:
                     self.assertEqual(archive['unqualified_samples'][0]['dll'], dll)
 
