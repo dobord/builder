@@ -98,7 +98,6 @@ jobs:
           temp.joinpath("cef-strict-build-key.txt").write_text(key+"\n")
       - name: Prepare pinned CEF sources and official Linux prerequisites
         env:
-          GITHUB_SHA: 37729fd2b1db127c1658098d69ab63adc70e045f
           CEF_STATIC_BUILD_TIMEOUT_SECONDS: '18000'
           CEF_STATIC_JOBS: '4'
         shell: bash
@@ -106,13 +105,12 @@ jobs:
           set -euo pipefail
           work="$RUNNER_TEMP/cef-strict-engine-work"
           logs="$RUNNER_TEMP/cef-strict-engine-logs"
-          python private-vcpkg/.full-cef/vcpkg/ports/cef-static/source_build.py prepare --work "$work" --logs "$logs" >"$RUNNER_TEMP/cef-source-prepare.log" 2>&1
+          env GITHUB_SHA=37729fd2b1db127c1658098d69ab63adc70e045f python private-vcpkg/.full-cef/vcpkg/ports/cef-static/source_build.py prepare --work "$work" --logs "$logs" >"$RUNNER_TEMP/cef-source-prepare.log" 2>&1
           sudo "$work/download/chromium/src/build/install-build-deps.sh" --no-prompt --no-arm --no-chromeos-fonts >"$RUNNER_TEMP/cef-install-build-deps.log" 2>&1
           df -h /
       - name: Run bounded strict GN Ninja compilation slice
         id: slice
         env:
-          GITHUB_SHA: 37729fd2b1db127c1658098d69ab63adc70e045f
           CEF_STATIC_STRICT_THIRD_PARTY: '1'
           CEF_STATIC_BUILD_TIMEOUT_SECONDS: '18000'
           CEF_STATIC_JOBS: '4'
@@ -123,7 +121,7 @@ jobs:
           logs="$RUNNER_TEMP/cef-strict-engine-logs"
           key="$(cat "$RUNNER_TEMP/cef-strict-build-key.txt")"
           sha="$(cat "$RUNNER_TEMP/cef-platform-sha256.txt")"
-          python private-vcpkg/.full-cef/vcpkg/integration/driver.py slice             --work "$work" --logs "$logs" --contract "$key"             --state "$RUNNER_TEMP/cef-strict-iteration.json"             --checkpoint "$RUNNER_TEMP/cef-strict-checkpoint"             --seconds 9000 --jobs 4             --platform-manifest "$work/platform-inputs.json"             --platform-prefix "$work/target-prefix"             --platform-sha256 "$sha"             >"$RUNNER_TEMP/cef-engine-slice.log" 2>&1
+          env GITHUB_SHA=37729fd2b1db127c1658098d69ab63adc70e045f python private-vcpkg/.full-cef/vcpkg/integration/driver.py slice             --work "$work" --logs "$logs" --contract "$key"             --state "$RUNNER_TEMP/cef-strict-iteration.json"             --checkpoint "$RUNNER_TEMP/cef-strict-checkpoint"             --seconds 9000 --jobs 4             --platform-manifest "$work/platform-inputs.json"             --platform-prefix "$work/target-prefix"             --platform-sha256 "$sha"             >"$RUNNER_TEMP/cef-engine-slice.log" 2>&1
           python - <<'PY'
           import json,os,pathlib
           temp=pathlib.Path(os.environ["RUNNER_TEMP"])
@@ -144,7 +142,6 @@ jobs:
       - name: Verify strict CEF runtime if compilation completed
         if: steps.slice.outputs.ready == 'true'
         env:
-          GITHUB_SHA: 37729fd2b1db127c1658098d69ab63adc70e045f
           CEF_STATIC_STRICT_THIRD_PARTY: '1'
           CEF_STATIC_BUILD_TIMEOUT_SECONDS: '18000'
           CEF_STATIC_JOBS: '4'
@@ -154,7 +151,7 @@ jobs:
           work="$RUNNER_TEMP/cef-strict-engine-work"
           logs="$RUNNER_TEMP/cef-strict-engine-logs"
           sha="$(cat "$RUNNER_TEMP/cef-platform-sha256.txt")"
-          python private-vcpkg/.full-cef/vcpkg/ports/cef-static/source_build.py build             --work "$work" --logs "$logs" --jobs 4             --platform-manifest "$work/platform-inputs.json"             --platform-prefix "$work/target-prefix"             --platform-sha256 "$sha"             >"$RUNNER_TEMP/cef-engine-runtime.log" 2>&1
+          env GITHUB_SHA=37729fd2b1db127c1658098d69ab63adc70e045f python private-vcpkg/.full-cef/vcpkg/ports/cef-static/source_build.py build             --work "$work" --logs "$logs" --jobs 4             --platform-manifest "$work/platform-inputs.json"             --platform-prefix "$work/target-prefix"             --platform-sha256 "$sha"             >"$RUNNER_TEMP/cef-engine-runtime.log" 2>&1
           python - <<'PY'
           import json,os,pathlib
           p=pathlib.Path(os.environ["RUNNER_TEMP"])/"cef-strict-engine-logs/engine-build-receipt.json"
