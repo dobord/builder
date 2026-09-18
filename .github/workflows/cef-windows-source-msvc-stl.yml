@@ -49,6 +49,9 @@ jobs:
           if ((git -C private-vcpkg rev-parse HEAD) -ne 'c9270689c87ef7d2a0aa610b927e67d4eb291b9c') { throw 'vcpkg revision mismatch' }
           if ((git -C private-lfc-ui rev-parse HEAD) -ne '85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5') { throw 'lfc-ui revision mismatch' }
           python -I -m unittest discover -s private-cef/vcpkg/static/tests -p test_platform_source.py -v
+          Remove-Item -LiteralPath "$env:GITHUB_WORKSPACE/private-vcpkg" -Recurse -Force
+          Remove-Item -LiteralPath "$env:GITHUB_WORKSPACE/private-cef/.git" -Recurse -Force
+          Remove-Item -LiteralPath "$env:GITHUB_WORKSPACE/private-lfc-ui/.git" -Recurse -Force
       - name: Check full source workspace capacity
         shell: pwsh
         run: |
