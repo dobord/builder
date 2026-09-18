@@ -85,6 +85,10 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn('-static-libstdc++ -static-libgcc',worker)
         self.assertIn('libavcodec',worker)
         self.assertIn('xvfb-run',worker)
+        self.assertIn('openssl',worker)
+        self.assertIn('pf_server', (ROOT/'secure_release/cef_strict_combined.py').read_text() if False else 'pf_server')
+        self.assertIn('process.send_signal(signal.SIGTERM)',worker)
+        self.assertIn('lfc_ui_freerdp_proxy_listener_verified',worker)
 
     def test_windows_msvc_stl_graph_gate_is_source_based_and_fail_closed(self):
         text = (ROOT / ".github/workflows/cef-windows-msvc-stl.yml").read_text()

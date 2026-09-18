@@ -12,8 +12,11 @@ import os
 from pathlib import Path
 import re
 import shutil
+import signal
+import socket
 import subprocess
 import sys
+import time
 
 from . import build_support, cef_build, cef_contract, crypto, safeio
 from . import cef_strict_iteration
@@ -462,6 +465,114 @@ cef_static_deploy_resources(freerdp_proxy_web_engine_view_cef)
         summary["lfc_ui_freerdp_cef_link_verified"] = True
         summary["lfc_ui_freerdp_cef_runtime_loader_verified"] = True
         summary["target_shared_payload_count"] = 0
+
+        certificate = root / "proxy-cert.pem"
+        private_key = root / "proxy-key.pem"
+        run(
+            ["openssl", "req", "-x509", "-newkey", "rsa:2048",
+             "-keyout", private_key, "-out", certificate,
+             "-sha256", "-days", "1", "-nodes", "-subj", "/CN=localhost"],
+            cwd=root, env=build_env,
+            log=root / "lfc-ui-freerdp-cef-certificate.log", timeout=60,
+        )
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as reservation:
+            reservation.bind(("127.0.0.1", 0))
+            proxy_port = reservation.getsockname()[1]
+        proxy_config = root / "freerdp-proxy.ini"
+        proxy_config.write_text(
+            f"""[Server]
+Host=127.0.0.1
+Port={proxy_port}
+
+[Target]
+FixedTarget=true
+Host=127.0.0.1
+Port=1
+User=
+Domain=
+Password=
+
+[Security]
+ServerRdpSecurity=true
+ServerTlsSecurity=true
+ServerNlaSecurity=false
+ClientRdpSecurity=true
+ClientTlsSecurity=true
+ClientNlaSecurity=false
+ClientAllowFallbackToTls=true
+
+[Channels]
+GFX=false
+DisplayControl=true
+PassthroughIsBlacklist=false
+Passthrough=drdynvc,Microsoft::Windows::RDS::DisplayControl,FreeRDP::Advanced::Input
+Clipboard=false
+AudioInput=false
+AudioOutput=false
+DeviceRedirection=false
+VideoRedirection=false
+CameraRedirection=false
+RemoteApp=false
+
+[Input]
+Keyboard=true
+Mouse=true
+Multitouch=false
+
+[Codecs]
+RFX=true
+NSC=true
+
+[Certificates]
+CertificateFile={certificate}
+PrivateKeyFile={private_key}
+""",
+            encoding="utf-8",
+        )
+        lifecycle_log = root / "lfc-ui-freerdp-cef-runtime.log"
+        with lifecycle_log.open("w", encoding="utf-8") as stream:
+            process = subprocess.Popen(
+                ["xvfb-run", "-a", str(proxy_exe), str(proxy_config)],
+                cwd=proxy_exe.parent, env=build_env,
+                stdout=stream, stderr=subprocess.STDOUT, text=True,
+            )
+            listening = False
+            deadline = time.monotonic() + 60
+            try:
+                while time.monotonic() < deadline:
+                    code = process.poll()
+                    if code is not None:
+                        raise RuntimeError(
+                            "Final FreeRDP/CEF process exited before proxy listener startup"
+                        )
+                    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    probe.settimeout(0.25)
+                    try:
+                        listening = probe.connect_ex(
+                            ("127.0.0.1", proxy_port)
+                        ) == 0
+                    finally:
+                        probe.close()
+                    if listening:
+                        break
+                    time.sleep(0.25)
+                if not listening:
+                    raise RuntimeError(
+                        "Final FreeRDP/CEF proxy listener did not start"
+                    )
+                process.send_signal(signal.SIGTERM)
+                code = process.wait(timeout=60)
+                if code != 0:
+                    raise RuntimeError(
+                        "Final FreeRDP/CEF process did not stop cleanly"
+                    )
+            except BaseException:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait(timeout=30)
+                raise
+        summary["lfc_ui_freerdp_cef_process_initialized"] = True
+        summary["lfc_ui_freerdp_proxy_listener_verified"] = True
 
         # The checkpoint codec binds this exact work path. Rename only after all
         # source/vcpkg operations are complete so verify_consumer can hide it
