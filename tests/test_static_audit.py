@@ -13,9 +13,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from secure_release import static_audit as audit
 
 
+def ar_record(data, name):
+    if len(name) > 16:
+        raise ValueError('ar member name must use a long-name table')
+    fields = (name.ljust(16), b'0'.ljust(12), b'0'.ljust(6), b'0'.ljust(6),
+              b'100644'.ljust(8), str(len(data)).encode().ljust(10), b'`\n')
+    return b''.join(fields) + data + (b'\n' if len(data) & 1 else b'')
+
+
 def ar(data, name=b'object.o/'):
-    fields = (name.ljust(16), b'0'.ljust(12), b'0'.ljust(6), b'0'.ljust(6), b'100644'.ljust(8), str(len(data)).encode().ljust(10), b'`\n')
-    return b'!<arch>\n' + b''.join(fields) + data + (b'\n' if len(data) & 1 else b'')
+    if len(name) <= 16:
+        return b'!<arch>\n' + ar_record(data, name)
+    longname = name if name.endswith(b'/') else name + b'/'
+    table = longname + b'\n'
+    return b'!<arch>\n' + ar_record(table, b'//') + ar_record(data, b'/0')
 
 
 def elf(kind=1):
@@ -99,8 +110,8 @@ class AuditTests(unittest.TestCase):
                                   ('third-party.dll', False)):
                 path = root / (dll.replace('.', '-') + '.zip')
                 with zipfile.ZipFile(path, 'w') as z:
-                    z.writestr(prefix+'lib/cef-static/cef_2181_7aff207fa4d8.lib',
-                               ar(short(dll), b'import.obj/'))
+                    payload = ar(coff(), b'native.obj/') + ar(short(dll), b'import.obj/')[8:]
+                    z.writestr(prefix+'lib/cef-static/cef_2181_7aff207fa4d8.lib', payload)
                 report = audit.inspect_sdk(path, 'windows')
                 self.assertEqual(report['target_archives_static'], expected, dll)
                 archive = report['archives'][0]
