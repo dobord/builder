@@ -6,6 +6,8 @@ on:
     paths:
       - .github/workflows/cef-strict-windows.yml
       - secure_release/cef_strict_windows.py
+      - secure_release/static_audit.py
+      - tests/test_static_audit.py
 permissions:
   contents: read
 jobs:
