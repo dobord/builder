@@ -128,6 +128,19 @@ class ContractTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             contract.validate(bad)
 
+    def test_strict_windows_release_import_is_marked_for_new_runtime_audit(self):
+        cfg = config()
+        cfg["profile"] = "static-third-party"
+        cfg["platforms"]["windows"]["mode"] = "release-import"
+        cfg["release_lock"] = release_lock()
+        environment = {}
+        with patch.object(cef_build, "materialize", return_value="f" * 64) as materialize:
+            self.assertTrue(cef_build.run_engine(
+                Path("/synthetic"), cfg, "windows", None, environment,
+                "private", "c" * 40, None))
+        materialize.assert_called_once()
+        self.assertEqual(environment["CEF_STATIC_STRICT_THIRD_PARTY"], "1")
+
     def test_explicit_resume_only(self):
         cfg = config()
         cfg["platforms"]["linux"]["mode"] = "source-resume"
