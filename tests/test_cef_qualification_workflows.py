@@ -86,7 +86,8 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn('libavcodec',worker)
         self.assertIn('xvfb-run',worker)
         self.assertIn('openssl',worker)
-        self.assertIn('pf_server', (ROOT/'secure_release/cef_strict_combined.py').read_text() if False else 'pf_server')
+        self.assertIn('[Server]',worker)
+        self.assertIn('proxy_config.write_text',worker)
         self.assertIn('process.send_signal(signal.SIGTERM)',worker)
         self.assertIn('lfc_ui_freerdp_proxy_listener_verified',worker)
 
