@@ -93,6 +93,19 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn('process.send_signal(signal.SIGTERM)',worker)
         self.assertIn('lfc_ui_freerdp_proxy_listener_verified',worker)
 
+    def test_windows_msvc_stl_full_source_gate_builds_lfc_ui_example(self):
+        text = (ROOT / ".github/workflows/cef-windows-source-msvc-stl.yml").read_text()
+        self.assertIn("ref: a8ecc4717a402ca5fc31051da00386bd50591ea3", text)
+        self.assertIn("source_build.py build", text)
+        self.assertIn("export_static.py", text)
+        self.assertIn("cef_cpp_support.lib", text)
+        self.assertIn("use-installed-static-cef.patch", text)
+        self.assertIn("--target web_engine_view_cef", text)
+        self.assertIn("--coff-imports", text)
+        self.assertIn("msvcp140.dll", text)
+        self.assertIn("LFC_UI_WINDOWS_SOURCE_BUILT_STATIC_CEF_LINK_QUALIFIED", text)
+        self.assertNotIn("upload-artifact", text)
+
     def test_windows_msvc_stl_graph_gate_is_source_based_and_fail_closed(self):
         text = (ROOT / ".github/workflows/cef-windows-msvc-stl.yml").read_text()
         self.assertIn("ref: a8ecc4717a402ca5fc31051da00386bd50591ea3", text)
