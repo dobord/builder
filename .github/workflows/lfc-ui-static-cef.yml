@@ -180,12 +180,21 @@ jobs:
             @'
           import os, pathlib, re
           text=pathlib.Path(os.environ["CEF_CPP_PREFLIGHT_LOG"]).read_text(errors="replace")[-262144:]
-          category="compile"
+          category, code, token = "compile", "", ""
           if re.search(r"cannot open include file|No such file or directory",text,re.I):
               category="missing-header"
           elif re.search(r"unresolved external symbol|undefined reference",text,re.I):
               category="link"
-          print("CEF_CPP_SUPPORT_PREFLIGHT_FAILURE category=" + category)
+          match=re.search(r"(?:fatal error|error)\s+(C[0-9]{4}):(?:\s*['\"]([^'\"\r\n]{1,80})['\"])?",text,re.I)
+          if not match:
+              match=re.search(r"(LNK[0-9]{4}):(?:[^\r\n]*?['\"]([^'\"\r\n]{1,80})['\"])?",text,re.I)
+          if match:
+              code=match.group(1).upper()
+              raw=(match.group(2) or "").strip()
+              if re.fullmatch(r"[A-Za-z0-9_+.:<>~-]{1,80}",raw):
+                  token=raw
+          suffix=(" code="+code if code else "")+(" token="+token if token else "")
+          print("CEF_CPP_SUPPORT_PREFLIGHT_FAILURE category=" + category + suffix)
           '@ | python -
             exit 1
           }
