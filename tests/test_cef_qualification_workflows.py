@@ -9,7 +9,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
     def test_full_platform_workflow_is_exact_and_keeps_native_output_private(self):
         text = (ROOT / ".github/workflows/cef-strict-platform-qualification.yml").read_text()
         self.assertIn("repository: dobord/vcpkg", text)
-        self.assertIn("ref: 324c4c677119df4f4d4b8beced7ef4623afc2512", text)
+        self.assertIn("ref: c60e7b532c546e2ac882a39be0303c8ec6a60eaa", text)
         self.assertIn("repository: microsoft/vcpkg", text)
         self.assertIn("ref: 9e593bb18ea69cc5095e012465dcd675a822ed0d", text)
         self.assertIn("repository: dobord/cef", text)
@@ -32,7 +32,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
     def test_strict_engine_iteration_uploads_only_encrypted_checkpoint(self):
         workflow=(ROOT/'.github/workflows/cef-strict-engine-iteration.yml').read_text()
         worker=(ROOT/'secure_release/cef_strict_iteration.py').read_text()
-        self.assertIn('ref: 324c4c677119df4f4d4b8beced7ef4623afc2512',workflow)
+        self.assertIn('ref: c60e7b532c546e2ac882a39be0303c8ec6a60eaa',workflow)
         self.assertIn('run: python -m secure_release.cef_strict_iteration',workflow)
         self.assertIn('Restore reviewed completed-package caches by exact artifact digest',workflow)
         self.assertIn('gh api "repos/dobord/vcpkg/actions/artifacts/$id/zip"',workflow)
@@ -55,7 +55,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertNotIn('print(text',worker)
         lock=(ROOT/'ci/cef-strict-engine-lock.json').read_text()
         self.assertIn('"checkpoint": null',lock)
-        self.assertIn('"vcpkg_commit": "324c4c677119df4f4d4b8beced7ef4623afc2512"',lock)
+        self.assertIn('"vcpkg_commit": "c60e7b532c546e2ac882a39be0303c8ec6a60eaa"',lock)
 
     def test_sdk_dependency_qualification_keeps_private_build_logs_runner_local(self):
         text = (ROOT / ".github/workflows/cef-strict-sdk-deps.yml").read_text()
@@ -81,7 +81,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
     def test_current_private_source_contract_workflow_pins_gn_gate_revision(self):
         text = (ROOT / ".github/workflows/cef-strict-source-contracts.yml").read_text()
         self.assertIn("repository: dobord/vcpkg", text)
-        self.assertIn("ref: 324c4c677119df4f4d4b8beced7ef4623afc2512", text)
+        self.assertIn("ref: c60e7b532c546e2ac882a39be0303c8ec6a60eaa", text)
         self.assertIn("ref: 457fd41f39cbcff940c7af654da899d44ba5e553", text)
         self.assertIn("ref: e212a7d7e3c427d882731428410a6ca1c48093ef", text)
         self.assertNotIn("git -C private-vcpkg/.full-cef apply --check", text)
