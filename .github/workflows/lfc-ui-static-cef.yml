@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/vcpkg
-          ref: 52bef1a3c2bfef7d20f2ad9f7f9ce86ad7a91534
+          ref: 6bc7ecd4dcfcea6caeedb209b67627aa4deb1564
           path: private-vcpkg
           token: ${{ secrets.SOURCE_READ_TOKEN }}
           persist-credentials: false
@@ -34,7 +34,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/cef
-          ref: d1c76dcfd2c5c8715942ceea7270a4732d31a3cd
+          ref: 0d3ebf395343d584e2c0ed266c5b3b61063de30c
           path: private-cef
           persist-credentials: false
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
@@ -50,7 +50,7 @@ jobs:
           lock = json.loads(Path("private-cef/vcpkg/integration/release.lock.json").read_text())
           contract = {
               "schema": 1,
-              "recipe_commit": "d1c76dcfd2c5c8715942ceea7270a4732d31a3cd",
+              "recipe_commit": "0d3ebf395343d584e2c0ed266c5b3b61063de30c",
               "profile": "static-third-party",
               "mode": "release-import",
               "triplet": "x64-windows-static-release",
