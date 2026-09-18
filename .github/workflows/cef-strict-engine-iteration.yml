@@ -6,6 +6,8 @@ on:
       - feature/cef-static-integration
     paths:
       - .github/workflows/cef-strict-engine-iteration.yml
+      - secure_release/cef_strict_iteration.py
+      - ci/cef-strict-engine-lock.json
 permissions:
   contents: read
   actions: read
