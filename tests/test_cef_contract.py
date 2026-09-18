@@ -33,11 +33,29 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(contract.build_key(cfg, "linux"), original)
 
     def test_semantic_changes_invalidate(self):
-        for key, value in (("profile", "static-third-party"), ("recipe_commit", "b" * 40)):
-            cfg = config()
-            original = contract.build_key(cfg, "linux")
-            cfg[key] = value
-            self.assertNotEqual(contract.build_key(cfg, "linux"), original)
+        cfg = config()
+        original = contract.build_key(cfg, "linux")
+        cfg["recipe_commit"] = "b" * 40
+        self.assertNotEqual(contract.build_key(cfg, "linux"), original)
+        cfg = config()
+        cfg["profile"] = "static-third-party"
+        strict_a = contract.build_key(cfg, "linux", "1" * 64)
+        strict_b = contract.build_key(cfg, "linux", "2" * 64)
+        self.assertNotEqual(strict_a, strict_b)
+        self.assertNotEqual(strict_a, original)
+
+    def test_strict_profile_is_source_only_and_linux_digest_bound(self):
+        cfg = config()
+        cfg["profile"] = "static-third-party"
+        contract.validate(cfg)
+        with self.assertRaises(ValueError):
+            contract.build_key(cfg, "linux")
+        self.assertEqual(contract.port_contract(cfg, "linux", "a" * 64)["platform_sha256"], "a" * 64)
+        self.assertIsNone(contract.port_contract(cfg, "windows")["platform_sha256"])
+        cfg["platforms"]["windows"]["mode"] = "release-import"
+        cfg["release_lock"] = {"schema": 1, "tag": "x", "tested_commit": "b" * 40, "platforms": {}}
+        with self.assertRaises(ValueError):
+            contract.validate(cfg)
 
     def test_explicit_resume_only(self):
         cfg = config()
@@ -91,6 +109,14 @@ class ContractTests(unittest.TestCase):
         for row in plan["platforms"].values():
             row["packages"].append("cef-static")
         validate_plan(plan)
+        strict = copy.deepcopy(plan)
+        strict["cef"]["profile"] = "static-third-party"
+        for row in strict["platforms"].values():
+            row["packages"][-1] = "cef-static[strict-platform]"
+        validate_plan(strict)
+        strict["platforms"]["linux"]["packages"][-1] = "cef-static"
+        with self.assertRaises(ValueError):
+            validate_plan(strict)
         plan["version"] = 1
         del plan["cef"]
         with self.assertRaises(ValueError):
@@ -105,6 +131,9 @@ class ContractTests(unittest.TestCase):
             key = cef_build.materialize(root, config(), "linux")
             self.assertEqual(key, contract.build_key(config(), "linux"))
             self.assertEqual(json.loads((port / "cef-build.json").read_text()), contract.port_contract(config(), "linux"))
+            strict = config(); strict["profile"] = "static-third-party"
+            key = cef_build.materialize(root, strict, "linux", "f" * 64)
+            self.assertEqual(key, contract.build_key(strict, "linux", "f" * 64))
 
     def test_no_credentials_in_worker_environment(self):
         with patch.dict("os.environ", {"GITHUB_TOKEN": "secret", "GITHUB_RUN_ID": "12", "GITHUB_REF": "refs/heads/main"}):
