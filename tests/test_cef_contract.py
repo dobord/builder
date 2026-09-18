@@ -5,7 +5,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
-from secure_release import cef_contract as contract, cef_build, build_support
+from secure_release import cef_contract as contract, cef_build, build_support, tasks
 from secure_release.protocol import validate_plan
 
 
@@ -19,6 +19,35 @@ def config():
 def selection():
     return {"run": 12, "attempt": 1, "artifact_id": 456, "artifact_sha256": "d" * 64}
 
+
+
+class ContinuationAPI:
+    def __init__(self, builder_sha="b" * 40, include_binary=True):
+        self.builder_sha = builder_sha
+        self.include_binary = include_binary
+        self.assert_repo = None
+
+    def get(self, path):
+        attempt = int(path.rsplit("/", 1)[1])
+        return {"repository": {"id": 1372874997}, "head_repository": {"id": 1372874997},
+                "path": ".github/workflows/build-release.yml", "head_sha": self.builder_sha,
+                "run_attempt": attempt, "event": "workflow_dispatch",
+                "status": "completed", "conclusion": "success"}
+
+    def artifacts(self, repo, run):
+        self.assert_repo = repo
+        values = [{
+            "id": 1001, "name": f"cef-checkpoint-linux-{run}-2", "expired": False,
+            "digest": "sha256:" + "c" * 64,
+            "workflow_run": {"id": run, "head_sha": self.builder_sha},
+        }]
+        if self.include_binary:
+            values.append({
+                "id": 1002, "name": f"vcpkg-binaries-linux-{run}-2", "expired": False,
+                "digest": "sha256:" + "d" * 64,
+                "workflow_run": {"id": run, "head_sha": self.builder_sha},
+            })
+        return values
 
 class ContractTests(unittest.TestCase):
     def test_native_triplets(self):
@@ -148,6 +177,76 @@ class ContractTests(unittest.TestCase):
             self.assertEqual(len(choices), 1)
             self.assertTrue(choices[0].endswith(",readwrite"))
             self.assertNotIn("--binarysource=clear", args)
+
+
+    def test_explicit_continuation_resolves_github_artifact_digests(self):
+        cfg = config()
+        cfg["profile"] = "static-third-party"
+        plan = {"version": 2, "upstream_sha": "e" * 40,
+                "ports": [{"name": "example", "repository": "dobord/example", "sha": "f" * 40}],
+                "platforms": {"linux": {"packages": ["example", "cef-static[strict-platform]"]},
+                              "windows": {"packages": ["example", "cef-static[strict-platform]"]}},
+                "smoke_path": "ci/smoke", "cef": cfg}
+        api = ContinuationAPI()
+        result = tasks._apply_continuation(
+            plan, {"linux_builder_run": "42", "linux_builder_attempt": "2",
+                   "windows_builder_run": "", "windows_builder_attempt": ""},
+            "b" * 40, api)
+        selected = result["cef"]["platforms"]["linux"]
+        self.assertEqual(selected["mode"], "source-resume")
+        self.assertEqual(selected["checkpoint"],
+                         {"run": 42, "attempt": 2, "artifact_id": 1001, "artifact_sha256": "c" * 64})
+        self.assertEqual(selected["binary_cache"],
+                         {"run": 42, "attempt": 2, "artifact_id": 1002, "artifact_sha256": "d" * 64})
+        self.assertEqual(result["cef"]["platforms"]["windows"]["mode"], "source-fresh")
+        self.assertEqual(api.assert_repo, "dobord/builder")
+        self.assertEqual(plan["cef"]["platforms"]["linux"]["mode"], "source-fresh")
+
+    def test_continuation_never_falls_back_or_crosses_builder_revision(self):
+        cfg = config()
+        cfg["profile"] = "static-third-party"
+        plan = {"version": 2, "upstream_sha": "e" * 40,
+                "ports": [{"name": "example", "repository": "dobord/example", "sha": "f" * 40}],
+                "platforms": {"linux": {"packages": ["example", "cef-static[strict-platform]"]},
+                              "windows": {"packages": ["example", "cef-static[strict-platform]"]}},
+                "smoke_path": "ci/smoke", "cef": cfg}
+        with self.assertRaises(ValueError):
+            tasks._apply_continuation(
+                plan, {"linux_builder_run": "42", "linux_builder_attempt": "",
+                       "windows_builder_run": "", "windows_builder_attempt": ""},
+                "b" * 40, ContinuationAPI())
+        with self.assertRaises(ValueError):
+            tasks._apply_continuation(
+                plan, {"linux_builder_run": "42", "linux_builder_attempt": "2",
+                       "windows_builder_run": "", "windows_builder_attempt": ""},
+                "b" * 40, ContinuationAPI(builder_sha="a" * 40))
+        with self.assertRaises(ValueError):
+            tasks._apply_continuation(
+                plan, {"linux_builder_run": "", "linux_builder_attempt": "",
+                       "windows_builder_run": "", "windows_builder_attempt": ""},
+                "b" * 40, ContinuationAPI())
+
+    def test_checkpoint_iteration_persists_completed_package_cache(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            cache = root / "cache"
+            cache.mkdir()
+            (cache / "package.zip").write_bytes(b"binary-cache-fixture")
+            contexts = []
+            with patch.dict("os.environ", {
+                    "RUNNER_TEMP": str(root / "runner"),
+                    "GITHUB_RUN_ID": "77", "GITHUB_RUN_ATTEMPT": "1",
+                    "GITHUB_SHA": "b" * 40, "GITHUB_OUTPUT": str(root / "output")}):
+                with patch.object(tasks.crypto, "public_text", return_value="public"), \
+                     patch.object(tasks.cef_cache, "seal",
+                                  side_effect=lambda source, target, public, context: contexts.append(context)), \
+                     patch.object(tasks.cef_build, "write_output") as output:
+                    self.assertTrue(tasks._persist_binary_cache(
+                        cache, "a" * 64, "linux", "private"))
+            self.assertEqual(len(contexts), 1)
+            self.assertEqual(contexts[0], tasks.cef_cache.context(
+                "vcpkg-binaries", "linux", "a" * 64, 77, 1, "b" * 40, "index"))
+            output.assert_called_once_with("binary_cache_ready", True)
 
     def test_missing_runtime_evidence_is_rejected(self):
         for proof in ({}, {"schema": 1}, {"kind": "engine-iteration", "ready": True}):
