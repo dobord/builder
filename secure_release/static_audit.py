@@ -170,6 +170,10 @@ def inspect_archive(stream: BinaryIO, size: int, platform: str,
         kind = object_kind(payload, text, platform)
         if kind == 'coff-import' and allow_windows_os_imports:
             dll = short_import_dll(payload)
+            if dll is None:
+                candidate = text.casefold()
+                if re.fullmatch(r'[a-z0-9_.-]+\.(?:dll|drv)', candidate):
+                    dll = candidate
             if dll is not None and allowed_windows_os_import(dll):
                 kinds['coff-os-import'] += 1
                 system_imports[dll] += 1
@@ -179,6 +183,8 @@ def inspect_archive(stream: BinaryIO, size: int, platform: str,
             sample = {'member': text, 'kind': kind}
             if kind == 'coff-import':
                 dll = short_import_dll(payload)
+                if dll is None and re.fullmatch(r'[A-Za-z0-9_.-]+\.(?:dll|drv)', text):
+                    dll = text.casefold()
                 if dll is not None:
                     sample['dll'] = dll
             samples.append(sample)
@@ -301,7 +307,7 @@ WINDOWS_API_SET = re.compile(r'(?:api|ext)-ms-win-[a-z0-9-]+\.dll\Z', re.I)
 # OS ABI imports observed/reviewed for the pinned CEF/Rust Windows closure.
 # This is deliberately not a generic "any DLL under System32" policy.
 WINDOWS_OS_IMPORT_DLLS = frozenset({
-    'advapi32.dll', 'bcrypt.dll', 'kernel32.dll', 'ntdll.dll',
+    'advapi32.dll', 'bcrypt.dll', 'bcryptprimitives.dll', 'kernel32.dll', 'ntdll.dll',
     'ole32.dll', 'rpcrt4.dll', 'secur32.dll', 'shell32.dll',
     'user32.dll', 'userenv.dll', 'ws2_32.dll',
 })
