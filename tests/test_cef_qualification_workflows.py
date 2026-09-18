@@ -91,12 +91,12 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
 
     def test_lfc_ui_static_cef_workflow_builds_upstream_example(self):
         text = (ROOT / ".github/workflows/lfc-ui-static-cef.yml").read_text()
-        self.assertIn("ref: 36b2d770ee9b4ec367eeae2723f8fe317e562b1f", text)
-        self.assertIn("ref: 6a36621ea5493a94d7e79dc388746bbb8829b1d2", text)
+        self.assertIn("ref: c7fb5af43431773dd68b3afe746ef71ecd786dc9", text)
+        self.assertIn("ref: c74fc487b25fc6e3dbbdd4d02c4e963735a66b96", text)
         self.assertIn("'lfc-ui[cef]'", text)
         self.assertIn("web_engine_view_cef.cpp", text)
         self.assertIn("find_package(lfc-ui CONFIG REQUIRED COMPONENTS WebEngine)", text)
-        self.assertIn("TARGET CEF::static", text)
+        self.assertIn("TARGET CEF::cpp", text)
         self.assertIn("cef_static_deploy_resources(web_engine_view_cef)", text)
         self.assertIn("LFC_UI_CEF_SHARED_TARGET_PAYLOAD", text)
 
