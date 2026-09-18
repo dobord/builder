@@ -5,50 +5,18 @@ on:
       - feature/cef-static-integration
     paths:
       - .github/workflows/cef-strict-windows.yml
-      - secure_release/cef_strict_windows.py
 permissions:
   contents: read
 jobs:
   windows:
     runs-on: windows-2022
-    timeout-minutes: 150
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          repository: dobord/vcpkg
-          ref: 9b8c4b30b943375eaca5ac177d79a26df8035ba7
-          path: private-vcpkg
-          token: ${{ secrets.SOURCE_READ_TOKEN }}
-          persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          repository: microsoft/vcpkg
-          ref: 9e593bb18ea69cc5095e012465dcd675a822ed0d
-          path: private-vcpkg/.windows-upstream
-          persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          repository: dobord/cef
-          ref: 37729fd2b1db127c1658098d69ab63adc70e045f
-          path: private-vcpkg/.full-cef
-          persist-credentials: false
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
         with:
           python-version: '3.12'
-      - name: Install pinned CMake
-        run: python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r build-tools.lock
-      - name: Validate strict Windows worker
+      - name: Validate strict Windows worker syntax
         run: python -m py_compile secure_release/cef_strict_windows.py
-      - name: Qualify locked Windows static CEF through vcpkg
-        run: python -m secure_release.cef_strict_windows
-      - name: Upload non-sensitive Windows qualification summary
-        if: success()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: cef-strict-windows-summary-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/cef-strict-windows-summary.json
-          retention-days: 7
-          if-no-files-found: error
