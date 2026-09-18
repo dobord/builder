@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "repository": "dobord/vcpkg-bin",
-  "commit": "b65ae0f43200ededcaa37acd824fff31b1c86cc9",
+  "commit": "dd060ec1c71df021c3b4dda741f3424e7de6bac3",
   "files": {
     "tests/vcpkg_bin_snapshot/cef_publication.py": {
       "source": "ci/cef_publication.py",
@@ -13,7 +13,7 @@
     },
     "tests/vcpkg_bin_snapshot/test_cef_publication.py": {
       "source": "ci/tests/test_cef_publication.py",
-      "github_blob_sha": "6cf6059f850c67f09e10f885ceb64d6c84a3638b"
+      "github_blob_sha": "1d9ec24b99ebc769c5b5be45392aa3484f1e7831"
     },
     "tests/vcpkg_bin_snapshot/test_cef_archive_gate.py": {
       "source": "ci/tests/test_cef_archive_gate.py",
