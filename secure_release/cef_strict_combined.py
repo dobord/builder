@@ -21,7 +21,8 @@ import time
 from . import build_support, cef_build, cef_contract, crypto, safeio
 from . import cef_strict_iteration
 
-VCPKG = "d5f62138a9b45c71fb407a48edb0b4cefd5affe6"
+ENGINE_VCPKG = "d5f62138a9b45c71fb407a48edb0b4cefd5affe6"
+SDK_VCPKG = "99d41d5f1b1b978fdc0d589f7d12f1fc78dd606b"
 UPSTREAM = "9e593bb18ea69cc5095e012465dcd675a822ed0d"
 CEF = "37efc4f9f340992d50d6f3fa41f617c9013fa26b"
 LOCKFREECORO = "24038aed3a0be642adb60e71bd994ae8f0d90140"
@@ -33,6 +34,59 @@ def git_head(path: Path) -> str:
     return subprocess.check_output(
         ["git", "-C", str(path), "rev-parse", "HEAD"], text=True, timeout=30
     ).strip()
+
+
+def registry_snapshot(root: Path) -> dict[str, str]:
+    result = {}
+    ignored_roots = {".git", ".full-upstream", ".full-cef"}
+    for path in sorted(root.rglob("*")):
+        relative = path.relative_to(root)
+        if not relative.parts or relative.parts[0] in ignored_roots:
+            continue
+        if path.is_symlink():
+            raise ValueError("Registry snapshot contains a symlink")
+        if path.is_file():
+            result[relative.as_posix()] = crypto.digest(path)
+    return result
+
+
+def verify_engine_registry_delta(engine: Path, sdk: Path) -> None:
+    if git_head(engine) != ENGINE_VCPKG or git_head(sdk) != SDK_VCPKG:
+        raise ValueError("Strict combined registry provenance mismatch")
+    before, after = registry_snapshot(engine), registry_snapshot(sdk)
+    changed = {
+        name for name in set(before) | set(after)
+        if before.get(name) != after.get(name)
+    }
+    required = {
+        "ports/freerdp/portfile.cmake",
+        "ports/freerdp/vcpkg.json",
+        "versions/baseline.json",
+        "versions/f-/freerdp.json",
+        "ci/cef/tests/test_contracts.py",
+    }
+    allowed = {
+        name for name in changed
+        if name.startswith("ports/freerdp/")
+        or name in {
+            "versions/baseline.json",
+            "versions/f-/freerdp.json",
+            "ci/cef/tests/test_contracts.py",
+        }
+    }
+    if changed != allowed or not required.issubset(changed):
+        raise ValueError("Final SDK registry changed outside the reviewed FreeRDP delta")
+
+    old_baseline = json.loads((engine / "versions/baseline.json").read_text())
+    new_baseline = json.loads((sdk / "versions/baseline.json").read_text())
+    old_freerdp = old_baseline["default"].pop("freerdp")
+    new_freerdp = new_baseline["default"].pop("freerdp")
+    if old_baseline != new_baseline:
+        raise ValueError("Registry baseline changed outside FreeRDP")
+    if (old_freerdp.get("baseline"), old_freerdp.get("port-version")) != ("3.31.1", 10):
+        raise ValueError("Unexpected engine-registry FreeRDP baseline")
+    if (new_freerdp.get("baseline"), new_freerdp.get("port-version")) != ("3.31.1", 11):
+        raise ValueError("Unexpected final-registry FreeRDP baseline")
 
 
 def clean_environment() -> dict[str, str]:
@@ -102,12 +156,14 @@ def main() -> None:
     workspace = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
     temp = Path(os.environ["RUNNER_TEMP"]).resolve()
     registry = workspace / "private-vcpkg"
+    engine_registry = workspace / "private-engine-vcpkg"
     upstream = registry / ".full-upstream"
     recipe_checkout = registry / ".full-cef"
     lockfree = workspace / "private-lockfreecoro"
     lfc_ui = workspace / "private-lfc-ui"
     expected_heads = {
-        registry: VCPKG,
+        registry: SDK_VCPKG,
+        engine_registry: ENGINE_VCPKG,
         upstream: UPSTREAM,
         recipe_checkout: CEF,
         lockfree: LOCKFREECORO,
@@ -116,6 +172,7 @@ def main() -> None:
     for path, revision in expected_heads.items():
         if git_head(path) != revision:
             raise ValueError("Strict combined SDK source revision mismatch")
+    verify_engine_registry_delta(engine_registry, registry)
 
     plan = json.loads((registry / "ci/release-plan.json").read_text(encoding="utf-8"))
     cfg = plan["cef"]
@@ -154,7 +211,8 @@ def main() -> None:
         "kind": "cef-strict-combined-sdk-qualification",
         "status": "running",
         "platform": "linux",
-        "vcpkg_commit": VCPKG,
+        "engine_vcpkg_commit": ENGINE_VCPKG,
+        "sdk_vcpkg_commit": SDK_VCPKG,
         "upstream_commit": UPSTREAM,
         "cef_recipe_commit": CEF,
         "build_contract_sha256": build_key,
