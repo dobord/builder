@@ -34,13 +34,14 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
     def test_strict_engine_iteration_uploads_only_encrypted_checkpoint(self):
         workflow=(ROOT/'.github/workflows/cef-strict-engine-iteration.yml').read_text()
         worker=(ROOT/'secure_release/cef_strict_iteration.py').read_text()
-        self.assertIn('ref: 6746bb33a98f92e43a931069bb5e2ee8e2db5b02',workflow)
+        self.assertIn('ref: 03d570423f92d512c2abe9ddd27a91aa3a2620e5',workflow)
         self.assertIn('run: python -m secure_release.cef_strict_iteration',workflow)
         self.assertIn('- secure_release/cef_strict_iteration.py',workflow)
         self.assertIn('- ci/cef-strict-engine-lock.json',workflow)
         self.assertIn('Restore reviewed completed-package caches by exact artifact digest',workflow)
         self.assertIn('gh api "repos/dobord/vcpkg/actions/artifacts/$id/zip"',workflow)
         self.assertIn('sha256sum -c -',workflow)
+        self.assertIn('VCPKG = "03d570423f92d512c2abe9ddd27a91aa3a2620e5"',worker)
         self.assertIn('"--binary-cache"',worker)
         self.assertIn('cef-strict-checkpoint-encrypted/*.enc',workflow)
         self.assertNotIn('path: ${{ runner.temp }}/cef-strict-checkpoint/*',workflow)
@@ -61,7 +62,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertNotIn('print(text',worker)
         lock=(ROOT/'ci/cef-strict-engine-lock.json').read_text()
         self.assertIn('"checkpoint": null',lock)
-        self.assertIn('"vcpkg_commit": "6746bb33a98f92e43a931069bb5e2ee8e2db5b02"',lock)
+        self.assertIn('"vcpkg_commit": "03d570423f92d512c2abe9ddd27a91aa3a2620e5"',lock)
 
     def test_sdk_dependency_qualification_keeps_private_build_logs_runner_local(self):
         text = (ROOT / ".github/workflows/cef-strict-sdk-deps.yml").read_text()
@@ -87,11 +88,13 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn('- .github/workflows/cef-strict-combined.yml',text)
         self.assertIn('- secure_release/cef_strict_combined.py',text)
         self.assertIn('- ci/cef-strict-engine-lock.json',text)
+        self.assertIn('ref: 03d570423f92d512c2abe9ddd27a91aa3a2620e5',text)
         self.assertIn('run: python -m secure_release.cef_strict_combined',text)
         self.assertIn('cef-strict-combined-summary-',text)
         self.assertNotIn('cipher-output',text)
         self.assertNotIn('compiler.log',text)
         worker=(ROOT/'secure_release/cef_strict_combined.py').read_text()
+        self.assertIn('VCPKG = "03d570423f92d512c2abe9ddd27a91aa3a2620e5"',worker)
         self.assertIn('freerdp_proxy_web_engine_view_cef.cpp',worker)
         self.assertIn('"lfc-ui-freerdp-cef-consumer"',worker)
         self.assertIn('freerdp-server-proxy',worker)
@@ -145,13 +148,13 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
 
     def test_freerdp_static_diagnostic_uses_deterministic_audio_revision(self):
         text = (ROOT / ".github/workflows/freerdp-static-diagnostic.yml").read_text()
-        self.assertIn("ref: 6746bb33a98f92e43a931069bb5e2ee8e2db5b02", text)
+        self.assertIn("ref: 03d570423f92d512c2abe9ddd27a91aa3a2620e5", text)
         self.assertIn("FREERDP_STATIC_CONFIGURE_FAILURE category=", text)
         self.assertNotIn("upload-artifact", text)
 
     def test_lfc_ui_static_freerdp_workflow_is_relocated_and_static(self):
         text = (ROOT / ".github/workflows/lfc-ui-static-freerdp.yml").read_text()
-        self.assertIn("ref: 6746bb33a98f92e43a931069bb5e2ee8e2db5b02", text)
+        self.assertIn("ref: 03d570423f92d512c2abe9ddd27a91aa3a2620e5", text)
         self.assertIn("'lfc-ui[freerdp]'", text)
         self.assertIn("freerdp-server-proxy", text)
         self.assertIn("freerdp-shadow", text)
@@ -182,7 +185,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
     def test_current_private_source_contract_workflow_pins_gn_gate_revision(self):
         text = (ROOT / ".github/workflows/cef-strict-source-contracts.yml").read_text()
         self.assertIn("repository: dobord/vcpkg", text)
-        self.assertIn("ref: 6746bb33a98f92e43a931069bb5e2ee8e2db5b02", text)
+        self.assertIn("ref: 03d570423f92d512c2abe9ddd27a91aa3a2620e5", text)
         self.assertIn("ref: befa5c26c0c608165f27ac348e892305837fd614", text)
         self.assertIn("ref: 457fd41f39cbcff940c7af654da899d44ba5e553", text)
         self.assertNotIn("git -C private-vcpkg/.full-cef apply --check", text)
