@@ -58,6 +58,15 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           python -m secure_release.cef_windows_iteration
+      - name: Probe encrypted checkpoint artifact schema
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: cef-windows-engine-checkpoint-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/cef-windows-engine-checkpoint-encrypted/*.enc
+          if-no-files-found: ignore
+          retention-days: 7
+          compression-level: 0
       - name: Probe summary artifact schema
         if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
