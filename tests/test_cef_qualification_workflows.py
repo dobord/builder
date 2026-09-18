@@ -168,6 +168,9 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn("LFC_UI_CEF_SHARED_TARGET_PAYLOAD", text)
         self.assertIn("LFC_UI_CEF_ENGINE_INSTALL_FAILURE category=", text)
         self.assertIn("CEF_RELEASE_PREFLIGHT_ACQUIRED", text)
+        self.assertIn("CEF_RELEASE_PREFLIGHT_INSTALLED", text)
+        self.assertIn("CEF_CPP_SUPPORT_PREFLIGHT_QUALIFIED", text)
+        self.assertIn("CEF_CPP_SUPPORT_PREFLIGHT_FAILURE category=", text)
         self.assertIn("CEF_RELEASE_PREFLIGHT_FAILURE category=", text)
 
     def test_current_private_source_contract_workflow_pins_gn_gate_revision(self):
