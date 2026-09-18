@@ -73,10 +73,57 @@ jobs:
             "--x-install-root=$installed"
             --binarysource=clear
           )
+          set +e
           "$upstream/vcpkg" install 'lfc-ui[freerdp]' "${common[@]}" >"$RUNNER_TEMP/lfc-ui-freerdp-install.log" 2>&1
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ]; then
+            python - <<'PY'
+          import os, pathlib, re
+          text = (pathlib.Path(os.environ["RUNNER_TEMP"]) / "lfc-ui-freerdp-install.log").read_text(errors="replace")
+          package = "unknown"
+          for pattern in (
+              r"error: building ([a-z0-9][a-z0-9+_.-]*):x64-linux-static-release",
+              r"([a-z0-9][a-z0-9+_.-]*):x64-linux-static-release failed",
+              r"BUILD_FAILED[^\n]*?([a-z0-9][a-z0-9+_.-]+):x64-linux-static-release",
+          ):
+              match = re.search(pattern, text, re.I)
+              if match:
+                  package = match.group(1).lower()
+                  break
+          reason = "unknown"
+          missing = re.search(
+              r'Could not find a package configuration file provided by\s+["\']?([A-Za-z0-9+_.-]+)',
+              text, re.I,
+          )
+          if missing and re.fullmatch(r"[A-Za-z0-9+_.-]+", missing.group(1)):
+              reason = "missing-cmake-package-" + missing.group(1).lower()
+          elif re.search(r"(patch failed|does not apply|corrupt patch)", text, re.I):
+              reason = "patch"
+          elif re.search(r"(failed to download|download failed|curl.*error)", text, re.I):
+              reason = "download"
+          elif re.search(r"(configuring .* failed|cmake error)", text, re.I):
+              reason = "configure"
+          elif re.search(r"(build failed|ninja: build stopped|make: \*\*\*)", text, re.I):
+              reason = "build"
+          if not re.fullmatch(r"[a-z0-9][a-z0-9+_.-]*|unknown", package):
+              package = "unknown"
+          if not re.fullmatch(r"[a-z0-9+_.-]+", reason):
+              reason = "unknown"
+          print(f"LFC_UI_FREERDP_INSTALL_FAILURE package={package} reason={reason}")
+          PY
+            exit "$rc"
+          fi
           export_root="$RUNNER_TEMP/lfc-ui-freerdp-export"
           mkdir -p "$export_root"
+          set +e
           "$upstream/vcpkg" export lfc-ui freerdp ffmpeg "${common[@]}"             --raw --output=sdk "--output-dir=$export_root" >"$RUNNER_TEMP/lfc-ui-freerdp-export.log" 2>&1
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ]; then
+            echo "LFC_UI_FREERDP_EXPORT_FAILURE" >&2
+            exit "$rc"
+          fi
           sdk="$export_root/sdk"
           mkdir -p "$sdk/triplets"
           cp "$GITHUB_WORKSPACE/private-vcpkg/triplets/x64-linux-static-release.cmake" "$sdk/triplets/"
