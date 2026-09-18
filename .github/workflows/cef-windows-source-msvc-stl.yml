@@ -21,13 +21,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/cef
-          ref: befa5c26c0c608165f27ac348e892305837fd614
+          ref: 37efc4f9f340992d50d6f3fa41f617c9013fa26b
           path: private-cef
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/vcpkg
-          ref: 32f9a0430ef382ae0899a73667049382a9c65d8c
+          ref: 630ca19aa95016b4eb08fe4325e2b2df78fcca55
           path: private-vcpkg
           token: ${{ secrets.SOURCE_READ_TOKEN }}
           persist-credentials: false
@@ -45,11 +45,11 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          if ((git -C private-cef rev-parse HEAD) -ne 'befa5c26c0c608165f27ac348e892305837fd614') { throw 'CEF revision mismatch' }
-          if ((git -C private-vcpkg rev-parse HEAD) -ne '32f9a0430ef382ae0899a73667049382a9c65d8c') { throw 'vcpkg revision mismatch' }
+          if ((git -C private-cef rev-parse HEAD) -ne '37efc4f9f340992d50d6f3fa41f617c9013fa26b') { throw 'CEF revision mismatch' }
+          if ((git -C private-vcpkg rev-parse HEAD) -ne '630ca19aa95016b4eb08fe4325e2b2df78fcca55') { throw 'vcpkg revision mismatch' }
           if ((git -C private-lfc-ui rev-parse HEAD) -ne '85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5') { throw 'lfc-ui revision mismatch' }
           python -I -m unittest discover -s private-cef/vcpkg/static/tests -p test_platform_source.py -v
-          Remove-Item -LiteralPath "$env:GITHUB_WORKSPACE/private-vcpkg" -Recurse -Force
+          Remove-Item -LiteralPath "$env:GITHUB_WORKSPACE/private-vcpkg/.git" -Recurse -Force
           Remove-Item -LiteralPath "$env:GITHUB_WORKSPACE/private-cef/.git" -Recurse -Force
           Remove-Item -LiteralPath "$env:GITHUB_WORKSPACE/private-lfc-ui/.git" -Recurse -Force
       - name: Check full source workspace capacity
@@ -61,7 +61,7 @@ jobs:
       - name: Build and runtime-verify static CEF from source
         shell: pwsh
         env:
-          GITHUB_SHA: befa5c26c0c608165f27ac348e892305837fd614
+          GITHUB_SHA: 37efc4f9f340992d50d6f3fa41f617c9013fa26b
           CEF_STATIC_BUILD_TIMEOUT_SECONDS: '18000'
           CEF_STATIC_JOBS: '4'
         run: |

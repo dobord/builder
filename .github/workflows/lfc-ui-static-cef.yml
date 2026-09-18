@@ -1,4 +1,4 @@
-name: lfc-ui static CEF feature qualification
+name: CEF strict release-import rejection
 on:
   push:
     branches:
@@ -7,10 +7,13 @@ on:
       - .github/workflows/lfc-ui-static-cef.yml
 permissions:
   contents: read
+concurrency:
+  group: cef-strict-release-import-rejection
+  cancel-in-progress: true
 jobs:
   windows:
     runs-on: windows-2022
-    timeout-minutes: 150
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -18,7 +21,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/vcpkg
-          ref: eca827d50971a1acc1a7f44a85108e22c302decd
+          ref: 630ca19aa95016b4eb08fe4325e2b2df78fcca55
           path: private-vcpkg
           token: ${{ secrets.SOURCE_READ_TOKEN }}
           persist-credentials: false
@@ -26,323 +29,54 @@ jobs:
         with:
           repository: microsoft/vcpkg
           ref: 9e593bb18ea69cc5095e012465dcd675a822ed0d
-          path: private-vcpkg/.lfc-cef-upstream
+          path: private-vcpkg/.strict-reject-upstream
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/cef
-          ref: df861f0ea6ac7c950c3e20689f38817ba7889bde
+          ref: 37efc4f9f340992d50d6f3fa41f617c9013fa26b
           path: private-cef
-          persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          repository: dobord/lfc-ui
-          ref: 85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5
-          path: private-lfc-ui
-          token: ${{ secrets.SOURCE_READ_TOKEN }}
           persist-credentials: false
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
         with:
           python-version: '3.12'
-      - name: Install pinned Python and CMake tooling
-        run: |
-          python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r requirements.lock
-          python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r build-tools.lock
-      - name: Verify revisions and prepare offline private sources
+      - name: Materialize an intentionally invalid strict release-import contract
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          if ((git -C private-vcpkg rev-parse HEAD) -ne 'eca827d50971a1acc1a7f44a85108e22c302decd') { throw 'vcpkg revision mismatch' }
-          if ((git -C private-vcpkg/.lfc-cef-upstream rev-parse HEAD) -ne '9e593bb18ea69cc5095e012465dcd675a822ed0d') { throw 'upstream revision mismatch' }
-          if ((git -C private-cef rev-parse HEAD) -ne 'df861f0ea6ac7c950c3e20689f38817ba7889bde') { throw 'CEF revision mismatch' }
-          if ((git -C private-lfc-ui rev-parse HEAD) -ne '85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5') { throw 'lfc-ui revision mismatch' }
-          $downloads = Join-Path $env:GITHUB_WORKSPACE 'private-vcpkg/.lfc-cef-upstream/downloads'
-          New-Item -ItemType Directory -Force $downloads | Out-Null
-          git -C private-lfc-ui -c core.autocrlf=false archive --format=tar.gz 85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5 -o (Join-Path $downloads 'lfc-ui-85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5.tar.gz')
-          git -C private-cef -c core.autocrlf=false archive --format=tar.gz df861f0ea6ac7c950c3e20689f38817ba7889bde -o (Join-Path $downloads 'cef-static-df861f0ea6ac7c950c3e20689f38817ba7889bde.tar.gz')
-          if (-not (Test-Path (Join-Path $downloads 'lfc-ui-85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5.tar.gz'))) { throw 'lfc-ui archive missing' }
-          if (-not (Test-Path (Join-Path $downloads 'cef-static-df861f0ea6ac7c950c3e20689f38817ba7889bde.tar.gz'))) { throw 'CEF recipe archive missing' }
-      - name: Verify lfc-ui overlay patches against exact source
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          git -C private-lfc-ui apply --check "$env:GITHUB_WORKSPACE/private-vcpkg/ports/lfc-ui/use-installed-lockfreecoro.patch"
-          if ($LASTEXITCODE -ne 0) { throw 'LFC_UI_LOCKFREECORO_PATCH_FAILED' }
-          git -C private-lfc-ui apply --check "$env:GITHUB_WORKSPACE/private-vcpkg/ports/lfc-ui/use-installed-static-cef.patch"
-          if ($LASTEXITCODE -ne 0) { throw 'LFC_UI_STATIC_CEF_PATCH_FAILED' }
-      - name: Materialize exact strict Windows CEF contract
-        shell: pwsh
-        run: |
           @'
           import json
           from pathlib import Path
-          from secure_release import cef_build
-          root = Path("private-vcpkg")
-          cfg = json.loads((root / "ci/release-plan.json").read_text())["cef"]
-          key = cef_build.materialize(root, cfg, "windows")
-          print("LFC_UI_CEF_BUILD_CONTRACT=" + key)
-          '@ | python -
-      - name: Preflight exact locked CEF release transport
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $upstream = Join-Path $env:GITHUB_WORKSPACE 'private-vcpkg/.lfc-cef-upstream'
-          $cache = Join-Path $upstream 'downloads/cef-static-assets'
-          $env:CEF_RELEASE_CACHE = $cache
-          @'
-          import os, pathlib, sys, urllib.error
-          recipe = pathlib.Path("private-cef").resolve()
-          sys.path.insert(0, str(recipe / "vcpkg/integration"))
-          import sdk_import
-          lock = sdk_import.read_json(recipe / "vcpkg/integration/release.lock.json")
-          cache = pathlib.Path(os.environ["CEF_RELEASE_CACHE"]).resolve()
-          prefix = pathlib.Path(os.environ["RUNNER_TEMP"]).resolve() / "cef-release-preflight-prefix"
-          try:
-              directory = sdk_import.obtain(lock, "x64-windows-static-release", cache)
-              sdk_import.install_bundle(
-                  lock, "x64-windows-static-release", directory, prefix,
-                  required_profile="static-third-party",
-              )
-          except urllib.error.HTTPError as error:
-              print("CEF_RELEASE_PREFLIGHT_FAILURE category=http-" + str(error.code))
-              raise SystemExit(1)
-          except urllib.error.URLError as error:
-              reason = type(error.reason).__name__.lower()
-              category = "url-" + reason if reason.replace("_", "").isalnum() else "urlerror"
-              print("CEF_RELEASE_PREFLIGHT_FAILURE category=" + category)
-              raise SystemExit(1)
-          except TimeoutError:
-              print("CEF_RELEASE_PREFLIGHT_FAILURE category=timeout")
-              raise SystemExit(1)
-          except ValueError as error:
-              message = str(error)
-              known = (
-                  ("Untrusted release redirect", "redirect"),
-                  ("Release asset exceeds its locked size", "asset-size"),
-                  ("Release asset digest/size mismatch", "asset-digest"),
-                  ("Missing or redirected release asset", "asset-missing"),
-                  ("Invalid asset", "asset-invalid"),
-                  ("Invalid SDK", "sdk-invalid"),
-              )
-              category = next((label for prefix, label in known if message.startswith(prefix)), "valueerror")
-              print("CEF_RELEASE_PREFLIGHT_FAILURE category=" + category)
-              raise SystemExit(1)
-          except Exception as error:
-              name = type(error).__name__.lower()
-              category = name if name.replace("_", "").isalnum() else "exception"
-              print("CEF_RELEASE_PREFLIGHT_FAILURE category=python-" + category)
-              raise SystemExit(1)
-          print("CEF_RELEASE_PREFLIGHT_ACQUIRED")
-          print("CEF_RELEASE_PREFLIGHT_INSTALLED")
-          '@ | python -
-          if ($LASTEXITCODE -ne 0) { throw 'CEF_RELEASE_PREFLIGHT_FAILED' }
-      - name: Preflight standalone CEF C++ support archive
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $prefix = (Resolve-Path (Join-Path $env:RUNNER_TEMP 'cef-release-preflight-prefix')).Path
-          $recipe = (Resolve-Path (Join-Path $env:GITHUB_WORKSPACE 'private-cef')).Path
-          $source = (Resolve-Path (Join-Path $recipe 'vcpkg/ports/cef-static/cpp_support')).Path
-          $build = Join-Path $env:RUNNER_TEMP 'cef-cpp-support-preflight'
-          $log = Join-Path $env:RUNNER_TEMP 'cef-cpp-support-preflight-configure.log'
-          $cmakeArgs = @(
-            '-S',$source,
-            '-B',$build,
-            '-G','Visual Studio 17 2022','-A','x64',
-            "-DCEF_RECIPE_SOURCE=$recipe",
-            "-DCEF_PACKAGE_PREFIX=$prefix"
-          )
-          & cmake @cmakeArgs *> $log
-          if ($LASTEXITCODE -ne 0) {
-            $env:CEF_CPP_PREFLIGHT_LOG = $log
-            @'
-          import os, pathlib, re
-          text=pathlib.Path(os.environ["CEF_CPP_PREFLIGHT_LOG"]).read_text(errors="replace")[-262144:]
-          category="configure"
-          checks=(
-              ("recipe-source",r"CEF_RECIPE_SOURCE must name"),
-              ("package-prefix",r"CEF_PACKAGE_PREFIX must contain"),
-              ("compiler",r"No CMAKE_CXX_COMPILER|CXX compiler identification is unknown"),
-              ("generator",r"generator.*(?:not found|does not match|could not)"),
-          )
-          for label,pattern in checks:
-              if re.search(pattern,text,re.I):
-                  category=label
-                  break
-          print("CEF_CPP_SUPPORT_PREFLIGHT_FAILURE category=" + category)
-          '@ | python -
-            exit 1
+          lock = json.loads(Path("private-cef/vcpkg/integration/release.lock.json").read_text())
+          contract = {
+              "schema": 1,
+              "recipe_commit": "37efc4f9f340992d50d6f3fa41f617c9013fa26b",
+              "profile": "static-third-party",
+              "mode": "release-import",
+              "triplet": "x64-windows-static-release",
+              "platform_sha256": None,
+              "release_lock": lock,
           }
-          $buildLog = Join-Path $env:RUNNER_TEMP 'cef-cpp-support-preflight-build.log'
-          & cmake --build $build --config Release --parallel 2 *> $buildLog
-          if ($LASTEXITCODE -ne 0) {
-            $env:CEF_CPP_PREFLIGHT_LOG = $buildLog
-            @'
-          import os, pathlib, re
-          text=pathlib.Path(os.environ["CEF_CPP_PREFLIGHT_LOG"]).read_text(errors="replace")[-262144:]
-          category, code, token = "compile", "", ""
-          if re.search(r"cannot open include file|No such file or directory",text,re.I):
-              category="missing-header"
-          elif re.search(r"unresolved external symbol|undefined reference",text,re.I):
-              category="link"
-          match=re.search(r"(?:fatal error|error)\s+(C[0-9]{4}):(?:\s*['\"]([^'\"\r\n]{1,80})['\"])?",text,re.I)
-          if not match:
-              match=re.search(r"(LNK[0-9]{4}):(?:[^\r\n]*?['\"]([^'\"\r\n]{1,80})['\"])?",text,re.I)
-          if match:
-              code=match.group(1).upper()
-              raw=(match.group(2) or "").strip()
-              if re.fullmatch(r"[A-Za-z0-9_+.:<>~-]{1,80}",raw):
-                  token=raw
-          suffix=(" code="+code if code else "")+(" token="+token if token else "")
-          print("CEF_CPP_SUPPORT_PREFLIGHT_FAILURE category=" + category + suffix)
+          path = Path("private-vcpkg/ports/cef-static/cef-build.json")
+          path.write_text(json.dumps(contract, sort_keys=True, separators=(",", ":")) + "\n")
           '@ | python -
-            exit 1
-          }
-          Write-Host 'CEF_CPP_SUPPORT_PREFLIGHT_QUALIFIED'
-      - name: Install and export lfc-ui cef feature
+      - name: Verify strict release-import is rejected before package promotion
         shell: pwsh
+        env:
+          VCPKG_DISABLE_METRICS: '1'
+          VCPKG_BINARY_SOURCES: clear
         run: |
           $ErrorActionPreference = 'Stop'
-          $upstream = Join-Path $env:GITHUB_WORKSPACE 'private-vcpkg/.lfc-cef-upstream'
-          $installed = Join-Path $env:RUNNER_TEMP 'lfc-ui-cef-installed'
-          $downloads = Join-Path $upstream 'downloads'
-          $env:VCPKG_ROOT = $upstream
-          $env:VCPKG_DOWNLOADS = $downloads
-          $env:VCPKG_DISABLE_METRICS = '1'
-          $env:VCPKG_BINARY_SOURCES = 'clear'
-          $env:VCPKG_MAX_CONCURRENCY = '2'
-          $env:CMAKE_BUILD_PARALLEL_LEVEL = '2'
-          & cmd.exe /d /c (Join-Path $upstream 'bootstrap-vcpkg.bat') -disableMetrics *> (Join-Path $env:RUNNER_TEMP 'lfc-ui-cef-bootstrap.log')
-          if ($LASTEXITCODE -ne 0) { throw 'LFC_UI_CEF_BOOTSTRAP_FAILED' }
+          $upstream = Join-Path $env:GITHUB_WORKSPACE 'private-vcpkg/.strict-reject-upstream'
+          & cmd.exe /d /c (Join-Path $upstream 'bootstrap-vcpkg.bat') -disableMetrics *> (Join-Path $env:RUNNER_TEMP 'cef-reject-bootstrap.log')
+          if ($LASTEXITCODE -ne 0) { throw 'CEF_STRICT_REJECT_BOOTSTRAP_FAILED' }
+          $log = Join-Path $env:RUNNER_TEMP 'cef-strict-release-reject.log'
           $vcpkg = Join-Path $upstream 'vcpkg.exe'
-          $common = @(
-            '--triplet=x64-windows-static-release',
-            '--host-triplet=x64-windows-static-release',
-            "--overlay-ports=$env:GITHUB_WORKSPACE/private-vcpkg/ports",
-            "--overlay-triplets=$env:GITHUB_WORKSPACE/private-vcpkg/triplets",
-            "--x-install-root=$installed",
-            '--binarysource=clear'
-          )
-          $engineLog = Join-Path $env:RUNNER_TEMP 'lfc-ui-cef-engine-install.log'
-          & $vcpkg install 'cef-static[strict-platform]' @common *> $engineLog
-          $engineRc = $LASTEXITCODE
-          if ($engineRc -ne 0) {
-            $env:LFC_UI_CEF_DIAG_LOG = $engineLog
-            @'
-          import os, pathlib, re
-          path = pathlib.Path(os.environ["LFC_UI_CEF_DIAG_LOG"])
-          pieces = [path.read_text(errors="replace")[-1048576:]]
-          roots = [
-              pathlib.Path(os.environ["GITHUB_WORKSPACE"]) / "private-vcpkg/.lfc-cef-upstream",
-              pathlib.Path(os.environ["RUNNER_TEMP"]),
-          ]
-          candidates = []
-          for root in roots:
-              if root.is_dir():
-                  candidates.extend(
-                      p for p in root.rglob("*cef-release-import*")
-                      if p.is_file() and p.stat().st_size <= 16 * 1024 * 1024
-                  )
-          candidates = sorted(set(candidates), key=lambda p: p.stat().st_mtime, reverse=True)[:16]
-          pieces.extend(p.read_text(errors="replace")[-1048576:] for p in candidates)
-          text = "\n".join(pieces)
-          category, package = "unknown", "cef-static"
-          for pattern in (
-              r"error: building ([a-z0-9][a-z0-9+_.-]*):",
-              r"BUILD_FAILED[^\n]*?([a-z0-9][a-z0-9+_.-]+):x64-windows-static-release",
-              r"([a-z0-9][a-z0-9+_.-]+):x64-windows-static-release failed",
-          ):
-              match = re.search(pattern, text, re.I)
-              if match:
-                  package = match.group(1).lower()
-                  break
-          http = re.search(r"HTTP Error ([0-9]{3})", text, re.I)
-          if http:
-              category = "http-" + http.group(1)
-          else:
-              checks = (
-                  ("download-timeout", r"timed out|TimeoutError|socket\.timeout"),
-                  ("download-redirect", r"Untrusted release redirect"),
-                  ("download-tls", r"CERTIFICATE_VERIFY_FAILED|SSLError|TLSV1"),
-                  ("download-connection", r"Remote end closed|ConnectionResetError|ConnectionAbortedError|ConnectionRefusedError|URLError"),
-                  ("asset-size", r"Release asset exceeds its locked size|Invalid asset size"),
-                  ("asset-digest", r"Release asset digest/size mismatch|digest mismatch|hash mismatch|checksum mismatch"),
-                  ("asset-missing", r"Missing or redirected release asset"),
-                  ("archive-layout", r"Invalid SDK inventory|Invalid transport parts|Invalid helper inventory|Unexpected file in CEF package prefix|Missing required CEF payload|Non-relocatable archive"),
-                  ("release-contract", r"Invalid SDK lock|Unsupported SDK lock|Wrong source triplet|This release payload cannot be used|strict_requalification_required|requalification"),
-                  ("disk", r"Insufficient package disk space"),
-                  ("patch", r"patch failed|does not apply|corrupt patch|malformed patch"),
-                  ("configure", r"(?:cmake|configure).*(?:error|failed)"),
-                  ("compile", r"(?:FAILED:|fatal error:|ninja: build stopped)"),
-                  ("download", r"(?:download|urllib|urlopen|release asset).*(?:failed|error)"),
-              )
-              for label, pattern in checks:
-                  if re.search(pattern, text, re.I):
-                      category = label
-                      break
-          if category == "unknown":
-              classes = re.findall(r"(?m)^(?:[A-Za-z_][A-Za-z0-9_]*\.)*([A-Za-z_][A-Za-z0-9_]*(?:Error|Exception)):", text)
-              if classes:
-                  safe = classes[-1].lower()
-                  if re.fullmatch(r"[a-z][a-z0-9_]{0,63}", safe):
-                      category = "python-" + safe
-          if not re.fullmatch(r"[a-z0-9][a-z0-9+_.-]*", package):
-              package = "unknown"
-          print(f"LFC_UI_CEF_ENGINE_INSTALL_FAILURE category={category} package={package}")
-          '@ | python -
-            exit $engineRc
+          & $vcpkg install 'cef-static[strict-platform]' '--triplet=x64-windows-static-release' '--host-triplet=x64-windows-static-release' "--overlay-ports=$env:GITHUB_WORKSPACE/private-vcpkg/ports" "--overlay-triplets=$env:GITHUB_WORKSPACE/private-vcpkg/triplets" '--binarysource=clear' *> $log
+          $rc = $LASTEXITCODE
+          if ($rc -eq 0) { throw 'CEF_STRICT_RELEASE_IMPORT_UNEXPECTEDLY_SUCCEEDED' }
+          $text = [IO.File]::ReadAllText($log)
+          if (-not $text.Contains('static-third-party requires a source-built CEF engine')) {
+            throw 'CEF_STRICT_RELEASE_IMPORT_REJECTION_UNEXPECTED'
           }
-          & $vcpkg install 'lfc-ui[cef]' @common *> (Join-Path $env:RUNNER_TEMP 'lfc-ui-cef-install.log')
-          if ($LASTEXITCODE -ne 0) { throw 'LFC_UI_CEF_INSTALL_FAILED' }
-          $export = Join-Path $env:RUNNER_TEMP 'lfc-ui-cef-export'
-          New-Item -ItemType Directory -Force $export | Out-Null
-          & $vcpkg export lfc-ui cef-static @common --raw --output=sdk --output-dir=$export *> (Join-Path $env:RUNNER_TEMP 'lfc-ui-cef-export.log')
-          if ($LASTEXITCODE -ne 0) { throw 'LFC_UI_CEF_EXPORT_FAILED' }
-          $sdk = Join-Path $export 'sdk'
-          $prefix = Join-Path $sdk 'installed/x64-windows-static-release'
-          $dlls = @(Get-ChildItem (Join-Path $prefix 'lib'),(Join-Path $prefix 'bin') -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -ieq '.dll' })
-          if ($dlls.Count -ne 0) { throw 'LFC_UI_CEF_SHARED_TARGET_PAYLOAD' }
-          New-Item -ItemType Directory -Force (Join-Path $sdk 'triplets') | Out-Null
-          Copy-Item "$env:GITHUB_WORKSPACE/private-vcpkg/triplets/x64-windows-static-release.cmake" (Join-Path $sdk 'triplets/x64-windows-static-release.cmake')
-          "LFC_UI_CEF_SDK=$sdk" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-      - name: Build upstream CEF example from exported SDK
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $src = Join-Path $env:RUNNER_TEMP 'lfc-ui-cef-example'
-          New-Item -ItemType Directory -Force $src | Out-Null
-          Copy-Item "$env:GITHUB_WORKSPACE/private-lfc-ui/examples/web_engine_view_cef.cpp" (Join-Path $src 'web_engine_view_cef.cpp')
-          Copy-Item "$env:GITHUB_WORKSPACE/private-lfc-ui/examples/example_style.hpp" (Join-Path $src 'example_style.hpp')
-          @'
-          cmake_minimum_required(VERSION 3.32)
-          project(lfc_ui_static_cef_example LANGUAGES C CXX)
-          set(CMAKE_CXX_STANDARD 23)
-          set(CMAKE_CXX_STANDARD_REQUIRED ON)
-          set(CMAKE_MSVC_RUNTIME_LIBRARY MultiThreaded)
-          find_package(lfc-ui CONFIG REQUIRED COMPONENTS WebEngine)
-          if(NOT TARGET lfc::ui-webengine OR NOT TARGET CEF::cpp)
-            message(FATAL_ERROR "lfc-ui[cef] did not export the static CEF WebEngine target")
-          endif()
-          add_executable(web_engine_view_cef web_engine_view_cef.cpp)
-          target_link_libraries(web_engine_view_cef PRIVATE lfc::ui-webengine)
-          target_link_options(web_engine_view_cef PRIVATE /STACK:0x800000)
-          cef_static_deploy_resources(web_engine_view_cef)
-          '@ | Set-Content (Join-Path $src 'CMakeLists.txt')
-          $build = Join-Path $env:RUNNER_TEMP 'lfc-ui-cef-example-build'
-          $args = @(
-            '-S',$src,'-B',$build,
-            '-G','Visual Studio 17 2022','-A','x64',
-            '-DCMAKE_BUILD_TYPE=Release',
-            '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded',
-            "-DCMAKE_TOOLCHAIN_FILE=$env:LFC_UI_CEF_SDK/scripts/buildsystems/vcpkg.cmake",
-            '-DVCPKG_TARGET_TRIPLET=x64-windows-static-release',
-            '-DVCPKG_HOST_TRIPLET=x64-windows-static-release',
-            '-DVCPKG_MANIFEST_MODE=OFF'
-          )
-          & cmake @args
-          if ($LASTEXITCODE -ne 0) { throw 'LFC_UI_CEF_EXAMPLE_CONFIGURE_FAILED' }
-          & cmake --build $build --config Release --parallel 2
-          if ($LASTEXITCODE -ne 0) { throw 'LFC_UI_CEF_EXAMPLE_BUILD_FAILED' }
-          $exe = Get-ChildItem $build -Recurse -Filter web_engine_view_cef.exe | Select-Object -First 1
-          if ($null -eq $exe -or -not $exe.Exists) { throw 'LFC_UI_CEF_EXAMPLE_MISSING' }
-          Write-Host 'LFC_UI_STATIC_CEF_EXAMPLE_LINK_VERIFIED'
+          Write-Host 'CEF_STRICT_RELEASE_IMPORT_REJECTED'
