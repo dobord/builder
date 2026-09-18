@@ -87,6 +87,51 @@ class AuditTests(unittest.TestCase):
         data = struct.pack('<HHHHIIHH', 0, 0xffff, 0, 0x8664, 0, 9, 0, 4) + b'a\0bad.dll\0'
         self.assertEqual(audit.object_kind(data, 'a.obj', 'windows'), 'coff-import')
 
+    def test_cef_generated_archive_allows_only_reviewed_windows_os_short_imports(self):
+        def short(dll):
+            body = b'symbol\0' + dll.encode('ascii') + b'\0'
+            return struct.pack('<HHHHIIHH', 0, 0xffff, 0, 0x8664, 0,
+                               len(body), 0, 4) + body
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            prefix = 'installed/x64-windows-static-release/'
+            for dll, expected in (('kernel32.dll', True), ('api-ms-win-core-file-l1-1-0.dll', True),
+                                  ('third-party.dll', False)):
+                path = root / (dll.replace('.', '-') + '.zip')
+                with zipfile.ZipFile(path, 'w') as z:
+                    z.writestr(prefix+'lib/cef-static/cef_2181_7aff207fa4d8.lib',
+                               ar(short(dll), b'import.obj/'))
+                report = audit.inspect_sdk(path, 'windows')
+                self.assertEqual(report['target_archives_static'], expected, dll)
+                archive = report['archives'][0]
+                if expected:
+                    self.assertEqual(archive['system_imports'], {dll: 1})
+                    self.assertEqual(archive['kinds'], {'coff-os-import': 1})
+                else:
+                    self.assertEqual(archive['unqualified_samples'][0]['dll'], dll)
+
+    def test_ordinary_import_library_stays_forbidden_even_for_system_dll(self):
+        body = b'symbol\0kernel32.dll\0'
+        member = struct.pack('<HHHHIIHH', 0, 0xffff, 0, 0x8664, 0,
+                             len(body), 0, 4) + body
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / 'sdk.zip'
+            prefix = 'installed/x64-windows-static-release/'
+            with zipfile.ZipFile(path, 'w') as z:
+                z.writestr(prefix+'lib/kernel32.lib', ar(member, b'import.obj/'))
+            report = audit.inspect_sdk(path, 'windows')
+            self.assertFalse(report['target_archives_static'])
+            self.assertEqual(report['violations'][0]['reason'], 'unqualified-archive-members')
+
+    def test_long_idata_import_never_inherits_short_os_allowance(self):
+        payload = coff(b'.idata$2')
+        data = ar(payload)
+        result = audit.inspect_archive(
+            io.BytesIO(data), len(data), 'windows',
+            allow_windows_os_imports=True)
+        self.assertFalse(result['qualified_objects_only'])
+        self.assertEqual(result['kinds'], {'coff-import': 1})
+
     def test_long_import_and_bigobj(self):
         for big in (False, True):
             self.assertEqual(audit.object_kind(coff(big=big), 'a.obj', 'windows'), 'coff-object')
