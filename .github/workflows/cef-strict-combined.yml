@@ -5,6 +5,8 @@ on:
     branches:
       - feature/cef-static-integration
     paths:
+      - .github/workflows/cef-strict-combined.yml
+      - secure_release/cef_strict_combined.py
       - ci/cef-strict-engine-lock.json
 permissions:
   contents: read
