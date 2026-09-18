@@ -109,7 +109,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
 
     def test_windows_msvc_stl_graph_gate_is_source_based_and_fail_closed(self):
         text = (ROOT / ".github/workflows/cef-windows-msvc-stl.yml").read_text()
-        self.assertIn("ref: befa5c26c0c608165f27ac348e892305837fd614", text)
+        self.assertIn("ref: 139494aa73b6896b86b2b89230222bc4d9426b3e", text)
         self.assertIn("source_build.py prepare", text)
         self.assertIn("source_build.py check", text)
         self.assertIn("test_patch_source.py", text)
@@ -133,7 +133,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
 
     def test_lfc_ui_static_freerdp_workflow_is_relocated_and_static(self):
         text = (ROOT / ".github/workflows/lfc-ui-static-freerdp.yml").read_text()
-        self.assertIn("ref: 8b9c4c621c990288ef88ff299c06d4c2fcea0c5c", text)
+        self.assertIn("ref: 41740842b05f0d72f64778ffccc12f2d7108701a", text)
         self.assertIn("'lfc-ui[freerdp]'", text)
         self.assertIn("freerdp-server-proxy", text)
         self.assertIn("freerdp-shadow", text)

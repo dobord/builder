@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/cef
-          ref: befa5c26c0c608165f27ac348e892305837fd614
+          ref: 139494aa73b6896b86b2b89230222bc4d9426b3e
           path: private-cef
           persist-credentials: false
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
@@ -31,7 +31,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          if ((git -C private-cef rev-parse HEAD) -ne 'befa5c26c0c608165f27ac348e892305837fd614') { throw 'CEF revision mismatch' }
+          if ((git -C private-cef rev-parse HEAD) -ne '139494aa73b6896b86b2b89230222bc4d9426b3e') { throw 'CEF revision mismatch' }
           python -I -m unittest discover -s private-cef/vcpkg/static/tests -p test_platform_source.py -v
           python -I -m unittest discover -s private-cef/vcpkg/static/tests -p test_patch_source.py -v
       - name: Check source workspace capacity
