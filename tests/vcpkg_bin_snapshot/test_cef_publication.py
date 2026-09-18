@@ -7,8 +7,15 @@ import sys
 import tempfile
 import unittest
 import zipfile
+import struct
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import cef_publication as gate
+
+def static_elf_archive():
+    payload = b'\x7fELF\x02\x01\x01' + b'\0' * 9 + struct.pack('<HHI', 1, 62, 1) + b'\0' * 40
+    header = (b'fixture.o/      ' + b'0           ' + b'0     ' + b'0     ' +
+              b'100644  ' + str(len(payload)).encode().ljust(10) + b'`\n')
+    return b'!<arch>\n' + header + payload + (b'\n' if len(payload) & 1 else b'')
 
 class PublicationTests(unittest.TestCase):
     def setUp(self):
@@ -34,7 +41,7 @@ class PublicationTests(unittest.TestCase):
                     if profile == 'static-third-party':
                         closure = {'kind': 'windows-native-os-abi', 'manifest_sha256': None}
                         if platform == 'linux':
-                            payload = b'!<arch>\nfixture-static-archive'
+                            payload = static_elf_archive()
                             relative = 'lib/libfixture.a'
                             archive.writestr(f'installed/{triplet}/{relative}', payload)
                             build_inputs = gate.canonical({'schema': 1, 'fixture': 'frozen-platform-inputs'})
