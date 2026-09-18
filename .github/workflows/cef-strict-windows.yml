@@ -10,7 +10,7 @@ permissions:
 jobs:
   windows:
     runs-on: windows-2022
-    timeout-minutes: 15
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -48,3 +48,13 @@ jobs:
           python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r build-tools.lock
       - name: Validate strict Windows worker syntax
         run: python -m py_compile secure_release/cef_strict_windows.py
+      - name: Qualify locked Windows static CEF through vcpkg
+        run: python -m secure_release.cef_strict_windows
+      - name: Upload non-sensitive Windows qualification summary
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: cef-strict-windows-summary-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/cef-strict-windows-summary.json
+          retention-days: 7
+          if-no-files-found: ignore
