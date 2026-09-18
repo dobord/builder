@@ -89,6 +89,22 @@ py -m secure_release.fetch_sdk_local `
   --output C:\sdk\vcpkg-windows-static.zip
 ```
 
+For a normal Windows workstation the repository also includes a thin PowerShell
+wrapper. It never reads private-key contents itself; authenticated download and
+decryption stay in the Python verifier. If `GH_TOKEN`/`GITHUB_TOKEN` is unset,
+the wrapper obtains the token from an already authenticated `gh` CLI session:
+
+```powershell
+.\fetch-vcpkg.ps1 `
+  -PrivateKey C:\secure\vcpkg-release-keys\artifact-private.json `
+  -RequestVerifyKey C:\secure\vcpkg-release-keys\request-signing-public.json `
+  -Output C:\sdk\vcpkg-windows-static.zip `
+  -InstallDependencies
+```
+
+Add `-Run RUN_ID -Attempt ATTEMPT -BuilderSha FULL_SHA` to retrieve one exact
+reviewed build instead of the newest matching successful artifact.
+
 Omit `--run` to use the newest successful, unexpired SDK artifact for the
 requested platform. For an exact reviewed build, add
 `--run RUN_ID --attempt ATTEMPT --builder-sha FULL_SHA`. Use `--work-dir` when
