@@ -59,17 +59,19 @@ jobs:
           import os, pathlib, re
           workspace = pathlib.Path(os.environ["GITHUB_WORKSPACE"])
           runner = pathlib.Path(os.environ["RUNNER_TEMP"])
-          root = workspace / "private-vcpkg/.freerdp-diag-upstream/buildtrees/freerdp"
+          buildtrees = workspace / "private-vcpkg/.freerdp-diag-upstream/buildtrees"
+          root = buildtrees / "freerdp"
           install_text = (runner / "freerdp-install.log").read_text(errors="replace")[-1048576:]
           pieces = [install_text]
-          if root.is_dir():
-              candidates = sorted(
-                  [p for p in root.rglob("*") if p.is_file() and
-                   (p.suffix == ".log" or "config" in p.name.lower())],
+          recent = []
+          if buildtrees.is_dir():
+              recent = sorted(
+                  [p for p in buildtrees.rglob("*") if p.is_file() and
+                   (p.suffix in {".log", ".txt"} or "config" in p.name.lower())],
                   key=lambda p: p.stat().st_mtime,
                   reverse=True,
-              )[:28]
-              pieces.extend(p.read_text(errors="replace")[-262144:] for p in candidates)
+              )[:40]
+              pieces.extend(p.read_text(errors="replace")[-262144:] for p in recent)
           text = "\n".join(pieces)
           package = "unknown"
           for pattern in (
@@ -81,6 +83,13 @@ jobs:
               if match:
                   package = match.group(1).lower()
                   break
+          if package == "unknown" and recent:
+              try:
+                  candidate = recent[0].relative_to(buildtrees).parts[0].lower()
+                  if re.fullmatch(r"[a-z0-9][a-z0-9+_.-]*", candidate):
+                      package = candidate
+              except (ValueError, IndexError):
+                  pass
           category, token = "unknown", ""
           patterns = [
               ("missing-cmake-package", r"Could not find a package configuration file provided by\s+['\"]?([A-Za-z0-9+_.-]+)"),
@@ -106,7 +115,23 @@ jobs:
                   category = "ffmpeg"
               elif re.search(r"CMake Error", text):
                   category = "cmake-error"
+          details = []
+          if root.is_dir():
+              caches = sorted(root.rglob("CMakeCache.txt"), key=lambda p: p.stat().st_mtime, reverse=True)
+              if caches:
+                  cache = caches[0].read_text(errors="replace")
+                  for key in ("WITH_CAIRO", "WITH_SWSCALE", "WITH_FFMPEG"):
+                      match = re.search(r"^" + key + r":(?:BOOL|UNINITIALIZED)=(ON|OFF)$", cache, re.M)
+                      if match:
+                          details.append(key.lower() + "=" + match.group(1).lower())
+          cmake_error = re.search(r"CMake Error at ([^:\r\n]+):(\d+)", text)
+          if cmake_error:
+              source = pathlib.PurePosixPath(cmake_error.group(1).replace("\\", "/")).name
+              if re.fullmatch(r"[A-Za-z0-9_.+-]+", source):
+                  details.append("cmake_source=" + source)
           suffix = (" token=" + token) if token else ""
+          if details:
+              suffix += " " + " ".join(details)
           if not re.fullmatch(r"[a-z0-9][a-z0-9+_.-]*|unknown", package):
               package = "unknown"
           print("FREERDP_STATIC_CONFIGURE_FAILURE package=" + package + " category=" + category + suffix)
