@@ -21,6 +21,8 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn("sha256sum -c -", text)
         self.assertIn('cat "$RUNNER_TEMP/cef-gn-evidence/gn-qualification.json"', text)
         self.assertNotIn("persist-credentials: true", text)
+        self.assertIn("pkgconfig_module=", text)
+        self.assertIn("missing_dependency=", text)
 
     def test_production_build_accepts_trusted_large_disk_runner_labels(self):
         text=(ROOT/'.github/workflows/build-release.yml').read_text()

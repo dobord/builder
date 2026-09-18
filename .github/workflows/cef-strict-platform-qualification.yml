@@ -111,7 +111,33 @@ jobs:
               error_type = "unknown"
           if not re.fullmatch(r"[a-z0-9][a-z0-9+_.-]*|unknown", package):
               package = "unknown"
-          print(f"CEF_PLATFORM_NATIVE_FAILURE command={command} error_type={error_type} package={package}")
+          details = []
+          if logs and command == "06":
+              modules_path = pathlib.Path(os.environ["GITHUB_WORKSPACE"]) / "private-vcpkg/ports/cef-platform-deps/modules.json"
+              selected = json.loads(modules_path.read_text()).get("modules", [])
+              failed_module = next(
+                  (name for name in selected
+                   if re.search(r"(?<![A-Za-z0-9+_.-])" + re.escape(name) + r"(?![A-Za-z0-9+_.-])", text)),
+                  None,
+              )
+              if failed_module and re.fullmatch(r"[A-Za-z0-9+_.-]+", failed_module):
+                  details.append("pkgconfig_module=" + failed_module)
+              missing = None
+              for pattern in (
+                  r"Package\s+['\"]?([A-Za-z0-9+_.-]+)['\"]?\s+was not found",
+                  r"No package\s+['\"]?([A-Za-z0-9+_.-]+)['\"]?\s+found",
+                  r"Package\s+['\"]?([A-Za-z0-9+_.-]+)['\"]?,\s+required by",
+              ):
+                  match = re.search(pattern, text, re.I)
+                  if match and re.fullmatch(r"[A-Za-z0-9+_.-]+", match.group(1)):
+                      missing = match.group(1).lower()
+                      break
+              if missing:
+                  details.append("missing_dependency=" + missing)
+          print(
+              f"CEF_PLATFORM_NATIVE_FAILURE command={command} error_type={error_type} package={package}"
+              + (" " + " ".join(details) if details else "")
+          )
           PY
             exit "$rc"
           fi
