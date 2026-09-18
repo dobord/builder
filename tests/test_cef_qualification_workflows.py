@@ -9,7 +9,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
     def test_full_platform_workflow_is_exact_and_keeps_native_output_private(self):
         text = (ROOT / ".github/workflows/cef-strict-platform-qualification.yml").read_text()
         self.assertIn("repository: dobord/vcpkg", text)
-        self.assertIn("ref: 8fd1ca83ba365f3fe3884d86f7ef6608c2095f2b", text)
+        self.assertIn("ref: a0ce35082136ac045c8e5cc97de4c0e4e29a5b38", text)
         self.assertIn("repository: microsoft/vcpkg", text)
         self.assertIn("ref: 9e593bb18ea69cc5095e012465dcd675a822ed0d", text)
         self.assertIn("repository: dobord/cef", text)
@@ -17,6 +17,8 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn('>"$RUNNER_TEMP/cef-strict-native.log" 2>&1', text)
         self.assertNotIn("actions/cache", text)
         self.assertNotIn("upload-artifact", text)
+        self.assertIn("gh api \"repos/dobord/vcpkg/actions/artifacts/$id/zip\"", text)
+        self.assertIn("sha256sum -c -", text)
         self.assertNotIn("persist-credentials: true", text)
 
     def test_production_build_accepts_trusted_large_disk_runner_labels(self):
@@ -50,7 +52,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
     def test_current_private_source_contract_workflow_pins_gn_gate_revision(self):
         text = (ROOT / ".github/workflows/cef-strict-source-contracts.yml").read_text()
         self.assertIn("repository: dobord/vcpkg", text)
-        self.assertIn("ref: fb0c27ec25ae3d9f297edb8bcd5a36378e38ce2e", text)
+        self.assertIn("ref: a0ce35082136ac045c8e5cc97de4c0e4e29a5b38", text)
         self.assertIn("ref: dee44a002606796afc3837ccca7120f62898691d", text)
         self.assertIn("python -I -m unittest discover -s ci/cef-full/tests -v", text)
         self.assertIn("ci/cef-full/gn_check.py", text)
