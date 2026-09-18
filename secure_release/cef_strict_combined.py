@@ -18,9 +18,9 @@ import sys
 from . import build_support, cef_build, cef_contract, crypto, safeio
 from . import cef_strict_iteration
 
-VCPKG = "c60e7b532c546e2ac882a39be0303c8ec6a60eaa"
+VCPKG = "736b290cf7338c26565c831d48c8ef52b8a353a5"
 UPSTREAM = "9e593bb18ea69cc5095e012465dcd675a822ed0d"
-CEF = "6a36621ea5493a94d7e79dc388746bbb8829b1d2"
+CEF = "c74fc487b25fc6e3dbbdd4d02c4e963735a66b96"
 LOCKFREECORO = "24038aed3a0be642adb60e71bd994ae8f0d90140"
 LFC_UI = "85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5"
 TRIPLET = "x64-linux-static-release"
@@ -359,6 +359,109 @@ def main() -> None:
             cwd=root, env=build_env,
             log=root / "consumer-test.log", timeout=600,
         )
+
+        stage = "lfc-ui-freerdp-cef-consumer"
+        proxy_source = root / "lfc-ui-freerdp-cef-source"
+        proxy_source.mkdir()
+        for name in (
+            "freerdp_proxy_web_engine_view_cef.cpp",
+            "freerdp_graphics_mode_args.hpp",
+        ):
+            shutil.copy2(lfc_ui / "examples" / name, proxy_source / name)
+        (proxy_source / "CMakeLists.txt").write_text(
+            """cmake_minimum_required(VERSION 3.32)
+project(lfc_ui_freerdp_cef_qualification LANGUAGES C CXX)
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+find_package(lfc-ui CONFIG REQUIRED COMPONENTS WebEngine)
+foreach(required_target IN ITEMS
+    lfc::ui
+    lfc::ui-webengine
+    CEF::static
+    CEF::cpp
+    freerdp
+    freerdp-client
+    freerdp-server
+    freerdp-server-proxy
+    freerdp-shadow)
+  if(NOT TARGET ${required_target})
+    message(FATAL_ERROR "Missing final SDK target: ${required_target}")
+  endif()
+endforeach()
+add_executable(freerdp_proxy_web_engine_view_cef
+    freerdp_proxy_web_engine_view_cef.cpp)
+target_link_libraries(freerdp_proxy_web_engine_view_cef PRIVATE
+    lfc::ui-webengine)
+target_link_options(freerdp_proxy_web_engine_view_cef PRIVATE
+    -static-libstdc++ -static-libgcc)
+cef_static_deploy_resources(freerdp_proxy_web_engine_view_cef)
+""",
+            encoding="utf-8",
+        )
+        proxy_build = root / "lfc-ui-freerdp-cef-build"
+        proxy_configure = build_support.consumer_configure_command(
+            proxy_source, proxy_build, consumer_sdk, TRIPLET
+        )
+        run(
+            proxy_configure, cwd=root, env=build_env,
+            log=root / "lfc-ui-freerdp-cef-configure.log", timeout=900,
+        )
+        run(
+            ["cmake", "--build", proxy_build, "--config", "Release",
+             "--parallel", "2"],
+            cwd=root, env=build_env,
+            log=root / "lfc-ui-freerdp-cef-build.log", timeout=3600,
+        )
+        executables = [
+            path for path in proxy_build.rglob("freerdp_proxy_web_engine_view_cef")
+            if path.is_file() and not path.is_symlink()
+        ]
+        if len(executables) != 1:
+            raise RuntimeError("Final FreeRDP/CEF qualification executable is missing")
+        proxy_exe = executables[0]
+        target_prefix = consumer_sdk / "installed" / TRIPLET
+        shared_payload = sorted(
+            path.relative_to(target_prefix).as_posix()
+            for path in target_prefix.rglob("*")
+            if path.is_file() and (
+                path.suffix.lower() in {".dll", ".dylib"}
+                or ".so" in path.name
+            )
+        )
+        if shared_payload:
+            raise RuntimeError(
+                "Final vcpkg target prefix contains shared payload: "
+                + ", ".join(shared_payload[:20])
+            )
+        dynamic = subprocess.check_output(
+            ["readelf", "-d", proxy_exe], text=True, timeout=120
+        ).lower()
+        forbidden_needed = [
+            token for token in (
+                "libcef.so", "libfreerdp", "libwinpr", "libavcodec",
+                "libavformat", "libavutil", "libavfilter", "libswscale",
+                "libswresample", "libx264", "libx265", "libvpx",
+                "libaom", "libopus", "libssl.so", "libcrypto.so",
+                "libstdc++.so", "libgcc_s.so",
+            )
+            if token in dynamic
+        ]
+        if forbidden_needed:
+            raise RuntimeError(
+                "Final FreeRDP/CEF executable has shared third-party runtime dependencies: "
+                + ", ".join(forbidden_needed)
+            )
+        usage = subprocess.run(
+            ["xvfb-run", "-a", str(proxy_exe)],
+            cwd=proxy_exe.parent, env=build_env,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, timeout=120,
+        )
+        if usage.returncode != 2 or "Usage:" not in usage.stdout:
+            raise RuntimeError("Final FreeRDP/CEF executable did not reach its usage path")
+        summary["lfc_ui_freerdp_cef_link_verified"] = True
+        summary["lfc_ui_freerdp_cef_runtime_loader_verified"] = True
+        summary["target_shared_payload_count"] = 0
 
         # The checkpoint codec binds this exact work path. Rename only after all
         # source/vcpkg operations are complete so verify_consumer can hide it

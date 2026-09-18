@@ -9,11 +9,11 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
     def test_full_platform_workflow_is_exact_and_keeps_native_output_private(self):
         text = (ROOT / ".github/workflows/cef-strict-platform-qualification.yml").read_text()
         self.assertIn("repository: dobord/vcpkg", text)
-        self.assertIn("ref: c60e7b532c546e2ac882a39be0303c8ec6a60eaa", text)
+        self.assertIn("ref: 736b290cf7338c26565c831d48c8ef52b8a353a5", text)
         self.assertIn("repository: microsoft/vcpkg", text)
         self.assertIn("ref: 9e593bb18ea69cc5095e012465dcd675a822ed0d", text)
         self.assertIn("repository: dobord/cef", text)
-        self.assertIn("ref: 6a36621ea5493a94d7e79dc388746bbb8829b1d2", text)
+        self.assertIn("ref: c74fc487b25fc6e3dbbdd4d02c4e963735a66b96", text)
         self.assertIn('>"$RUNNER_TEMP/cef-strict-native.log" 2>&1', text)
         self.assertNotIn("actions/cache", text)
         self.assertNotIn("upload-artifact", text)
@@ -32,7 +32,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
     def test_strict_engine_iteration_uploads_only_encrypted_checkpoint(self):
         workflow=(ROOT/'.github/workflows/cef-strict-engine-iteration.yml').read_text()
         worker=(ROOT/'secure_release/cef_strict_iteration.py').read_text()
-        self.assertIn('ref: c60e7b532c546e2ac882a39be0303c8ec6a60eaa',workflow)
+        self.assertIn('ref: 736b290cf7338c26565c831d48c8ef52b8a353a5',workflow)
         self.assertIn('run: python -m secure_release.cef_strict_iteration',workflow)
         self.assertIn('Restore reviewed completed-package caches by exact artifact digest',workflow)
         self.assertIn('gh api "repos/dobord/vcpkg/actions/artifacts/$id/zip"',workflow)
@@ -55,7 +55,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertNotIn('print(text',worker)
         lock=(ROOT/'ci/cef-strict-engine-lock.json').read_text()
         self.assertIn('"checkpoint": null',lock)
-        self.assertIn('"vcpkg_commit": "c60e7b532c546e2ac882a39be0303c8ec6a60eaa"',lock)
+        self.assertIn('"vcpkg_commit": "736b290cf7338c26565c831d48c8ef52b8a353a5"',lock)
 
     def test_sdk_dependency_qualification_keeps_private_build_logs_runner_local(self):
         text = (ROOT / ".github/workflows/cef-strict-sdk-deps.yml").read_text()
@@ -77,6 +77,14 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn('cef-strict-combined-summary-',text)
         self.assertNotIn('cipher-output',text)
         self.assertNotIn('compiler.log',text)
+        worker=(ROOT/'secure_release/cef_strict_combined.py').read_text()
+        self.assertIn('freerdp_proxy_web_engine_view_cef.cpp',worker)
+        self.assertIn("'lfc-ui-freerdp-cef-consumer'",worker)
+        self.assertIn('freerdp-server-proxy',worker)
+        self.assertIn('freerdp-shadow',worker)
+        self.assertIn('-static-libstdc++ -static-libgcc',worker)
+        self.assertIn('libavcodec',worker)
+        self.assertIn('xvfb-run',worker)
 
     def test_windows_msvc_stl_graph_gate_is_source_based_and_fail_closed(self):
         text = (ROOT / ".github/workflows/cef-windows-msvc-stl.yml").read_text()
@@ -103,7 +111,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
     def test_current_private_source_contract_workflow_pins_gn_gate_revision(self):
         text = (ROOT / ".github/workflows/cef-strict-source-contracts.yml").read_text()
         self.assertIn("repository: dobord/vcpkg", text)
-        self.assertIn("ref: c60e7b532c546e2ac882a39be0303c8ec6a60eaa", text)
+        self.assertIn("ref: 736b290cf7338c26565c831d48c8ef52b8a353a5", text)
         self.assertIn("ref: 457fd41f39cbcff940c7af654da899d44ba5e553", text)
         self.assertIn("ref: e212a7d7e3c427d882731428410a6ca1c48093ef", text)
         self.assertNotIn("git -C private-vcpkg/.full-cef apply --check", text)
