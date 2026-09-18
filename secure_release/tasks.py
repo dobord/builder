@@ -194,7 +194,6 @@ def build():
         revision = cfg["recipe_commit"]
         recipe_archive = downloads / f"cef-static-{revision}.tar.gz"
         safeio.extract_tar(recipe_archive, root / "cef-recipe")
-        cef_build.materialize(root / "workspace", cfg, platform)
         source_ports.append({"name": "cef-static", "sha": revision})
     build_support.protect_source_archives(root / "workspace", downloads, source_ports)
     environment = build_support.build_environment(clean_env(), downloads, upstream)
@@ -227,7 +226,11 @@ def build():
                             revision=env("GITHUB_SHA"), private=input_private)
         else:
             binary_cache.mkdir()
-        if not cef_build.run_engine(root, cfg, platform, execute, environment, input_private, env("GITHUB_SHA")):
+        platform_probe = cef_build.capture_platform_dependencies(
+            root, cfg, platform, execute, executable, args, binary_cache)
+        platform_sha256 = platform_probe["sha256"] if platform_probe is not None else None
+        if not cef_build.run_engine(root, cfg, platform, execute, environment, input_private,
+                                    env("GITHUB_SHA"), platform_probe):
             return  # A persisted checkpoint, never an installed or published SDK.
     # Preserve downloads through the entire graph. Remove them at final job cleanup.
     try:
@@ -257,7 +260,7 @@ def build():
     execute(configure, stage="consumer-configure", timeout=600)
     execute(["cmake", "--build", str(out), "--config", "Release", "--parallel", "2"], stage="consumer-build", timeout=1800)
     execute(["ctest", "--test-dir", str(out), "-C", "Release", "--output-on-failure", "--timeout", "60"], stage="consumer-test", timeout=180)
-    cef_proof = cef_build.verify_consumer(root, cfg, platform, execute) if cfg is not None else None
+    cef_proof = cef_build.verify_consumer(root, cfg, platform, execute, platform_sha256) if cfg is not None else None
     bundle = root / "result"
     bundle.mkdir()
     shutil.copyfile(package, bundle / "sdk.zip")
@@ -268,7 +271,7 @@ def build():
                 "source_sha": payload["source_sha"], "upstream_sha": payload["plan"]["upstream_sha"],
                 "image_os": os.environ.get("ImageOS", ""), "image_version": os.environ.get("ImageVersion", "")}
     if cfg is not None:
-        manifest["cef"] = {"build_contract_sha256": cef_contract.build_key(cfg, platform),
+        manifest["cef"] = {"build_contract_sha256": cef_contract.build_key(cfg, platform, platform_sha256),
                            "profile": cfg["profile"], "consumer": cef_proof}
     (bundle / "manifest.json").write_bytes(crypto.canonical(manifest))
     safeio.pack_tar(bundle, root / "result.tgz")
