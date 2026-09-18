@@ -1,5 +1,9 @@
 """Strict publication ABI binding tests; no network or native build required."""
+import json
+from pathlib import Path
+import tempfile
 import unittest
+from unittest.mock import patch
 from secure_release import cef_build
 from test_cef_contract import config
 
@@ -70,6 +74,42 @@ class StrictPublicationContractTests(unittest.TestCase):
         cfg = config()
         cfg["profile"] = "static-third-party"
         return cfg
+
+    def test_strict_linux_capture_requires_complete_signed_preflight(self):
+        cfg = self.strict()
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "workspace/ci/cef-full").mkdir(parents=True)
+            (root / "workspace/ci/cef-full/verify_prefix.py").write_text("# signed fixture\n")
+            (root / "cef-recipe").mkdir()
+            calls = []
+
+            def execute(command, **options):
+                calls.append((list(map(str, command)), options))
+                if len(calls) == 2:
+                    receipt = root / "cef-platform-probe/qualification.json"
+                    receipt.write_text(json.dumps({
+                        "schema": 1,
+                        "kind": "cef-static-platform-preflight",
+                        "status": "success",
+                        "full_platform_graph_qualified": True,
+                        "cef_runtime_verified": False,
+                        "gpu_runtime_qualified": False,
+                        "module_count": 36,
+                        "manifest_sha256": "b" * 64,
+                    }, sort_keys=True, separators=(",", ":")) + "\n")
+
+            with patch.object(cef_build.shutil, "which", return_value="/usr/bin/pkg-config"), \
+                 patch.object(cef_build.build_support, "install_command",
+                              return_value=["vcpkg", "install", "cef-platform-deps"]):
+                result = cef_build.capture_platform_dependencies(
+                    root, cfg, "linux", execute, "vcpkg", [], None)
+
+            self.assertEqual(len(calls), 2)
+            self.assertIn(str(root / "workspace/ci/cef-full/verify_prefix.py"), calls[1][0])
+            self.assertEqual(result["sha256"], "b" * 64)
+            self.assertTrue(result["qualification"].is_file())
+            self.assertEqual(len(result["qualification_sha256"]), 64)
 
     def test_linux_contract_contains_qualified_platform_digest(self):
         key, contract = cef_build.qualified_contract(proof("linux"), self.strict(), "linux")
