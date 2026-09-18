@@ -78,6 +78,17 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertNotIn('cipher-output',text)
         self.assertNotIn('compiler.log',text)
 
+    def test_windows_msvc_stl_graph_gate_is_source_based_and_fail_closed(self):
+        text = (ROOT / ".github/workflows/cef-windows-msvc-stl.yml").read_text()
+        self.assertIn("ref: dfdcc240141f5a15f976387d21c60a2b92205d5f", text)
+        self.assertIn("source_build.py prepare", text)
+        self.assertIn("source_build.py check", text)
+        self.assertIn("use_custom_libcxx", text)
+        self.assertIn("third_party/libc++", text)
+        self.assertIn("static-link-inputs.json", text)
+        self.assertIn("CEF_WINDOWS_MSVC_STL_GRAPH_QUALIFIED", text)
+        self.assertNotIn("upload-artifact", text)
+
     def test_lfc_ui_static_cef_workflow_builds_upstream_example(self):
         text = (ROOT / ".github/workflows/lfc-ui-static-cef.yml").read_text()
         self.assertIn("ref: 36b2d770ee9b4ec367eeae2723f8fe317e562b1f", text)

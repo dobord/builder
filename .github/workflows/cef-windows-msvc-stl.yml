@@ -1,0 +1,82 @@
+name: CEF Windows MSVC STL source graph
+on:
+  push:
+    branches:
+      - feature/cef-static-integration
+    paths:
+      - .github/workflows/cef-windows-msvc-stl.yml
+permissions:
+  contents: read
+concurrency:
+  group: cef-windows-msvc-stl-source-graph
+  cancel-in-progress: true
+jobs:
+  graph:
+    runs-on: ${{ fromJSON(vars.CEF_STATIC_WINDOWS_RUNNER_LABELS || '["windows-2022"]') }}
+    timeout-minutes: 210
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: dobord/cef
+          ref: dfdcc240141f5a15f976387d21c60a2b92205d5f
+          path: private-cef
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.12'
+      - name: Verify recipe and pure profile contract
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ((git -C private-cef rev-parse HEAD) -ne 'dfdcc240141f5a15f976387d21c60a2b92205d5f') { throw 'CEF revision mismatch' }
+          python -I -m unittest discover -s private-cef/vcpkg/static/tests -p test_platform_source.py -v
+      - name: Check source workspace capacity
+        shell: pwsh
+        run: |
+          $drive = Get-PSDrive -Name C
+          Write-Host ("CEF_WINDOWS_SOURCE_FREE_BYTES=" + $drive.Free)
+          if ($drive.Free -lt 85899345920) { throw 'CEF_WINDOWS_SOURCE_CAPACITY_LT_80_GIB' }
+      - name: Prepare exact pinned Chromium source without building
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $work = Join-Path $env:RUNNER_TEMP 'cef-msvc-stl-work'
+          $logs = Join-Path $env:RUNNER_TEMP 'cef-msvc-stl-logs'
+          python private-cef/vcpkg/ports/cef-static/source_build.py prepare --work $work --logs $logs --jobs 4
+          if ($LASTEXITCODE -ne 0) { throw 'CEF_WINDOWS_SOURCE_PREPARE_FAILED' }
+      - name: Generate exact Windows target graph with platform MSVC STL
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $work = Join-Path $env:RUNNER_TEMP 'cef-msvc-stl-work'
+          $logs = Join-Path $env:RUNNER_TEMP 'cef-msvc-stl-logs'
+          python private-cef/vcpkg/ports/cef-static/source_build.py check --work $work --logs $logs --jobs 4
+          if ($LASTEXITCODE -ne 0) { throw 'CEF_WINDOWS_GN_CHECK_FAILED' }
+          @'
+          import json, os, pathlib, re
+          root = pathlib.Path(os.environ["RUNNER_TEMP"]) / "cef-msvc-stl-logs"
+          args = (root / "args.gn").read_text(encoding="utf-8", errors="replace")
+          if not re.search(r"(?m)^use_custom_libcxx\s*=\s*false\s*$", args):
+              raise SystemExit("CEF_WINDOWS_TARGET_STILL_USES_CUSTOM_LIBCXX")
+          if not re.search(r"(?m)^use_custom_libcxx_for_host\s*=\s*true\s*$", args):
+              raise SystemExit("CEF_WINDOWS_HOST_LIBCXX_POLICY_CHANGED")
+          values = json.loads((root / "static-link-inputs.json").read_text())
+          def walk(value):
+              if isinstance(value, str):
+                  yield value
+              elif isinstance(value, list):
+                  for item in value:
+                      yield from walk(item)
+              elif isinstance(value, dict):
+                  for item in value.values():
+                      yield from walk(item)
+          linked = list(walk(values))
+          bad = sorted({x for x in linked if "third_party/libc++" in x.replace("\\","/").lower()
+                        or "third_party/libc++abi" in x.replace("\\","/").lower()})
+          if bad:
+              raise SystemExit("CEF_WINDOWS_TARGET_LINKS_CHROMIUM_LIBCXX:" + repr(bad[:20]))
+          print("CEF_WINDOWS_MSVC_STL_GRAPH_QUALIFIED")
+          '@ | python -
