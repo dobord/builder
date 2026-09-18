@@ -35,6 +35,7 @@ Public artifact sizes, timing and opaque release/run IDs are observable.
 - `publish.py`: independent verification, retry-safe draft handling, conflict refusal.
 - `bootstrap.py`: LOCAL-only key generation and repository secret provisioning with `gh` stdin.
 - `decrypt_local.py`: LOCAL-only authenticated diagnostic decryption; does not authorize releases.
+- `fetch_sdk_local.py`: LOCAL-only download, verification and decryption of completed SDK artifacts.
 - `.github/workflows/ci.yml`: PUBLIC synthetic tests only; disposable PUBLIC test keys protect no private data.
 - `.github/workflows/build-release.yml`: real encrypted release build, disabled until configured.
 - `.github/workflows/request-publication.yml`: dispatch publisher after completed successful build.
@@ -68,6 +69,38 @@ The private source repository contains the complete Russian setup guide at
 `docs/encrypted-release/SETUP_RU.md`, including the exact private source scopes,
 permission settings and first validation-only run. Enable publication only after
 the first complete two-platform verification succeeds.
+
+## Local workstation SDK retrieval
+
+A completed encrypted SDK can be fetched directly from the public builder without
+enabling the private publisher. Keep the artifact-decryption private key in the
+operator backup outside any Git worktree. The GitHub API token is read only from
+`GH_TOKEN` (preferred) or `GITHUB_TOKEN`; private key material is read from a file.
+
+Windows PowerShell example:
+
+```powershell
+py -m pip install --require-hashes --only-binary=:all: -r requirements.lock
+$env:GH_TOKEN = gh auth token
+py -m secure_release.fetch_sdk_local `
+  --platform windows `
+  --private-key C:\secure\vcpkg-release-keys\artifact-output-private.json `
+  --request-verify-key C:\secure\vcpkg-release-keys\request-verify-public.json `
+  --output C:\sdk\vcpkg-windows-static.zip
+```
+
+Omit `--run` to use the newest successful, unexpired SDK artifact for the
+requested platform. For an exact reviewed build, add
+`--run RUN_ID --attempt ATTEMPT --builder-sha FULL_SHA`. Use `--work-dir` when
+the temporary encrypted/decrypted files need to live on another disk. The command
+refuses to run under GitHub Actions and refuses to overwrite an existing output.
+
+With `--request-verify-key`, the tool verifies the signed source request in
+addition to the canonical builder workflow/run, GitHub artifact SHA256, encrypted
+context, decrypted manifest, SDK digest and archive layout. Without that optional
+public verification key, it still checks transport/envelope/manifest integrity but
+does not independently authenticate which source request selected the build.
+Neither mode authorizes publication; `vcpkg-bin` keeps its independent checks.
 
 ## Operational limits
 
