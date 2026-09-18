@@ -56,6 +56,10 @@ def validate(cfg: dict) -> None:
         release |= value["mode"] == "release-import"
     lock = cfg["release_lock"]
     require(release == (lock is not None), "Release mode requires a lock; source-only mode must not include one")
+    if cfg["profile"] == "static-third-party":
+        require(not release and lock is None, "static-third-party must be source-built; engine-only releases cannot be rebranded")
+        require(all(value["mode"].startswith("source-") for value in cfg["platforms"].values()),
+                "static-third-party requires source acquisition on both platforms")
     if release:
         require(isinstance(lock, dict) and set(lock) == {"schema", "tag", "tested_commit", "platforms"}, "Invalid CEF release lock")
         require(type(lock["schema"]) is int and lock["schema"] == 1, "Unsupported release lock")
@@ -75,15 +79,20 @@ def validate(cfg: dict) -> None:
             digest(record["sha256"])
 
 
-def port_contract(cfg: dict, platform: str) -> dict:
-    """Operational run/attempt/cache selections never become package ABI inputs."""
+def port_contract(cfg: dict, platform: str, platform_sha256: str | None = None) -> dict:
+    """Operational selectors stay out; strict Linux dependency content is ABI input."""
     validate(cfg)
     require(platform in TRIPLETS, "Invalid platform")
+    strict_linux = cfg["profile"] == "static-third-party" and platform == "linux"
+    require(strict_linux == (platform_sha256 is not None), "Strict Linux requires exactly one platform manifest digest")
+    if platform_sha256 is not None:
+        digest(platform_sha256)
     mode = cfg["platforms"][platform]["mode"]
     return {"schema": 1, "recipe_commit": cfg["recipe_commit"], "profile": cfg["profile"],
             "mode": "source" if mode.startswith("source-") else mode, "triplet": TRIPLETS[platform],
+            "platform_sha256": platform_sha256,
             "release_lock": copy.deepcopy(cfg["release_lock"]) if mode == "release-import" else None}
 
 
-def build_key(cfg: dict, platform: str) -> str:
-    return hashlib.sha256(canonical(port_contract(cfg, platform))).hexdigest()
+def build_key(cfg: dict, platform: str, platform_sha256: str | None = None) -> str:
+    return hashlib.sha256(canonical(port_contract(cfg, platform, platform_sha256))).hexdigest()
