@@ -11,7 +11,7 @@ permissions:
   actions: read
 concurrency:
   group: cef-strict-engine-linux
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   linux:
     runs-on: ubuntu-24.04
@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/vcpkg
-          ref: 4f12b0e731f68be7d3d28623f0e45d56951fa746
+          ref: d11cde21fd7aae08297f3bd5942edc5e293c5b7a
           path: private-vcpkg
           token: ${{ secrets.SOURCE_READ_TOKEN }}
           persist-credentials: false

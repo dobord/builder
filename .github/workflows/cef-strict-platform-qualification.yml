@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/vcpkg
-          ref: 4f12b0e731f68be7d3d28623f0e45d56951fa746
+          ref: d11cde21fd7aae08297f3bd5942edc5e293c5b7a
           path: private-vcpkg
           token: ${{ secrets.SOURCE_READ_TOKEN }}
           persist-credentials: false
@@ -44,7 +44,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C private-vcpkg rev-parse HEAD)" = "4f12b0e731f68be7d3d28623f0e45d56951fa746"
+          test "$(git -C private-vcpkg rev-parse HEAD)" = "d11cde21fd7aae08297f3bd5942edc5e293c5b7a"
           test "$(git -C private-vcpkg/.full-upstream rev-parse HEAD)" = "9e593bb18ea69cc5095e012465dcd675a822ed0d"
           test "$(git -C private-vcpkg/.full-cef rev-parse HEAD)" = "ff3ccfea536393e43fce28f650e0bd538345d23e"
       - name: Recover hosted-runner capacity and install native tools

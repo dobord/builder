@@ -9,7 +9,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
     def test_full_platform_workflow_is_exact_and_keeps_native_output_private(self):
         text = (ROOT / ".github/workflows/cef-strict-platform-qualification.yml").read_text()
         self.assertIn("repository: dobord/vcpkg", text)
-        self.assertIn("ref: 4f12b0e731f68be7d3d28623f0e45d56951fa746", text)
+        self.assertIn("ref: d11cde21fd7aae08297f3bd5942edc5e293c5b7a", text)
         self.assertIn("repository: microsoft/vcpkg", text)
         self.assertIn("ref: 9e593bb18ea69cc5095e012465dcd675a822ed0d", text)
         self.assertIn("repository: dobord/cef", text)
@@ -32,7 +32,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
     def test_strict_engine_iteration_uploads_only_encrypted_checkpoint(self):
         workflow=(ROOT/'.github/workflows/cef-strict-engine-iteration.yml').read_text()
         worker=(ROOT/'secure_release/cef_strict_iteration.py').read_text()
-        self.assertIn('ref: 4f12b0e731f68be7d3d28623f0e45d56951fa746',workflow)
+        self.assertIn('ref: d11cde21fd7aae08297f3bd5942edc5e293c5b7a',workflow)
         self.assertIn('run: python -m secure_release.cef_strict_iteration',workflow)
         self.assertIn('cef-strict-checkpoint-encrypted/*.enc',workflow)
         self.assertNotIn('path: ${{ runner.temp }}/cef-strict-checkpoint/*',workflow)
@@ -51,12 +51,12 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertNotIn('print(text',worker)
         lock=(ROOT/'ci/cef-strict-engine-lock.json').read_text()
         self.assertIn('"checkpoint": null',lock)
-        self.assertIn('"vcpkg_commit": "4f12b0e731f68be7d3d28623f0e45d56951fa746"',lock)
+        self.assertIn('"vcpkg_commit": "d11cde21fd7aae08297f3bd5942edc5e293c5b7a"',lock)
 
     def test_current_private_source_contract_workflow_pins_gn_gate_revision(self):
         text = (ROOT / ".github/workflows/cef-strict-source-contracts.yml").read_text()
         self.assertIn("repository: dobord/vcpkg", text)
-        self.assertIn("ref: 4f12b0e731f68be7d3d28623f0e45d56951fa746", text)
+        self.assertIn("ref: d11cde21fd7aae08297f3bd5942edc5e293c5b7a", text)
         self.assertIn("ref: 457fd41f39cbcff940c7af654da899d44ba5e553", text)
         self.assertIn("ref: e212a7d7e3c427d882731428410a6ca1c48093ef", text)
         self.assertIn("git -C private-vcpkg/.full-cef apply --check", text)
