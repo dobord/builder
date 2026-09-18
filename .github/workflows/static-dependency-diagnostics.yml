@@ -168,9 +168,9 @@ jobs:
           cause = "unknown"
           detail = ""
           patterns = [
-              ("unknown-option", r"Unknown options?:\s*["']?([A-Za-z0-9_+.-]+)"),
-              ("missing-dependency", r"(?:Dependency|Run-time dependency)\s+["']?([A-Za-z0-9_+.-]+)["']?[^\n]*(?:not found|found:\s*NO)"),
-              ("missing-program", r"Program\s+["']?([A-Za-z0-9_+.-]+)["']?[^\n]*(?:not found|found:\s*NO)"),
+              ("unknown-option", r"Unknown options?:\\s*['\\\"]?([A-Za-z0-9_+.-]+)"),
+              ("missing-dependency", r"(?:Dependency|Run-time dependency)\\s+['\\\"]?([A-Za-z0-9_+.-]+)['\\\"]?[^\\n]*(?:not found|found:\\s*NO)"),
+              ("missing-program", r"Program\\s+['\\\"]?([A-Za-z0-9_+.-]+)['\\\"]?[^\\n]*(?:not found|found:\\s*NO)"),
               ("missing-file", r"ERROR:\s*File\s+([A-Za-z0-9_+./-]+)\s+does not exist"),
           ]
           for label, pattern in patterns:
