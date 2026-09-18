@@ -115,14 +115,19 @@ jobs:
           import os, pathlib, re
           path = pathlib.Path(os.environ["LFC_UI_CEF_DIAG_LOG"])
           pieces = [path.read_text(errors="replace")[-1048576:]]
-          upstream = pathlib.Path(os.environ["GITHUB_WORKSPACE"]) / "private-vcpkg/.lfc-cef-upstream/buildtrees/cef-static"
-          if upstream.is_dir():
-              candidates = sorted(
-                  [p for p in upstream.rglob("*.log") if p.is_file()],
-                  key=lambda p: p.stat().st_mtime,
-                  reverse=True,
-              )[:16]
-              pieces.extend(p.read_text(errors="replace")[-1048576:] for p in candidates)
+          roots = [
+              pathlib.Path(os.environ["GITHUB_WORKSPACE"]) / "private-vcpkg/.lfc-cef-upstream",
+              pathlib.Path(os.environ["RUNNER_TEMP"]),
+          ]
+          candidates = []
+          for root in roots:
+              if root.is_dir():
+                  candidates.extend(
+                      p for p in root.rglob("*cef-release-import*")
+                      if p.is_file() and p.stat().st_size <= 16 * 1024 * 1024
+                  )
+          candidates = sorted(set(candidates), key=lambda p: p.stat().st_mtime, reverse=True)[:16]
+          pieces.extend(p.read_text(errors="replace")[-1048576:] for p in candidates)
           text = "\n".join(pieces)
           category, package = "unknown", "cef-static"
           for pattern in (
@@ -158,6 +163,12 @@ jobs:
                   if re.search(pattern, text, re.I):
                       category = label
                       break
+          if category == "unknown":
+              classes = re.findall(r"(?m)^(?:[A-Za-z_][A-Za-z0-9_]*\.)*([A-Za-z_][A-Za-z0-9_]*(?:Error|Exception)):", text)
+              if classes:
+                  safe = classes[-1].lower()
+                  if re.fullmatch(r"[a-z][a-z0-9_]{0,63}", safe):
+                      category = "python-" + safe
           if not re.fullmatch(r"[a-z0-9][a-z0-9+_.-]*", package):
               package = "unknown"
           print(f"LFC_UI_CEF_ENGINE_INSTALL_FAILURE category={category} package={package}")
