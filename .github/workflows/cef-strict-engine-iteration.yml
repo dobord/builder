@@ -1,4 +1,5 @@
 name: Strict CEF engine iteration
+# Exact pins are mirrored by ci/cef-strict-engine-lock.json.
 on:
   push:
     branches:
