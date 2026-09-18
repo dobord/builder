@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/cef
-          ref: dfdcc240141f5a15f976387d21c60a2b92205d5f
+          ref: a8ecc4717a402ca5fc31051da00386bd50591ea3
           path: private-cef
           persist-credentials: false
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
@@ -31,7 +31,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          if ((git -C private-cef rev-parse HEAD) -ne 'dfdcc240141f5a15f976387d21c60a2b92205d5f') { throw 'CEF revision mismatch' }
+          if ((git -C private-cef rev-parse HEAD) -ne 'a8ecc4717a402ca5fc31051da00386bd50591ea3') { throw 'CEF revision mismatch' }
           python -I -m unittest discover -s private-cef/vcpkg/static/tests -p test_platform_source.py -v
       - name: Check source workspace capacity
         shell: pwsh
@@ -63,6 +63,8 @@ jobs:
               raise SystemExit("CEF_WINDOWS_TARGET_STILL_USES_CUSTOM_LIBCXX")
           if not re.search(r"(?m)^use_custom_libcxx_for_host\s*=\s*true\s*$", args):
               raise SystemExit("CEF_WINDOWS_HOST_LIBCXX_POLICY_CHANGED")
+          if not re.search(r"(?m)^v8_enable_sandbox\s*=\s*false\s*$", args):
+              raise SystemExit("CEF_WINDOWS_V8_SANDBOX_POLICY_NOT_EXPLICIT")
           values = json.loads((root / "static-link-inputs.json").read_text())
           def walk(value):
               if isinstance(value, str):
