@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/vcpkg
-          ref: 972a7448447c54607a3be482a0aa396cc190a61c
+          ref: c01f6ebc41c9282bee4ed6d409f9a8a4a7a39535
           path: private-vcpkg
           token: ${{ secrets.SOURCE_READ_TOKEN }}
           persist-credentials: false
@@ -64,7 +64,7 @@ jobs:
         run: |
           set -euo pipefail
           upstream="$GITHUB_WORKSPACE/private-vcpkg/.gtk-upstream"
-          test "$(git -C private-vcpkg rev-parse HEAD)" = "972a7448447c54607a3be482a0aa396cc190a61c"
+          test "$(git -C private-vcpkg rev-parse HEAD)" = "c01f6ebc41c9282bee4ed6d409f9a8a4a7a39535"
           bash "$upstream/bootstrap-vcpkg.sh" -disableMetrics >"$RUNNER_TEMP/gtk-bootstrap.log" 2>&1
           set +e
           "$upstream/vcpkg" install gtk3             --triplet=x64-linux-static-release             --host-triplet=x64-linux-static-release             "--overlay-ports=$GITHUB_WORKSPACE/private-vcpkg/ports"             "--overlay-triplets=$GITHUB_WORKSPACE/private-vcpkg/ci/cef-platform/triplets"             "--x-install-root=$RUNNER_TEMP/gtk-installed"             --binarysource=clear             "--binarysource=files,$RUNNER_TEMP/gtk-cache/core,read"             "--binarysource=files,$RUNNER_TEMP/gtk-cache/cups,read"             "--binarysource=files,$RUNNER_TEMP/gtk-cache/gbm,read" >"$RUNNER_TEMP/gtk-install.log" 2>&1
