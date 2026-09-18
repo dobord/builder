@@ -184,7 +184,8 @@ def run_engine(root: Path, cfg: dict, platform: str, execute, environment: dict,
 
 
 def verify_consumer(root: Path, cfg: dict, platform: str, execute,
-                    platform_sha256: str | None = None) -> dict:
+                    platform_sha256: str | None = None,
+                    platform_preflight: dict | None = None) -> dict:
     """Run a NEW relocated combined consumer; upstream receipts are provenance only."""
     recipe = root / "cef-recipe"
     name = "cef_static_combined_smoke" + (".exe" if platform == "windows" else "")
@@ -219,6 +220,23 @@ def verify_consumer(root: Path, cfg: dict, platform: str, execute,
     proof = crypto.parse(state.read_bytes())
     if cfg["profile"] == "static-third-party":
         if platform == "linux":
+            if (not isinstance(platform_preflight, dict)
+                    or platform_preflight.get("sha256") != platform_sha256
+                    or not isinstance(platform_preflight.get("qualification_sha256"), str)
+                    or not isinstance(platform_preflight.get("qualification"), Path)
+                    or not platform_preflight["qualification"].is_file()):
+                raise ValueError("Strict Linux SDK lacks its complete platform qualification receipt")
+            qualification = crypto.parse(platform_preflight["qualification"].read_bytes())
+            if (qualification.get("schema") != 1
+                    or qualification.get("kind") != "cef-static-platform-preflight"
+                    or qualification.get("status") != "success"
+                    or qualification.get("full_platform_graph_qualified") is not True
+                    or qualification.get("cef_runtime_verified") is not False
+                    or qualification.get("module_count") != 36
+                    or qualification.get("manifest_sha256") != platform_sha256
+                    or crypto.digest(platform_preflight["qualification"])
+                       != platform_preflight["qualification_sha256"]):
+                raise ValueError("Strict Linux platform qualification receipt changed or is incomplete")
             inventory = root / "consumer-sdk" / "installed" / cef_contract.TRIPLETS[platform] / "share/cef-static/static-platform-inventory.json"
             if not inventory.is_file() or inventory.is_symlink():
                 raise ValueError("Strict Linux SDK is missing the exported platform inventory")
@@ -230,6 +248,8 @@ def verify_consumer(root: Path, cfg: dict, platform: str, execute,
             proof["platform_closure"] = {"kind": "linux-frozen-vcpkg",
                                          "manifest_sha256": platform_sha256,
                                          "inventory_sha256": crypto.digest(inventory),
+                                         "qualification_sha256": platform_preflight["qualification_sha256"],
+                                         "full_platform_graph_qualified": True,
                                          "archive_count": len(value["archives"])}
         else:
             proof["platform_closure"] = {"kind": "windows-native-os-abi", "manifest_sha256": None}
@@ -274,8 +294,12 @@ def validate_evidence(proof: dict, cfg: dict, platform: str) -> None:
             if (closure.get("kind") != "linux-frozen-vcpkg"
                     or not isinstance(closure.get("archive_count"), int) or closure["archive_count"] < 1
                     or not isinstance(closure.get("manifest_sha256"), str)
-                    or not isinstance(closure.get("inventory_sha256"), str)):
+                    or not isinstance(closure.get("inventory_sha256"), str)
+                    or not isinstance(closure.get("qualification_sha256"), str)
+                    or closure.get("full_platform_graph_qualified") is not True):
                 raise ValueError("Strict Linux CEF platform closure evidence is incomplete")
+            for name in ("manifest_sha256", "inventory_sha256", "qualification_sha256"):
+                cef_contract.digest(closure[name])
         elif closure != {"kind": "windows-native-os-abi", "manifest_sha256": None}:
             raise ValueError("Strict Windows CEF platform closure evidence is incomplete")
     elif proof.get("third_party_libraries_static") not in (None, False):
