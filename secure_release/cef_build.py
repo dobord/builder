@@ -264,6 +264,39 @@ def verify_consumer(root: Path, cfg: dict, platform: str, execute,
 
 
 
+def platform_preflight_digest(value: dict) -> str:
+    """Digest the pinned CEF platform-contract canonical JSON (including newline)."""
+    if not isinstance(value, dict):
+        raise ValueError("Invalid CEF platform preflight record")
+    return hashlib.sha256(crypto.canonical(value) + b"\n").hexdigest()
+
+
+def validate_platform_preflight(value: dict | None, proof: dict, cfg: dict, platform: str) -> None:
+    """Bind the builder's complete dependency preflight to final runtime evidence."""
+    cef_contract.validate(cfg)
+    strict_linux = cfg["profile"] == "static-third-party" and platform == "linux"
+    if not strict_linux:
+        if value is not None:
+            raise ValueError("Only strict Linux carries a platform preflight record")
+        return
+    if not isinstance(value, dict):
+        raise ValueError("Strict Linux publication lacks its platform preflight record")
+    closure = proof.get("platform_closure", {})
+    if (set(value) < {"schema", "kind", "status", "full_platform_graph_qualified",
+                      "cef_runtime_verified", "gpu_runtime_qualified", "module_count",
+                      "manifest_sha256"}
+            or value.get("schema") != 1
+            or value.get("kind") != "cef-static-platform-preflight"
+            or value.get("status") != "success"
+            or value.get("full_platform_graph_qualified") is not True
+            or value.get("cef_runtime_verified") is not False
+            or value.get("gpu_runtime_qualified") is not False
+            or value.get("module_count") != 36
+            or value.get("manifest_sha256") != closure.get("manifest_sha256")
+            or platform_preflight_digest(value) != closure.get("qualification_sha256")):
+        raise ValueError("Strict Linux platform preflight is not bound to final CEF evidence")
+
+
 def qualified_contract(proof: dict, cfg: dict, platform: str) -> tuple[str, dict]:
     """Bind publication to the exact strict Linux frozen-prefix digest.
 
