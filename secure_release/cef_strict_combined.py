@@ -429,11 +429,19 @@ def main() -> None:
         stage = "lfc-ui-freerdp-cef-consumer"
         proxy_source = root / "lfc-ui-freerdp-cef-source"
         proxy_source.mkdir()
-        for name in (
-            "freerdp_proxy_web_engine_view_cef.cpp",
-            "freerdp_graphics_mode_args.hpp",
-        ):
-            shutil.copy2(lfc_ui / "examples" / name, proxy_source / name)
+        canonical_proxy_example = (
+            lfc_ui / "examples/freerdp_proxy_web_engine_view_cef.cpp"
+        )
+        if not canonical_proxy_example.is_file():
+            raise ValueError("Pinned lfc-ui lacks the canonical FreeRDP/CEF example")
+        summary["lfc_ui_freerdp_cef_example_source_sha256"] = crypto.digest(
+            canonical_proxy_example
+        )
+        shutil.copy2(canonical_proxy_example, proxy_source / canonical_proxy_example.name)
+        shutil.copy2(
+            lfc_ui / "examples/freerdp_graphics_mode_args.hpp",
+            proxy_source / "freerdp_graphics_mode_args.hpp",
+        )
         (proxy_source / "CMakeLists.txt").write_text(
             """cmake_minimum_required(VERSION 3.32)
 project(lfc_ui_freerdp_cef_qualification LANGUAGES C CXX)
