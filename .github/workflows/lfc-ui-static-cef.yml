@@ -106,8 +106,43 @@ jobs:
             "--x-install-root=$installed",
             '--binarysource=clear'
           )
-          & $vcpkg install 'cef-static[strict-platform]' @common *> (Join-Path $env:RUNNER_TEMP 'lfc-ui-cef-engine-install.log')
-          if ($LASTEXITCODE -ne 0) { throw 'LFC_UI_CEF_ENGINE_INSTALL_FAILED' }
+          $engineLog = Join-Path $env:RUNNER_TEMP 'lfc-ui-cef-engine-install.log'
+          & $vcpkg install 'cef-static[strict-platform]' @common *> $engineLog
+          $engineRc = $LASTEXITCODE
+          if ($engineRc -ne 0) {
+            $env:LFC_UI_CEF_DIAG_LOG = $engineLog
+            @'
+          import os, pathlib, re
+          path = pathlib.Path(os.environ["LFC_UI_CEF_DIAG_LOG"])
+          text = path.read_text(errors="replace")[-1048576:]
+          category, package = "unknown", "cef-static"
+          for pattern in (
+              r"error: building ([a-z0-9][a-z0-9+_.-]*):",
+              r"BUILD_FAILED[^\n]*?([a-z0-9][a-z0-9+_.-]+):x64-windows-static-release",
+              r"([a-z0-9][a-z0-9+_.-]+):x64-windows-static-release failed",
+          ):
+              match = re.search(pattern, text, re.I)
+              if match:
+                  package = match.group(1).lower()
+                  break
+          checks = (
+              ("patch", r"patch failed|does not apply|corrupt patch|malformed patch"),
+              ("release-contract", r"release.*(?:lock|contract)|strict_requalification_required|requalification"),
+              ("artifact-integrity", r"(?:sha256|hash|checksum).*(?:mismatch|failed|invalid)"),
+              ("download", r"(?:download|http|curl).*(?:failed|error|404|403|502|503|504)"),
+              ("configure", r"(?:cmake|configure).*(?:error|failed)"),
+              ("compile", r"(?:FAILED:|fatal error:|ninja: build stopped)"),
+          )
+          for label, pattern in checks:
+              if re.search(pattern, text, re.I):
+                  category = label
+                  break
+          if not re.fullmatch(r"[a-z0-9][a-z0-9+_.-]*", package):
+              package = "unknown"
+          print(f"LFC_UI_CEF_ENGINE_INSTALL_FAILURE category={category} package={package}")
+          '@ | python -
+            exit $engineRc
+          }
           & $vcpkg install 'lfc-ui[cef]' @common *> (Join-Path $env:RUNNER_TEMP 'lfc-ui-cef-install.log')
           if ($LASTEXITCODE -ne 0) { throw 'LFC_UI_CEF_INSTALL_FAILED' }
           $export = Join-Path $env:RUNNER_TEMP 'lfc-ui-cef-export'
