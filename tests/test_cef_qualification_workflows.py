@@ -57,6 +57,18 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn('"checkpoint": null',lock)
         self.assertIn('"vcpkg_commit": "d11cde21fd7aae08297f3bd5942edc5e293c5b7a"',lock)
 
+    def test_sdk_dependency_qualification_keeps_private_build_logs_runner_local(self):
+        text = (ROOT / ".github/workflows/cef-strict-sdk-deps.yml").read_text()
+        self.assertIn("repository: dobord/lockfreecoro", text)
+        self.assertIn("repository: dobord/lfc-ui", text)
+        self.assertIn("persist-credentials: false", text)
+        self.assertIn("sdk-deps-install.log", text)
+        self.assertIn("sdk-deps-consumer-build.log", text)
+        self.assertIn("SDK_DEPS_LINUX_QUALIFIED", text)
+        self.assertIn("SDK_DEPS_WINDOWS_QUALIFIED", text)
+        self.assertNotIn("upload-artifact", text)
+        self.assertNotIn("cat $RUNNER_TEMP/sdk-deps", text)
+
     def test_current_private_source_contract_workflow_pins_gn_gate_revision(self):
         text = (ROOT / ".github/workflows/cef-strict-source-contracts.yml").read_text()
         self.assertIn("repository: dobord/vcpkg", text)
