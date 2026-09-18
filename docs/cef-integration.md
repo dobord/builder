@@ -3,7 +3,9 @@
 ## Implemented contract
 
 A signed release plan with `version: 2` has the original version-1 fields plus
-`cef`. Each platform must explicitly request the `cef-static` root package.
+`cef`. Each platform must explicitly request the CEF package matching its signed profile:
+`cef-static` for engine-static or `cef-static[strict-platform]` for
+static-third-party.
 Version 1 remains compatible for existing plans without CEF. A CEF package or
 receipt without its signed acquisition contract is refused by the publisher.
 
@@ -37,9 +39,10 @@ its run ID and operational budget do not become part of the CEF package ABI.
 
 ## Execution and caching
 
-The builder materializes `ports/cef-static/cef-build.json` before ABI calculation.
-The file records the recipe, native triplet, acquisition mode, profile and release
-hashes. Fresh/resume normalize to the same source identity. Source work lives at
+The builder materializes `ports/cef-static/cef-build.json` before the final CEF
+ABI calculation. The file records the recipe, native triplet, acquisition mode,
+profile, release hashes and—on strict Linux—the frozen platform-manifest digest.
+Fresh/resume normalize to the same source identity. Source work lives at
 `RUNNER_TEMP/encrypted-release-private/cef-work`, outside vcpkg's buildtrees.
 It uses the original reviewed CEF GN/Ninja recipe and checkpoint codecs.
 
@@ -82,15 +85,27 @@ The new manifest binds the consumer evidence, CEF contract and SDK ZIP digest.
 The private publisher independently checks that contract against the signed plan
 and against the actual installed CEF package. It never executes SDK code.
 
-## Explicit limitations and activation
+## Strict static-third-party path
 
-This implementation supports **engine-static**, not a qualified fully static
-third-party SDK. Linux still needs the declared system GLib/NSS/X11/ALSA stack.
-The `static-third-party` profile is recognized by the schema but intentionally
-rejected before source compilation/import; no downgrade or success claim occurs.
-Static NSS/D-Bus, Xorg, CUPS, GBM/DRM, udev/PCI, plugin closure and a complete final
-ELF/PE audit remain required. Existing Vulkan/OpenGL dependencies must also be
-reviewed across the entire package graph. Sandbox/GPU are not certified.
+The feature branch now implements `static-third-party` as a **source-only**
+profile. Engine-only release imports are rejected rather than relabeled. Linux
+first installs `cef-platform-deps`, snapshots the actual target include/lib/share
+payload, resolves all 36 pinned GN modules, hashes the manifest and puts both the
+manifest and target prefix inside the same CEF checkpoint workspace. The manifest
+digest is part of the CEF package ABI and checkpoint identity. Source-resume must
+therefore restore the exact same dependency closure. Windows uses the native OS ABI
+boundary and /MT rather than the Linux platform catalog.
+
+After the combined consumer runs, strict evidence requires browser and renderer
+module audits, Linux direct ELF dependency allowlisting, the exported frozen-prefix
+inventory and a clean final SDK archive audit. The private publisher checks those
+proofs again before consulting its explicit contract admission lists.
+
+This is implementation, not production certification. A real full source
+fresh/resume build with the strict dependency prefix, relocated combined SDK
+consumer and two-platform private publisher staging still has to complete before
+any contract hash is admitted. Sandbox and unrestricted GPU behavior remain
+separate unsupported claims.
 
 The aggregate SDK limit remains 1900 MiB and the safe archive limit 12 GiB. A
 larger SDK fails explicitly; multipart final-SDK publication is not implemented.
