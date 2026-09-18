@@ -131,6 +131,12 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertNotIn("upload-artifact", text)
         self.assertNotIn("cat $RUNNER_TEMP", text)
 
+    def test_freerdp_static_diagnostic_uses_deterministic_audio_revision(self):
+        text = (ROOT / ".github/workflows/freerdp-static-diagnostic.yml").read_text()
+        self.assertIn("ref: 41740842b05f0d72f64778ffccc12f2d7108701a", text)
+        self.assertIn("FREERDP_STATIC_CONFIGURE_FAILURE category=", text)
+        self.assertNotIn("upload-artifact", text)
+
     def test_lfc_ui_static_freerdp_workflow_is_relocated_and_static(self):
         text = (ROOT / ".github/workflows/lfc-ui-static-freerdp.yml").read_text()
         self.assertIn("ref: 41740842b05f0d72f64778ffccc12f2d7108701a", text)
