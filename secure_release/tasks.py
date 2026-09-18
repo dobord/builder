@@ -37,20 +37,93 @@ def run(args: list[str], log: Path, *, cwd: Path | None = None, environment: dic
                 timeout=timeout, stage=stage, public_progress=public_progress)
 
 
+def _artifact_selector(client: Client, platform: str, run: int, attempt: int,
+                       builder_sha: str, kind: str, *, required: bool) -> dict | None:
+    """Resolve one exact trusted builder artifact; never discover an older/latest run."""
+    run = number(run); attempt = number(attempt)
+    if platform not in cef_contract.TRIPLETS or kind not in {"cef-checkpoint", "vcpkg-binaries"}:
+        raise ValueError("invalid CEF continuation selector")
+    producer = client.get(f"/repos/{BUILDER}/actions/runs/{run}/attempts/{attempt}")
+    check_run(producer, BUILDER, "build-release.yml", builder_sha, attempt,
+              "workflow_dispatch", success=True)
+    expected = f"{kind}-{platform}-{run}-{attempt}"
+    matches = []
+    for artifact in client.artifacts(BUILDER, run):
+        workflow = artifact.get("workflow_run", {})
+        if artifact.get("name") != expected:
+            continue
+        if (artifact.get("expired") is True or workflow.get("id") != run
+                or workflow.get("head_sha") != builder_sha):
+            raise ValueError("untrusted CEF continuation artifact")
+        value = artifact.get("digest", "")
+        if not isinstance(value, str) or not value.startswith("sha256:"):
+            raise ValueError("CEF continuation artifact has no GitHub digest")
+        matches.append({"run": run, "attempt": attempt,
+                        "artifact_id": number(artifact.get("id")),
+                        "artifact_sha256": cef_contract.digest(value[7:])})
+    if len(matches) > 1 or (required and len(matches) != 1):
+        raise ValueError("missing or ambiguous CEF continuation artifact")
+    return matches[0] if matches else None
+
+
+def _apply_continuation(plan: dict, inputs: dict, builder_sha: str, client: Client) -> dict:
+    """Turn explicit run/attempt inputs into authenticated source-resume selectors."""
+    if plan.get("version") != 2 or plan.get("cef", {}).get("profile") != "static-third-party":
+        raise ValueError("CEF continuation requires the signed strict source profile")
+    result = crypto.parse(crypto.canonical(plan))
+    changed = False
+    for platform in cef_contract.TRIPLETS:
+        run_text = str(inputs.get(platform + "_builder_run", "")).strip()
+        attempt_text = str(inputs.get(platform + "_builder_attempt", "")).strip()
+        if bool(run_text) != bool(attempt_text):
+            raise ValueError("CEF continuation run and attempt must be supplied together")
+        if not run_text:
+            continue
+        selected = result["cef"]["platforms"][platform]
+        if selected != {"mode": "source-fresh", "checkpoint": None, "binary_cache": None}:
+            raise ValueError("CEF continuation only starts from a fresh signed plan")
+        run, attempt = number(run_text), number(attempt_text)
+        checkpoint = _artifact_selector(client, platform, run, attempt, builder_sha,
+                                        "cef-checkpoint", required=True)
+        binary = _artifact_selector(client, platform, run, attempt, builder_sha,
+                                    "vcpkg-binaries", required=False)
+        selected.update(mode="source-resume", checkpoint=checkpoint, binary_cache=binary)
+        changed = True
+    if not changed:
+        raise ValueError("manual continuation requires at least one explicit builder run")
+    validate_plan(result)
+    return result
+
+
 def request():
-    guard(SOURCE, event="push")
+    guard(SOURCE)
     e = event()
-    if e["deleted"] or not e.get("created") or not e["repository"]["private"] or env("GITHUB_REF_TYPE") != "tag":
-        raise ValueError("only newly created private release tags are supported")
+    event_name = env("GITHUB_EVENT_NAME")
+    if not e["repository"]["private"] or env("GITHUB_REF_TYPE") != "tag":
+        raise ValueError("release requests require a private immutable tag ref")
     tag = env("GITHUB_REF_NAME")
     if not TAG.fullmatch(tag):
         raise ValueError("invalid release tag")
+    if event_name == "push":
+        if e["deleted"] or not e.get("created"):
+            raise ValueError("only newly created release tag pushes are supported")
+        continuation_inputs = None
+    elif event_name == "workflow_dispatch":
+        values = e.get("inputs")
+        if not isinstance(values, dict) or values.get("source_tag") != tag:
+            raise ValueError("manual continuation must execute from the exact source tag")
+        continuation_inputs = values
+    else:
+        raise ValueError("unsupported release request event")
     source_sha = sha(env("GITHUB_SHA"))
     builder_sha = sha(env("BUILDER_COMMIT_SHA"))
     client = Client(env("SOURCE_TOKEN"))
     record = client.get(f"/repos/{SOURCE}/contents/ci/release-plan.json?ref={source_sha}")
     plan = crypto.parse(crypto.unb64(record["content"].replace("\n", "")))
     validate_plan(plan)
+    builder = Client(env("BUILDER_DISPATCH_TOKEN"))
+    if continuation_inputs is not None:
+        plan = _apply_continuation(plan, continuation_inputs, builder_sha, builder)
     created = int(time.time())
     rid, salt = str(uuid.uuid4()), crypto.b64(os.urandom(32))
     payload = {"version": 1, "release_id": rid, "salt": salt, "source_sha": source_sha, "source_tag": tag,
@@ -60,7 +133,7 @@ def request():
                "source_id": IDS[SOURCE], "builder_id": IDS[BUILDER], "bin_id": IDS[BIN], "plan": plan}
     document = crypto.sign(payload, env("REQUEST_SIGNING_PRIVATE_KEY"))
     encrypted = crypto.seal_message(crypto.canonical(document), env("BUILDER_INPUT_PUBLIC_KEY"), message_context(rid, salt))
-    answer = Client(env("BUILDER_DISPATCH_TOKEN")).dispatch(BUILDER, "build-release.yml", {"release_id": rid, "salt": salt, "request": encrypted})
+    answer = builder.dispatch(BUILDER, "build-release.yml", {"release_id": rid, "salt": salt, "request": encrypted})
     with open(env("GITHUB_STEP_SUMMARY"), "a", encoding="utf-8") as summary:
         summary.write(f"Accepted release request `{rid}`. Builder run: {answer['workflow_run_id']}\n")
 
@@ -112,7 +185,11 @@ def prepare():
     if repo["id"] != IDS[SOURCE] or not repo["private"] or repo["owner"]["id"] != OWNER:
         raise ValueError("source repository identity changed")
     requester = client.get(f"/repos/{SOURCE}/actions/runs/{payload['request_run']}/attempts/{payload['request_attempt']}")
-    check_run(requester, SOURCE, "release-request.yml", payload["source_sha"], payload["request_attempt"], "push", success=False)
+    requester_event = requester.get("event")
+    if requester_event not in {"push", "workflow_dispatch"}:
+        raise ValueError("unsupported requester event")
+    check_run(requester, SOURCE, "release-request.yml", payload["source_sha"],
+              payload["request_attempt"], requester_event, success=False)
     ref = client.get(f"/repos/{SOURCE}/git/ref/tags/{payload['source_tag']}")["object"]
     for _ in range(5):
         if ref["type"] == "commit":
@@ -159,6 +236,24 @@ def prepare():
     context = file_context(payload["release_id"], payload["salt"], int(env("GITHUB_RUN_ID")), int(env("GITHUB_RUN_ATTEMPT")),
                            env("GITHUB_SHA"), "sources", "all")
     crypto.encrypt_file(archive, Path(env("CIPHER_DIR")) / "input.enc", crypto.public_text(env("BUILDER_INPUT_PRIVATE_KEY")), context)
+
+
+def _persist_binary_cache(binary_cache: Path | None, cache_key: str | None,
+                          platform: str, input_private: str | None) -> bool:
+    """Persist completed packages even when the engine only produced a checkpoint."""
+    if binary_cache is None or not any(binary_cache.rglob("*.zip")):
+        return False
+    if cache_key is None or input_private is None:
+        raise ValueError("CEF binary cache lacks its authenticated context")
+    output = Path(env("RUNNER_TEMP")) / "cipher-cache/vcpkg-binaries"
+    if output.exists():
+        raise ValueError("CEF binary cache output already exists")
+    cache_context = cef_cache.context("vcpkg-binaries", platform, cache_key,
+                                      int(env("GITHUB_RUN_ID")), int(env("GITHUB_RUN_ATTEMPT")),
+                                      env("GITHUB_SHA"), "index")
+    cef_cache.seal(binary_cache, output, crypto.public_text(input_private), cache_context)
+    cef_build.write_output("binary_cache_ready", True)
+    return True
 
 
 def build():
@@ -231,17 +326,13 @@ def build():
         platform_sha256 = platform_probe["sha256"] if platform_probe is not None else None
         if not cef_build.run_engine(root, cfg, platform, execute, environment, input_private,
                                     env("GITHUB_SHA"), platform_probe):
-            return  # A persisted checkpoint, never an installed or published SDK.
+            _persist_binary_cache(binary_cache, cache_key, platform, input_private)
+            return  # Persisted checkpoint + completed packages; never an installed/published SDK.
     # Preserve downloads through the entire graph. Remove them at final job cleanup.
     try:
         execute(build_support.install_command(executable, packages, args, binary_cache=binary_cache), stage="install", timeout=14400)
     finally:
-        if binary_cache is not None and any(binary_cache.rglob("*.zip")):
-            cache_context = cef_cache.context("vcpkg-binaries", platform, cache_key, int(env("GITHUB_RUN_ID")),
-                                              int(env("GITHUB_RUN_ATTEMPT")), env("GITHUB_SHA"), "index")
-            cef_cache.seal(binary_cache, Path(env("RUNNER_TEMP")) / "cipher-cache/vcpkg-binaries",
-                           crypto.public_text(input_private), cache_context)
-            cef_build.write_output("binary_cache_ready", True)
+        _persist_binary_cache(binary_cache, cache_key, platform, input_private)
     input_private = None
     export = root / "export"
     export.mkdir()
