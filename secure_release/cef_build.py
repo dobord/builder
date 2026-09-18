@@ -10,6 +10,30 @@ from .protocol import BUILDER
 from .github import Client
 
 
+MIN_SOURCE_FREE_BYTES = 80 * 1024**3
+
+
+def require_source_capacity(root: Path, cfg: dict, platform: str) -> None:
+    """Reject undersized source runners before dependency/bootstrap work.
+
+    The pinned CEF recipe repeats its own capacity check immediately before
+    source preparation; this early gate only avoids wasting a standard hosted
+    runner on a build that cannot start.
+    """
+    cef_contract.validate(cfg)
+    if platform not in cef_contract.TRIPLETS:
+        raise ValueError("Invalid CEF platform")
+    if not cfg["platforms"][platform]["mode"].startswith("source-"):
+        return
+    free = shutil.disk_usage(root).free
+    if free < MIN_SOURCE_FREE_BYTES:
+        raise RuntimeError(
+            "CEF source build requires at least 80 GiB free; configure trusted "
+            "CEF_STATIC_LINUX_RUNNER_LABELS/CEF_STATIC_WINDOWS_RUNNER_LABELS "
+            "for a larger or self-hosted runner"
+        )
+
+
 def materialize(workspace: Path, cfg: dict, platform: str, platform_sha256: str | None = None) -> str:
     contract = cef_contract.port_contract(cfg, platform, platform_sha256)
     port = workspace / "ports/cef-static"
