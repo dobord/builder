@@ -19,6 +19,13 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertNotIn("upload-artifact", text)
         self.assertNotIn("persist-credentials: true", text)
 
+    def test_production_build_accepts_trusted_large_disk_runner_labels(self):
+        text=(ROOT/'.github/workflows/build-release.yml').read_text()
+        self.assertIn('runs-on: ${{ fromJSON(matrix.runner_labels) }}',text)
+        self.assertIn("vars.CEF_STATIC_LINUX_RUNNER_LABELS || '[\"ubuntu-24.04\"]'",text)
+        self.assertIn("vars.CEF_STATIC_WINDOWS_RUNNER_LABELS || '[\"windows-2022\"]'",text)
+        self.assertNotIn('runs-on: ${{ matrix.os }}',text)
+
     def test_current_private_source_contract_workflow_pins_gn_gate_revision(self):
         text = (ROOT / ".github/workflows/cef-strict-source-contracts.yml").read_text()
         self.assertIn("repository: dobord/vcpkg", text)
