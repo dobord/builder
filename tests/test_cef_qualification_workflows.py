@@ -26,6 +26,20 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn("vars.CEF_STATIC_WINDOWS_RUNNER_LABELS || '[\"windows-2022\"]'",text)
         self.assertNotIn('runs-on: ${{ matrix.os }}',text)
 
+    def test_strict_engine_iteration_uploads_only_encrypted_checkpoint(self):
+        workflow=(ROOT/'.github/workflows/cef-strict-engine-iteration.yml').read_text()
+        worker=(ROOT/'secure_release/cef_strict_iteration.py').read_text()
+        self.assertIn('ref: fb0c27ec25ae3d9f297edb8bcd5a36378e38ce2e',workflow)
+        self.assertIn('run: python -m secure_release.cef_strict_iteration',workflow)
+        self.assertIn('cef-strict-checkpoint-encrypted/*.enc',workflow)
+        self.assertNotIn('path: ${{ runner.temp }}/cef-strict-checkpoint/*',workflow)
+        self.assertIn('cef_cache.seal(',worker)
+        self.assertIn('"cef-checkpoint", "linux"',worker)
+        self.assertIn('"slice"',worker)
+        self.assertIn('"platform_build_inputs"',worker)
+        self.assertIn('"third_party_modules_static"',worker)
+        self.assertNotIn('print(text',worker)
+
     def test_current_private_source_contract_workflow_pins_gn_gate_revision(self):
         text = (ROOT / ".github/workflows/cef-strict-source-contracts.yml").read_text()
         self.assertIn("repository: dobord/vcpkg", text)
