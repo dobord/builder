@@ -34,7 +34,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
     def test_strict_engine_iteration_uploads_only_encrypted_checkpoint(self):
         workflow=(ROOT/'.github/workflows/cef-strict-engine-iteration.yml').read_text()
         worker=(ROOT/'secure_release/cef_strict_iteration.py').read_text()
-        self.assertIn('ref: f2495f0da9db29dfea129e2b04a371933b9d2f4d',workflow)
+        self.assertIn('ref: c01f6ebc41c9282bee4ed6d409f9a8a4a7a39535',workflow)
         self.assertIn('run: python -m secure_release.cef_strict_iteration',workflow)
         self.assertIn('Restore reviewed completed-package caches by exact artifact digest',workflow)
         self.assertIn('gh api "repos/dobord/vcpkg/actions/artifacts/$id/zip"',workflow)
@@ -57,7 +57,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertNotIn('print(text',worker)
         lock=(ROOT/'ci/cef-strict-engine-lock.json').read_text()
         self.assertIn('"checkpoint": null',lock)
-        self.assertIn('"vcpkg_commit": "f2495f0da9db29dfea129e2b04a371933b9d2f4d"',lock)
+        self.assertIn('"vcpkg_commit": "c01f6ebc41c9282bee4ed6d409f9a8a4a7a39535"',lock)
 
     def test_sdk_dependency_qualification_keeps_private_build_logs_runner_local(self):
         text = (ROOT / ".github/workflows/cef-strict-sdk-deps.yml").read_text()
@@ -74,6 +74,9 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
     def test_combined_qualification_runs_only_for_explicit_checkpoint_lock(self):
         text=(ROOT/'.github/workflows/cef-strict-combined.yml').read_text()
         self.assertIn('workflow_dispatch:',text)
+        self.assertIn('needs: gate',text)
+        self.assertIn("if: needs.gate.outputs.ready == 'true'",text)
+        self.assertIn('checkpoint\") is not None',text)
         self.assertIn('- ci/cef-strict-engine-lock.json',text)
         self.assertIn('run: python -m secure_release.cef_strict_combined',text)
         self.assertIn('cef-strict-combined-summary-',text)
@@ -153,7 +156,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
     def test_lfc_ui_static_cef_workflow_builds_upstream_example(self):
         text = (ROOT / ".github/workflows/lfc-ui-static-cef.yml").read_text()
         self.assertIn("ref: c01f6ebc41c9282bee4ed6d409f9a8a4a7a39535", text)
-        self.assertIn("ref: d8b2c3db26ac34e0e3d68d91b7368d4e1fb4368f", text)
+        self.assertIn("ref: befa5c26c0c608165f27ac348e892305837fd614", text)
         self.assertIn("'lfc-ui[cef]'", text)
         self.assertIn("web_engine_view_cef.cpp", text)
         self.assertIn("find_package(lfc-ui CONFIG REQUIRED COMPONENTS WebEngine)", text)
@@ -164,7 +167,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
     def test_current_private_source_contract_workflow_pins_gn_gate_revision(self):
         text = (ROOT / ".github/workflows/cef-strict-source-contracts.yml").read_text()
         self.assertIn("repository: dobord/vcpkg", text)
-        self.assertIn("ref: f2495f0da9db29dfea129e2b04a371933b9d2f4d", text)
+        self.assertIn("ref: c01f6ebc41c9282bee4ed6d409f9a8a4a7a39535", text)
         self.assertIn("ref: 457fd41f39cbcff940c7af654da899d44ba5e553", text)
         self.assertNotIn("git -C private-vcpkg/.full-cef apply --check", text)
         self.assertNotIn("strict-import-cef", text)
