@@ -42,6 +42,21 @@ class LocalSdkRetrievalTests(unittest.TestCase):
         self.assertIn("callerDirectory", script)
         self.assertNotIn("Get-Content $PrivateKey", script)
 
+    def test_sdk_layout_rejects_shared_target_payload(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            archive_path = root / "shared.zip"
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                archive.writestr("scripts/buildsystems/vcpkg.cmake", "set(VCPKG 1)\n")
+                archive.writestr(
+                    "installed/x64-windows-static-release/lib/example.lib", b"archive"
+                )
+                archive.writestr(
+                    "installed/x64-windows-static-release/bin/forbidden.dll", b"MZ"
+                )
+            with self.assertRaisesRegex(ValueError, "forbidden SDK file"):
+                _validate_sdk(archive_path, "x64-windows-static-release")
+
     def test_sdk_layout_requires_toolchain_and_static_library(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
