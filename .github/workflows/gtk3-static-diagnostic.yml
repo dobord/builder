@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/vcpkg
-          ref: 32f9a0430ef382ae0899a73667049382a9c65d8c
+          ref: 972a7448447c54607a3be482a0aa396cc190a61c
           path: private-vcpkg
           token: ${{ secrets.SOURCE_READ_TOKEN }}
           persist-credentials: false
@@ -64,7 +64,7 @@ jobs:
         run: |
           set -euo pipefail
           upstream="$GITHUB_WORKSPACE/private-vcpkg/.gtk-upstream"
-          test "$(git -C private-vcpkg rev-parse HEAD)" = "32f9a0430ef382ae0899a73667049382a9c65d8c"
+          test "$(git -C private-vcpkg rev-parse HEAD)" = "972a7448447c54607a3be482a0aa396cc190a61c"
           bash "$upstream/bootstrap-vcpkg.sh" -disableMetrics >"$RUNNER_TEMP/gtk-bootstrap.log" 2>&1
           set +e
           "$upstream/vcpkg" install gtk3             --triplet=x64-linux-static-release             --host-triplet=x64-linux-static-release             "--overlay-ports=$GITHUB_WORKSPACE/private-vcpkg/ports"             "--overlay-triplets=$GITHUB_WORKSPACE/private-vcpkg/ci/cef-platform/triplets"             "--x-install-root=$RUNNER_TEMP/gtk-installed"             --binarysource=clear             "--binarysource=files,$RUNNER_TEMP/gtk-cache/core,read"             "--binarysource=files,$RUNNER_TEMP/gtk-cache/cups,read"             "--binarysource=files,$RUNNER_TEMP/gtk-cache/gbm,read" >"$RUNNER_TEMP/gtk-install.log" 2>&1
@@ -88,34 +88,46 @@ jobs:
               logs = [p.read_text(errors="replace")[-262144:] for p in candidates]
           text = "\n".join(logs)
           category, token = "unknown", ""
-          patterns = [
-              ("missing-header", r"fatal error:\s*([A-Za-z0-9_+./-]+):\s*No such file"),
-              ("missing-library", r"(?:cannot find|unable to find)\s+-l([A-Za-z0-9_+.-]+)"),
-              ("missing-dependency", r"(?:Dependency|Run-time dependency)\s+['\"]?([A-Za-z0-9_+.-]+)['\"]?[^\n]*(?:not found|found:\s*NO)"),
-              ("missing-program", r"Program\s+['\"]?([A-Za-z0-9_+.-]+)['\"]?[^\n]*(?:not found|found:\s*NO)"),
-              ("unknown-option", r"Unknown options?:\s*['\"]?([A-Za-z0-9_+.-]+)"),
-          ]
-          for label, pattern in patterns:
-              m = re.search(pattern, text, re.I)
-              if m:
-                  category = label
-                  raw = pathlib.PurePosixPath(m.group(1)).name.lower()
-                  if re.fullmatch(r"[a-z0-9_+.-]+", raw):
-                      token = raw
-                  break
+          if re.search(r"patch failed|does not apply|corrupt patch|malformed patch", text, re.I):
+              category = "patch"
+          else:
+              concrete = [
+                  ("missing-header", r"fatal error:\s*([A-Za-z0-9_+./-]+):\s*No such file"),
+                  ("missing-library", r"(?:cannot find|unable to find)\s+-l([A-Za-z0-9_+.-]+)"),
+                  ("undefined-reference", r"undefined reference to [\x60'\"]([A-Za-z_][A-Za-z0-9_:]*)"),
+                  ("multiple-definition", r"multiple definition of [\x60'\"]?([A-Za-z_][A-Za-z0-9_:]*)"),
+              ]
+              for label, pattern in concrete:
+                  m = re.search(pattern, text, re.I)
+                  if m:
+                      category = label
+                      raw = pathlib.PurePosixPath(m.group(1)).name.lower()
+                      if re.fullmatch(r"[a-z0-9_+.:/-]+", raw):
+                          token = raw
+                      break
           if category == "unknown":
-              if re.search(r"multiple definition of", text, re.I):
-                  category = "multiple-definition"
-              elif re.search(r"undefined reference to", text, re.I):
-                  category = "undefined-reference"
-              elif re.search(r"collect2: error: ld returned|linker command failed", text, re.I):
+              if re.search(r"collect2: error: ld returned|linker command failed", text, re.I):
                   category = "link"
-              elif re.search(r"ninja: build stopped", text, re.I):
+              elif re.search(r"(?:^|\n)FAILED:", text):
                   category = "compile"
-              elif re.search(r"post-build validation", text, re.I):
+              elif re.search(r"post-build validation|Found unexpected shared", text, re.I):
                   category = "post-build-validation"
               elif re.search(r"meson\.build:\d+:\d+: ERROR:", text):
                   category = "meson-error"
+          if category == "unknown":
+              probes = [
+                  ("unknown-option", r"Unknown options?:\s*['\"]?([A-Za-z0-9_+.-]+)"),
+                  ("missing-program", r"Program\s+['\"]?([A-Za-z0-9_+.-]+)['\"]?[^\n]*(?:not found|found:\s*NO)"),
+                  ("missing-dependency", r"(?:Dependency|Run-time dependency)\s+['\"]?([A-Za-z0-9_+.-]+)['\"]?[^\n]*(?:not found|found:\s*NO)"),
+              ]
+              for label, pattern in probes:
+                  m = re.search(pattern, text, re.I)
+                  if m:
+                      category = label
+                      raw = pathlib.PurePosixPath(m.group(1)).name.lower()
+                      if re.fullmatch(r"[a-z0-9_+.-]+", raw):
+                          token = raw
+                      break
           suffix = (" token=" + token) if token else ""
           print("GTK3_STATIC_FAILURE category=" + category + suffix)
           PY
