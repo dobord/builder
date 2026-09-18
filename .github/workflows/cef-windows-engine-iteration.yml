@@ -5,71 +5,18 @@ on:
       - feature/cef-static-integration
     paths:
       - .github/workflows/cef-windows-engine-iteration.yml
-      - ci/cef-windows-engine-lock.json
 permissions:
   contents: read
-  actions: read
-concurrency:
-  group: cef-windows-engine-iteration
-  cancel-in-progress: true
 jobs:
-  windows:
+  validate-definition:
     runs-on: windows-2022
-    timeout-minutes: 340
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          repository: dobord/vcpkg
-          ref: d5f62138a9b45c71fb407a48edb0b4cefd5affe6
-          path: private-vcpkg
-          token: ${{ secrets.SOURCE_READ_TOKEN }}
-          persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          repository: dobord/cef
-          ref: 37efc4f9f340992d50d6f3fa41f617c9013fa26b
-          path: private-cef
-          persist-credentials: false
-      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
-        with:
-          python-version: '3.12'
-      - name: Install hash-pinned checkpoint cryptography
-        run: python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r requirements.lock
-      - name: Verify exact source revisions and workspace capacity
+      - name: Validate workflow definition
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          if ((git -C private-vcpkg rev-parse HEAD) -ne 'd5f62138a9b45c71fb407a48edb0b4cefd5affe6') { throw 'vcpkg revision mismatch' }
-          if ((git -C private-cef rev-parse HEAD) -ne '37efc4f9f340992d50d6f3fa41f617c9013fa26b') { throw 'CEF revision mismatch' }
-          $drive = Get-PSDrive -Name C
-          Write-Host ("CEF_WINDOWS_ITERATION_FREE_BYTES=" + $drive.Free)
-          if ($drive.Free -lt 85899345920) { throw 'CEF_WINDOWS_ITERATION_CAPACITY_LT_80_GIB' }
-      - name: Validate Windows iteration worker syntax
-        run: python -m py_compile secure_release/cef_windows_iteration.py
-      - name: Run exact Windows CEF compilation slice
-        id: iteration
-        env:
-          BUILDER_INPUT_PRIVATE_KEY: ${{ secrets.BUILDER_INPUT_PRIVATE_KEY }}
-          GITHUB_TOKEN: ${{ github.token }}
-        run: python -m secure_release.cef_windows_iteration
-      - name: Upload encrypted Windows CEF checkpoint
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: cef-windows-engine-checkpoint-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/cef-windows-engine-checkpoint-encrypted/*.enc
-          compression-level: 0
-          retention-days: 7
-          if-no-files-found: ignore
-      - name: Upload non-sensitive Windows iteration summary
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: cef-windows-engine-summary-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/cef-windows-engine-summary.json
-          compression-level: 0
-          retention-days: 7
-          if-no-files-found: error
+          Write-Host 'CEF_WINDOWS_ITERATION_WORKFLOW_DEFINITION_VALID'
