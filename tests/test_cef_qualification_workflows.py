@@ -108,9 +108,10 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
 
     def test_windows_msvc_stl_graph_gate_is_source_based_and_fail_closed(self):
         text = (ROOT / ".github/workflows/cef-windows-msvc-stl.yml").read_text()
-        self.assertIn("ref: a8ecc4717a402ca5fc31051da00386bd50591ea3", text)
+        self.assertIn("ref: befa5c26c0c608165f27ac348e892305837fd614", text)
         self.assertIn("source_build.py prepare", text)
         self.assertIn("source_build.py check", text)
+        self.assertIn("test_patch_source.py", text)
         self.assertIn("use_custom_libcxx", text)
         self.assertIn("v8_enable_sandbox", text)
         self.assertIn("CEF_WINDOWS_V8_SANDBOX_POLICY_NOT_EXPLICIT", text)
