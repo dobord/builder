@@ -53,37 +53,26 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-14 g++-14 autoconf autoconf-archive automake libtool pkg-config ninja-build gperf flex bison nasm gettext texinfo libltdl-dev xvfb xauth fonts-dejavu-core
           df -h /
-      - name: Restore locked core package cache
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          repository: dobord/vcpkg
-          run-id: 35253194739
-          name: cef-core-core-35253194739-1
-          github-token: ${{ secrets.SOURCE_READ_TOKEN }}
-          path: ${{ runner.temp }}/cef-cache/core
-      - name: Restore locked CUPS package cache
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          repository: dobord/vcpkg
-          run-id: 35256931873
-          name: cef-final-cups-35256931873-1
-          github-token: ${{ secrets.SOURCE_READ_TOKEN }}
-          path: ${{ runner.temp }}/cef-cache/cups
-      - name: Restore locked GBM package cache
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          repository: dobord/vcpkg
-          run-id: 35255316311
-          name: cef-final-gbm-35255316311-1
-          github-token: ${{ secrets.SOURCE_READ_TOKEN }}
-          path: ${{ runner.temp }}/cef-cache/gbm
-      - name: Verify restored cache payloads are non-empty
+      - name: Restore reviewed completed-package caches by exact artifact digest
+        env:
+          GH_TOKEN: ${{ secrets.SOURCE_READ_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
-          for d in core cups gbm; do
-            find "$RUNNER_TEMP/cef-cache/$d" -type f -name '*.zip' -print -quit | grep -q .
-          done
+          mkdir -p "$RUNNER_TEMP/cef-cache"
+          fetch_cache() {
+            id="$1"; sha="$2"; name="$3"
+            archive="$RUNNER_TEMP/cef-cache/$name.zip"
+            target="$RUNNER_TEMP/cef-cache/$name"
+            gh api "repos/dobord/vcpkg/actions/artifacts/$id/zip" > "$archive"
+            echo "$sha  $archive" | sha256sum -c - >/dev/null
+            mkdir "$target"
+            unzip -q "$archive" -d "$target"
+            find "$target" -type f -name '*.zip' -print -quit | grep -q .
+          }
+          fetch_cache 10510999882 7fce9a50b14a91452f939011155c265ac5e996815c5d442ba7d1c6b7f5da2b05 core
+          fetch_cache 10513582038 13070e63a1a5ccdaef82d483f4296ba31fa7ef1f237cd17729cf81fddf3d118f cups
+          fetch_cache 10512319512 c837f50873e149ac8c1d823ab906fbb36217616c3198e029bc6ee647e0222b8e gbm
       - name: Qualify exact complete static platform graph
         shell: bash
         env:
