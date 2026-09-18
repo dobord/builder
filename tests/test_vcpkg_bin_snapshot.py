@@ -6,7 +6,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 SNAPSHOT = ROOT / "tests/vcpkg_bin_snapshot"
-EXPECTED_COMMIT = "5cd04365f4b20fd383bfd77beca03e9c45b084f4"
+EXPECTED_COMMIT = "f04718eae6ce124741994d0920e46ce0a3ec33ad"
 
 
 def git_blob_sha(data: bytes) -> str:
