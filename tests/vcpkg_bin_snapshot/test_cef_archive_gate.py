@@ -56,7 +56,8 @@ class ArchiveGateTests(unittest.TestCase):
 
     def test_shared_files_are_not_accepted_even_with_matching_report(self):
         expected = self.bundle(shared=True)
-        self.assertFalse(gate.inspect(self.fixture.root, expected, self.fixture.policy)['publication_allowed'])
+        with self.assertRaises(ValueError):
+            gate.inspect(self.fixture.root, expected, self.fixture.policy)
 
     def test_forged_audit_summary_is_not_accepted(self):
         expected = self.bundle()
