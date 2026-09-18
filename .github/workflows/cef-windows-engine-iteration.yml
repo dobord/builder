@@ -1,10 +1,11 @@
 name: Resumable Windows CEF engine iteration
 on:
-  workflow_dispatch:
+  workflow_dispatch: {}
   push:
     branches:
       - feature/cef-static-integration
     paths:
+      - .github/workflows/cef-windows-engine-iteration.yml
       - ci/cef-windows-engine-lock.json
 permissions:
   contents: read
