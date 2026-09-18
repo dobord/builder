@@ -128,7 +128,8 @@ def request():
     validate_plan(plan)
     builder = Client(env("BUILDER_DISPATCH_TOKEN"))
     if continuation_inputs is not None:
-        plan = _apply_continuation(plan, continuation_inputs, builder_sha, builder)
+        cache_reader = Client(env("BUILDER_CACHE_READ_TOKEN"))
+        plan = _apply_continuation(plan, continuation_inputs, builder_sha, cache_reader)
     created = int(time.time())
     rid, salt = str(uuid.uuid4()), crypto.b64(os.urandom(32))
     payload = {"version": 1, "release_id": rid, "salt": salt, "source_sha": source_sha, "source_tag": tag,
