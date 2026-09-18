@@ -1,0 +1,99 @@
+name: FreeRDP static configure failure identity
+on:
+  push:
+    branches:
+      - feature/cef-static-integration
+    paths:
+      - .github/workflows/freerdp-static-diagnostic.yml
+permissions:
+  contents: read
+concurrency:
+  group: freerdp-static-configure-diagnostic
+  cancel-in-progress: true
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: dobord/vcpkg
+          ref: 00fd194d4b672e559804be757c253b172f674507
+          path: private-vcpkg
+          token: ${{ secrets.SOURCE_READ_TOKEN }}
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: microsoft/vcpkg
+          ref: 9e593bb18ea69cc5095e012465dcd675a822ed0d
+          path: private-vcpkg/.freerdp-diag-upstream
+          persist-credentials: false
+      - name: Install native prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-14 g++-14 autoconf autoconf-archive automake libtool pkg-config ninja-build nasm yasm
+      - name: Reproduce and classify FreeRDP configure
+        shell: bash
+        env:
+          CC: gcc-14
+          CXX: g++-14
+          VCPKG_DISABLE_METRICS: "1"
+          VCPKG_BINARY_SOURCES: clear
+        run: |
+          set -euo pipefail
+          upstream="$GITHUB_WORKSPACE/private-vcpkg/.freerdp-diag-upstream"
+          test "$(git -C private-vcpkg rev-parse HEAD)" = "00fd194d4b672e559804be757c253b172f674507"
+          bash "$upstream/bootstrap-vcpkg.sh" -disableMetrics >"$RUNNER_TEMP/freerdp-bootstrap.log" 2>&1
+          set +e
+          "$upstream/vcpkg" install 'freerdp[client,ffmpeg,proxy,server,urbdrc,winpr-tools,x11]'             --triplet=x64-linux-static-release             --host-triplet=x64-linux-static-release             "--overlay-ports=$GITHUB_WORKSPACE/private-vcpkg/ports"             "--overlay-triplets=$GITHUB_WORKSPACE/private-vcpkg/triplets"             "--x-install-root=$RUNNER_TEMP/freerdp-installed"             --binarysource=clear >"$RUNNER_TEMP/freerdp-install.log" 2>&1
+          rc=$?
+          set -e
+          if [ "$rc" -eq 0 ]; then
+            echo "FREERDP_STATIC_CONFIGURE_QUALIFIED"
+            exit 0
+          fi
+          python - <<'PY'
+          import os, pathlib, re
+          root = pathlib.Path(os.environ["GITHUB_WORKSPACE"]) / "private-vcpkg/.freerdp-diag-upstream/buildtrees/freerdp"
+          pieces = []
+          if root.is_dir():
+              candidates = sorted(
+                  [p for p in root.rglob("*") if p.is_file() and
+                   (p.suffix == ".log" or "config" in p.name.lower())],
+                  key=lambda p: p.stat().st_mtime,
+                  reverse=True,
+              )[:28]
+              pieces = [p.read_text(errors="replace")[-262144:] for p in candidates]
+          text = "\n".join(pieces)
+          category, token = "unknown", ""
+          patterns = [
+              ("missing-cmake-package", r"Could not find a package configuration file provided by\s+['\"]?([A-Za-z0-9+_.-]+)"),
+              ("missing-feature", r"(?:Could NOT find|Could not find)\s+([A-Za-z0-9+_.-]+)"),
+              ("missing-pkgconfig", r"Package\s+['\"]?([A-Za-z0-9+_.-]+)['\"]?[^\n]*(?:not found|was not found)"),
+              ("missing-library", r"(?:Could NOT find|NOTFOUND).*?([A-Za-z0-9+_.-]+)"),
+              ("unknown-option", r"Manually-specified variables were not used by the project:\s*\n\s*([A-Za-z0-9_+.-]+)"),
+          ]
+          for label, pattern in patterns:
+              m = re.search(pattern, text, re.I)
+              if m:
+                  category = label
+                  raw = m.group(1).lower()
+                  if re.fullmatch(r"[a-z0-9_+.-]+", raw):
+                      token = raw
+                  break
+          if category == "unknown":
+              if re.search(r"find_package\(X11 REQUIRED\)", text, re.I) and re.search(r"X11.*not found", text, re.I):
+                  category = "x11"
+              elif re.search(r"libusb", text, re.I) and re.search(r"(not found|NOTFOUND)", text):
+                  category = "libusb"
+              elif re.search(r"ffmpeg", text, re.I) and re.search(r"(not found|NOTFOUND)", text):
+                  category = "ffmpeg"
+              elif re.search(r"CMake Error", text):
+                  category = "cmake-error"
+          suffix = (" token=" + token) if token else ""
+          print("FREERDP_STATIC_CONFIGURE_FAILURE category=" + category + suffix)
+          PY
+          exit "$rc"
