@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "repository": "dobord/vcpkg-bin",
+  "commit": "b65ae0f43200ededcaa37acd824fff31b1c86cc9",
+  "files": {
+    "tests/vcpkg_bin_snapshot/cef_publication.py": {
+      "source": "ci/cef_publication.py",
+      "github_blob_sha": "bbb388a201990fa9cf6aec7e104d3ad8872d0288"
+    },
+    "tests/vcpkg_bin_snapshot/cef_archive_gate.py": {
+      "source": "ci/cef_archive_gate.py",
+      "github_blob_sha": "053fa3ebf5f2f33f4d6655edb3a040986f28a0ce"
+    },
+    "tests/vcpkg_bin_snapshot/test_cef_publication.py": {
+      "source": "ci/tests/test_cef_publication.py",
+      "github_blob_sha": "6cf6059f850c67f09e10f885ceb64d6c84a3638b"
+    },
+    "tests/vcpkg_bin_snapshot/test_cef_archive_gate.py": {
+      "source": "ci/tests/test_cef_archive_gate.py",
+      "github_blob_sha": "2376c7801cae019fcc49a3733ae568f4319dcc15"
+    },
+    "tests/vcpkg_bin_snapshot/cef-policy.json": {
+      "source": "ci/cef-policy.json",
+      "github_blob_sha": "6972b1e0aba7ee9014e9fe84b8412c4b3182ab8d"
+    }
+  }
+}
