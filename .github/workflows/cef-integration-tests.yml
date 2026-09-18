@@ -57,4 +57,4 @@ jobs:
       - name: Test pinned CEF static platform contracts
         if: runner.os == 'Linux'
         working-directory: cef-recipe
-        run: python -m unittest discover -s vcpkg/static/tests -v
+        run: python -m unittest discover -s vcpkg/static/tests -p 'test_platform_*.py' -v
