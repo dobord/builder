@@ -50,6 +50,54 @@ def run(command, *, cwd: Path, env: dict, log: Path, timeout: int,
     return result
 
 
+def classify_private_failure(primary: Path, logs: Path) -> tuple[str, str]:
+    """Return bounded Windows compiler/linker identity without exposing build output."""
+    pieces = []
+    candidates = [primary]
+    if logs.is_dir():
+        candidates += sorted(
+            [p for p in logs.rglob("*")
+             if p.is_file() and p.suffix.lower() in {".log", ".txt"}],
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )[:16]
+    total = 0
+    for candidate in candidates:
+        try:
+            if (not safeio.regular(candidate)
+                    or candidate.stat().st_size > 64 * 1024**2):
+                continue
+            data = candidate.read_text(
+                encoding="utf-8", errors="replace"
+            )[-1024 * 1024:]
+        except OSError:
+            continue
+        pieces.append(data)
+        total += len(data)
+        if total >= 8 * 1024**2:
+            break
+    text = "\n".join(pieces)
+    checks = (
+        ("ctad-warning", r"\[-Werror,(-Wctad-maybe-unsupported)\]"),
+        ("clang-warning", r"\[-Werror,(-W[A-Za-z0-9_.+-]+)\]"),
+        ("msvc-compile", r"(?:fatal error|error)\s+(C[0-9]{4}):"),
+        ("link", r"\b(LNK[0-9]{4})\b"),
+        ("missing-header",
+         r"(?:cannot open include file|file not found|No such file or directory)"),
+        ("capacity",
+         r"(?:No space left|not enough space|out of memory|compiler is out of heap)"),
+        ("compile", r"(?:^|\n)FAILED:|ninja: build stopped"),
+    )
+    for category, pattern in checks:
+        match = re.search(pattern, text, re.I)
+        if match:
+            token = (match.group(1) if match.lastindex else "").lower()
+            if token and not re.fullmatch(r"[-a-z0-9_.+]+", token):
+                token = ""
+            return category, token
+    return "unknown", ""
+
+
 def output(name: str, value: bool) -> None:
     target = os.environ.get("GITHUB_OUTPUT")
     if target:
@@ -382,6 +430,16 @@ def main() -> None:
         summary["status"] = "failed"
         summary["failure_stage"] = stage
         summary["failure_type"] = type(error).__name__
+        if stage in {"compile-slice", "engine-runtime"}:
+            category, token = classify_private_failure(
+                temp / ("cef-windows-engine-slice.log"
+                        if stage == "compile-slice"
+                        else "cef-windows-engine-runtime.log"),
+                engine_logs,
+            )
+            summary["failure_category"] = category
+            if token:
+                summary["failure_token"] = token
         raise
     finally:
         summary_path.write_text(
