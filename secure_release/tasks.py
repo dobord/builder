@@ -279,6 +279,8 @@ def build():
             or payload["output_key"] != crypto.fingerprint(env("ARTIFACT_ENCRYPTION_PUBLIC_KEY"))):
         raise ValueError("input bundle mismatch")
     cfg = payload["plan"].get("cef")
+    if cfg is not None:
+        cef_build.require_source_capacity(root, cfg, platform)
     input_private = env("BUILDER_INPUT_PRIVATE_KEY") if cfg is not None else None
     os.environ.pop("BUILDER_INPUT_PRIVATE_KEY", None)
     safeio.extract_tar(root / "input/workspace.tgz", root / "workspace")
