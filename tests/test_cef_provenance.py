@@ -134,7 +134,8 @@ class ProvenanceTests(unittest.TestCase):
                                 "runs": [{"number": 1, "status": "success",
                                           "engine_runtime_verified": True, "cwd": "fresh-1"}]},
                  "platform_closure": {"kind": "linux-frozen-vcpkg", "manifest_sha256": "b" * 64,
-                                      "inventory_sha256": "c" * 64, "archive_count": 10}}
+                                      "inventory_sha256": "c" * 64, "qualification_sha256": "d" * 64,
+                                      "full_platform_graph_qualified": True, "archive_count": 10}}
         cef_build.validate_evidence(proof, cfg, "linux")
         proof["smoke"]["third_party_modules_static"] = False
         with self.assertRaises(ValueError):
