@@ -118,9 +118,13 @@ def run_engine(root: Path, cfg: dict, platform: str, execute, environment: dict,
     selected = cfg["platforms"][platform]
     strict = cfg["profile"] == "static-third-party"
     if selected["mode"] == "release-import":
-        if strict:
-            raise ValueError("The selected release has no strict platform-dependency qualification")
+        if strict and platform != "windows":
+            raise ValueError("Strict release reuse is Windows-only; Linux requires the frozen source-built platform graph")
         materialize(root / "workspace", cfg, platform)
+        if strict:
+            # The imported producer receipt remains engine-static provenance.
+            # Only the NEW relocated consumer may promote this Windows result.
+            environment["CEF_STATIC_STRICT_THIRD_PARTY"] = "1"
         return True
     if strict and platform == "linux" and platform_probe is None:
         raise ValueError("Strict Linux source build requires a frozen vcpkg platform closure")
