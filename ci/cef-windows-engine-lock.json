@@ -1,0 +1,7 @@
+{
+  "schema": 1,
+  "platform": "windows",
+  "vcpkg_commit": "d5f62138a9b45c71fb407a48edb0b4cefd5affe6",
+  "cef_recipe_commit": "37efc4f9f340992d50d6f3fa41f617c9013fa26b",
+  "checkpoint": null
+}
