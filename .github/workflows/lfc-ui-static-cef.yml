@@ -125,18 +125,26 @@ jobs:
               if match:
                   package = match.group(1).lower()
                   break
-          checks = (
-              ("patch", r"patch failed|does not apply|corrupt patch|malformed patch"),
-              ("release-contract", r"release.*(?:lock|contract)|strict_requalification_required|requalification"),
-              ("artifact-integrity", r"(?:sha256|hash|checksum).*(?:mismatch|failed|invalid)"),
-              ("download", r"(?:download|http|curl).*(?:failed|error|404|403|502|503|504)"),
-              ("configure", r"(?:cmake|configure).*(?:error|failed)"),
-              ("compile", r"(?:FAILED:|fatal error:|ninja: build stopped)"),
-          )
-          for label, pattern in checks:
-              if re.search(pattern, text, re.I):
-                  category = label
-                  break
+          http = re.search(r"HTTP Error ([0-9]{3})", text, re.I)
+          if http:
+              category = "http-" + http.group(1)
+          else:
+              checks = (
+                  ("download-timeout", r"timed out|TimeoutError|socket\.timeout"),
+                  ("download-redirect", r"Untrusted release redirect|redirect.*(?:rejected|forbidden)"),
+                  ("download-tls", r"SSL|CERTIFICATE_VERIFY_FAILED|TLS"),
+                  ("download-connection", r"Remote end closed|connection (?:reset|aborted|refused)|URLError"),
+                  ("artifact-integrity", r"(?:sha256|hash|checksum|digest|size).*(?:mismatch|failed|invalid|exceeds)"),
+                  ("patch", r"patch failed|does not apply|corrupt patch|malformed patch"),
+                  ("release-contract", r"release.*(?:lock|contract)|strict_requalification_required|requalification"),
+                  ("configure", r"(?:cmake|configure).*(?:error|failed)"),
+                  ("compile", r"(?:FAILED:|fatal error:|ninja: build stopped)"),
+                  ("download", r"(?:download|urllib|urlopen|release asset).*(?:failed|error)"),
+              )
+              for label, pattern in checks:
+                  if re.search(pattern, text, re.I):
+                      category = label
+                      break
           if not re.fullmatch(r"[a-z0-9][a-z0-9+_.-]*", package):
               package = "unknown"
           print(f"LFC_UI_CEF_ENGINE_INSTALL_FAILURE category={category} package={package}")
