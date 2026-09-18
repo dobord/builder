@@ -85,6 +85,10 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn("SDK_DEPS_WINDOWS_INSTALL_FAILURE package=", text)
         self.assertIn("SDK_DEPS_WINDOWS_SHARED_TARGET_PAYLOAD count=", text)
         self.assertIn(" names=", text)
+        self.assertIn("'lfc-ui[lockfreecoro]'", text)
+        self.assertNotIn("lfc-ui[atspi,lockfreecoro,opengl,vulkan]", text)
+        self.assertNotIn("lfc-ui[lockfreecoro,opengl,vulkan]", text)
+        self.assertNotIn("'dbus[core]'", text)
         self.assertNotIn("upload-artifact", text)
         self.assertNotIn("cat $RUNNER_TEMP/sdk-deps", text)
 
