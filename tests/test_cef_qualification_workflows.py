@@ -23,6 +23,9 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertNotIn("persist-credentials: true", text)
         self.assertIn("pkgconfig_module=", text)
         self.assertIn("missing_dependency=", text)
+        self.assertIn("preflight_reason=", text)
+        self.assertIn("preflight_stage=", text)
+        self.assertIn("missing_library=", text)
 
     def test_production_build_accepts_trusted_large_disk_runner_labels(self):
         text=(ROOT/'.github/workflows/build-release.yml').read_text()
@@ -124,6 +127,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         workflow = (ROOT / ".github/workflows/cef-windows-engine-iteration.yml").read_text()
         worker = (ROOT / "secure_release/cef_windows_iteration.py").read_text()
         self.assertIn("workflow_dispatch:", workflow)
+        self.assertIn("- .github/workflows/cef-windows-engine-iteration.yml", workflow)
         self.assertIn("- ci/cef-windows-engine-lock.json", workflow)
         self.assertNotIn("- secure_release/cef_windows_iteration.py", workflow)
         self.assertIn("ref: d5f62138a9b45c71fb407a48edb0b4cefd5affe6", workflow)
