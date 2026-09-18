@@ -78,6 +78,17 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertNotIn('cipher-output',text)
         self.assertNotIn('compiler.log',text)
 
+    def test_lfc_ui_static_cef_workflow_builds_upstream_example(self):
+        text = (ROOT / ".github/workflows/lfc-ui-static-cef.yml").read_text()
+        self.assertIn("ref: c60e7b532c546e2ac882a39be0303c8ec6a60eaa", text)
+        self.assertIn("ref: 6a36621ea5493a94d7e79dc388746bbb8829b1d2", text)
+        self.assertIn("'lfc-ui[cef]'", text)
+        self.assertIn("web_engine_view_cef.cpp", text)
+        self.assertIn("find_package(lfc-ui CONFIG REQUIRED COMPONENTS WebEngine)", text)
+        self.assertIn("TARGET CEF::static", text)
+        self.assertIn("cef_static_deploy_resources(web_engine_view_cef)", text)
+        self.assertIn("LFC_UI_CEF_SHARED_TARGET_PAYLOAD", text)
+
     def test_current_private_source_contract_workflow_pins_gn_gate_revision(self):
         text = (ROOT / ".github/workflows/cef-strict-source-contracts.yml").read_text()
         self.assertIn("repository: dobord/vcpkg", text)
