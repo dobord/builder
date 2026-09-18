@@ -34,11 +34,18 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn('cef-strict-checkpoint-encrypted/*.enc',workflow)
         self.assertNotIn('path: ${{ runner.temp }}/cef-strict-checkpoint/*',workflow)
         self.assertIn('cef_cache.seal(',worker)
+        self.assertIn('cef_cache.unseal(',worker)
+        self.assertIn('check_run(',worker)
+        self.assertIn('"cef-strict-engine-iteration.yml"',worker)
         self.assertIn('"cef-checkpoint", "linux"',worker)
         self.assertIn('"slice"',worker)
+        self.assertIn('"restore"',worker)
         self.assertIn('"platform_build_inputs"',worker)
         self.assertIn('"third_party_modules_static"',worker)
         self.assertNotIn('print(text',worker)
+        lock=(ROOT/'ci/cef-strict-engine-lock.json').read_text()
+        self.assertIn('"checkpoint": null',lock)
+        self.assertIn('"vcpkg_commit": "fb0c27ec25ae3d9f297edb8bcd5a36378e38ce2e"',lock)
 
     def test_current_private_source_contract_workflow_pins_gn_gate_revision(self):
         text = (ROOT / ".github/workflows/cef-strict-source-contracts.yml").read_text()
