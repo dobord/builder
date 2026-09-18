@@ -1,6 +1,11 @@
 name: Strict CEF combined SDK qualification
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - feature/cef-static-integration
+    paths:
+      - ci/cef-strict-engine-lock.json
 permissions:
   contents: read
   actions: read

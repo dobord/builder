@@ -69,6 +69,15 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertNotIn("upload-artifact", text)
         self.assertNotIn("cat $RUNNER_TEMP/sdk-deps", text)
 
+    def test_combined_qualification_runs_only_for_explicit_checkpoint_lock(self):
+        text=(ROOT/'.github/workflows/cef-strict-combined.yml').read_text()
+        self.assertIn('workflow_dispatch:',text)
+        self.assertIn('- ci/cef-strict-engine-lock.json',text)
+        self.assertIn('run: python -m secure_release.cef_strict_combined',text)
+        self.assertIn('cef-strict-combined-summary-',text)
+        self.assertNotIn('cipher-output',text)
+        self.assertNotIn('compiler.log',text)
+
     def test_current_private_source_contract_workflow_pins_gn_gate_revision(self):
         text = (ROOT / ".github/workflows/cef-strict-source-contracts.yml").read_text()
         self.assertIn("repository: dobord/vcpkg", text)
