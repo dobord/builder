@@ -37,5 +37,13 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
         with:
           python-version: '3.12'
+      - name: Verify exact Windows qualification revisions
+        shell: pwsh
+        run: |
+          if ((git -C private-vcpkg rev-parse HEAD) -ne '9b8c4b30b943375eaca5ac177d79a26df8035ba7') { throw 'vcpkg revision mismatch' }
+          if ((git -C private-vcpkg/.windows-upstream rev-parse HEAD) -ne '9e593bb18ea69cc5095e012465dcd675a822ed0d') { throw 'upstream revision mismatch' }
+          if ((git -C private-vcpkg/.full-cef rev-parse HEAD) -ne '37729fd2b1db127c1658098d69ab63adc70e045f') { throw 'CEF revision mismatch' }
+      - name: Install pinned CMake
+        run: python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r build-tools.lock
       - name: Validate strict Windows worker syntax
         run: python -m py_compile secure_release/cef_strict_windows.py
