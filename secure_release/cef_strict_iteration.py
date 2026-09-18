@@ -55,6 +55,26 @@ def output(name: str, value: bool) -> None:
             stream.write(f"{name}={str(value).lower()}\n")
 
 
+def reviewed_binary_caches(temp: Path) -> list[Path]:
+    result = []
+    seen = set()
+    for name in (
+        "CEF_STRICT_BINARY_CACHE_CORE",
+        "CEF_STRICT_BINARY_CACHE_CUPS",
+        "CEF_STRICT_BINARY_CACHE_GBM",
+    ):
+        raw = os.environ.get(name)
+        if not raw:
+            raise ValueError("Missing reviewed strict CEF binary cache")
+        path = Path(raw).resolve(strict=True)
+        if (not path.is_dir() or path.is_symlink() or not path.is_relative_to(temp)
+                or path in seen):
+            raise ValueError("Invalid reviewed strict CEF binary cache")
+        seen.add(path)
+        result.append(path)
+    return result
+
+
 def qualification_lock(workspace: Path) -> dict:
     path = workspace / "ci/cef-strict-engine-lock.json"
     value = json.loads(path.read_text())
@@ -262,9 +282,12 @@ def main() -> None:
         lock = qualification_lock(workspace)
         selected = lock["checkpoint"]
         if selected is None:
+            cache_args = []
+            for cache in reviewed_binary_caches(temp):
+                cache_args.extend(["--binary-cache", cache])
             run(
                 [sys.executable, "ci/cef-full/native.py", "--root", ".",
-                 "--work", platform_work, "--evidence", evidence],
+                 "--work", platform_work, "--evidence", evidence, *cache_args],
                 cwd=registry, env=clean_env,
                 log=temp / "cef-platform-native.log", timeout=10800
             )

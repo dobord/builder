@@ -51,12 +51,35 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-14 g++-14 autoconf autoconf-archive automake libtool pkg-config ninja-build gperf flex bison nasm gettext texinfo libltdl-dev xvfb xauth fonts-dejavu-core ccache
           df -h /
+      - name: Restore reviewed completed-package caches by exact artifact digest
+        env:
+          GH_TOKEN: ${{ secrets.SOURCE_READ_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/cef-strict-cache"
+          fetch_cache() {
+            id="$1"; sha="$2"; name="$3"
+            archive="$RUNNER_TEMP/cef-strict-cache/$name.zip"
+            target="$RUNNER_TEMP/cef-strict-cache/$name"
+            gh api "repos/dobord/vcpkg/actions/artifacts/$id/zip" > "$archive"
+            echo "$sha  $archive" | sha256sum -c - >/dev/null
+            mkdir "$target"
+            unzip -q "$archive" -d "$target"
+            find "$target" -type f -name '*.zip' -print -quit | grep -q .
+          }
+          fetch_cache 10510999882 7fce9a50b14a91452f939011155c265ac5e996815c5d442ba7d1c6b7f5da2b05 core
+          fetch_cache 10513582038 13070e63a1a5ccdaef82d483f4296ba31fa7ef1f237cd17729cf81fddf3d118f cups
+          fetch_cache 10512319512 c837f50873e149ac8c1d823ab906fbb36217616c3198e029bc6ee647e0222b8e gbm
       - name: Validate strict iteration worker syntax
         run: python -m py_compile secure_release/cef_strict_iteration.py
       - name: Run exact strict platform and Chromium iteration
         id: strict
         env:
           BUILDER_INPUT_PRIVATE_KEY: ${{ secrets.BUILDER_INPUT_PRIVATE_KEY }}
+          CEF_STRICT_BINARY_CACHE_CORE: ${{ runner.temp }}/cef-strict-cache/core
+          CEF_STRICT_BINARY_CACHE_CUPS: ${{ runner.temp }}/cef-strict-cache/cups
+          CEF_STRICT_BINARY_CACHE_GBM: ${{ runner.temp }}/cef-strict-cache/gbm
         run: python -m secure_release.cef_strict_iteration
       - name: Upload encrypted strict checkpoint
         if: always()
