@@ -97,6 +97,17 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn("CEF_WINDOWS_MSVC_STL_GRAPH_QUALIFIED", text)
         self.assertNotIn("upload-artifact", text)
 
+    def test_lfc_ui_static_freerdp_workflow_is_relocated_and_static(self):
+        text = (ROOT / ".github/workflows/lfc-ui-static-freerdp.yml").read_text()
+        self.assertIn("ref: 736b290cf7338c26565c831d48c8ef52b8a353a5", text)
+        self.assertIn("'lfc-ui[freerdp]'", text)
+        self.assertIn("freerdp-server-proxy", text)
+        self.assertIn("freerdp-shadow", text)
+        self.assertIn("LFC_UI_FREERDP_SHARED_TARGET_PAYLOAD", text)
+        self.assertIn("-static-libstdc++ -static-libgcc", text)
+        self.assertIn("LFC_UI_STATIC_FREERDP_QUALIFIED", text)
+        self.assertNotIn("upload-artifact", text)
+
     def test_lfc_ui_static_cef_workflow_builds_upstream_example(self):
         text = (ROOT / ".github/workflows/lfc-ui-static-cef.yml").read_text()
         self.assertIn("ref: c7fb5af43431773dd68b3afe746ef71ecd786dc9", text)
