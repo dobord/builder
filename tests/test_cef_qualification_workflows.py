@@ -79,7 +79,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertNotIn('compiler.log',text)
         worker=(ROOT/'secure_release/cef_strict_combined.py').read_text()
         self.assertIn('freerdp_proxy_web_engine_view_cef.cpp',worker)
-        self.assertIn("'lfc-ui-freerdp-cef-consumer'",worker)
+        self.assertIn('"lfc-ui-freerdp-cef-consumer"',worker)
         self.assertIn('freerdp-server-proxy',worker)
         self.assertIn('freerdp-shadow',worker)
         self.assertIn('-static-libstdc++ -static-libgcc',worker)
