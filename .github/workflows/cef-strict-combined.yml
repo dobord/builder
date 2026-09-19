@@ -12,7 +12,7 @@ permissions:
   contents: read
   actions: read
 concurrency:
-  group: cef-strict-combined-linux-18567956
+  group: cef-strict-combined-linux-1873bb62
   cancel-in-progress: true
 jobs:
   gate:
@@ -47,14 +47,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/vcpkg
-          ref: 18567956f7595df7936881b93c9d12028c204dc7
+          ref: 1873bb62072b2b2d89a5bd2257271cd2fbab8fd4
           path: private-vcpkg
           token: ${{ secrets.SOURCE_READ_TOKEN }}
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/vcpkg
-          ref: 18567956f7595df7936881b93c9d12028c204dc7
+          ref: 1873bb62072b2b2d89a5bd2257271cd2fbab8fd4
           path: private-engine-vcpkg
           token: ${{ secrets.SOURCE_READ_TOKEN }}
           persist-credentials: false
@@ -67,7 +67,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/cef
-          ref: ff9276b9de9361ddeaa5b53589e79e17c254d2f4
+          ref: e3408e6a451698aeb922dc4147ec665d432e7f0a
           path: private-vcpkg/.full-cef
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1

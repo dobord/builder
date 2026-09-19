@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "platform": "windows",
-  "vcpkg_commit": "18567956f7595df7936881b93c9d12028c204dc7",
-  "cef_recipe_commit": "ff9276b9de9361ddeaa5b53589e79e17c254d2f4",
+  "vcpkg_commit": "1873bb62072b2b2d89a5bd2257271cd2fbab8fd4",
+  "cef_recipe_commit": "e3408e6a451698aeb922dc4147ec665d432e7f0a",
   "checkpoint": null
 }
