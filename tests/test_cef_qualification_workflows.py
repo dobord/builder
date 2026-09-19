@@ -223,7 +223,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
 
     def test_freerdp_static_diagnostic_uses_deterministic_audio_revision(self):
         text = (ROOT / ".github/workflows/freerdp-static-diagnostic.yml").read_text()
-        self.assertIn("ref: 1669f647f46fc6eaa9f73fcbb0ff79857b780071", text)
+        self.assertIn("ref: 5556ced2e671509c1dce8a19fd3b709cf748acb6", text)
         self.assertIn("FREERDP_STATIC_CONFIGURE_FAILURE package=", text)
         self.assertIn(" category=", text)
         self.assertIn('"WITH_CAIRO"', text)
@@ -258,7 +258,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
 
     def test_lfc_ui_static_freerdp_workflow_is_relocated_and_static(self):
         text = (ROOT / ".github/workflows/lfc-ui-static-freerdp.yml").read_text()
-        self.assertIn("ref: a6adaa2ff68841d932595d4519bd202021dfbd99", text)
+        self.assertIn("ref: 5556ced2e671509c1dce8a19fd3b709cf748acb6", text)
         self.assertIn("'lfc-ui[freerdp]'", text)
         self.assertIn("freerdp-server-proxy", text)
         self.assertIn("freerdp-shadow", text)
