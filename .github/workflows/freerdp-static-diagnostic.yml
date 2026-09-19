@@ -70,14 +70,47 @@ jobs:
                   key=lambda p: p.stat().st_mtime,
                   reverse=True,
               )[:40]
+          non_probe = [
+              p for p in recent
+              if not any(
+                  part in {"CMakeScratch", "CMakeTmp"}
+                  or part.startswith("TryCompile")
+                  for part in p.parts
+              )
+          ]
           freerdp_text = "\n".join(
-              p.read_text(errors="replace")[-262144:] for p in recent
+              p.read_text(errors="replace")[-262144:] for p in non_probe
           )
+
+          # Prefer the exact log names vcpkg reports for the terminal package
+          # failure. This avoids treating non-fatal CMake try-compile probes as
+          # the final static linker edge.
+          reported_names = []
+          for name in re.findall(r"([A-Za-z0-9_.+~-]+\.log)", install_text):
+              if name not in reported_names:
+                  reported_names.append(name)
+          reported_files = []
+          if root.is_dir():
+              for name in reported_names[-12:]:
+                  matches = [
+                      p for p in root.rglob(name)
+                      if p.is_file() and not any(
+                          part in {"CMakeScratch", "CMakeTmp"}
+                          or part.startswith("TryCompile")
+                          for part in p.parts
+                      )
+                  ]
+                  if matches:
+                      reported_files.append(max(matches, key=lambda p: p.stat().st_mtime))
+          reported_text = "\n".join(
+              p.read_text(errors="replace")[-524288:] for p in reported_files
+          )
+
           # Package/stage identity comes from vcpkg's top-level log. Compiler,
           # linker and dependency identity must come only from FreeRDP's own
-          # buildtree so a failed transitive package cannot contaminate the
-          # reported static edge.
-          text = freerdp_text or install_text
+          # terminal logs so a failed transitive package or configure probe
+          # cannot contaminate the reported static edge.
+          text = reported_text or freerdp_text or install_text
           package = "unknown"
           for pattern in (
               r"error: building ([a-z0-9][a-z0-9+_.-]*):",
@@ -162,6 +195,10 @@ jobs:
                   elif re.search(r"CMake Error", text):
                       category = "cmake-error"
           details = ["stage=" + build_stage]
+          if reported_names:
+              details.append("reported_logs=" + ",".join(reported_names[-6:]))
+          if reported_files:
+              details.append("terminal_log=" + reported_files[-1].name)
           if category == "link-error":
               if recent:
                   log_name = recent[0].name
