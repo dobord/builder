@@ -245,7 +245,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn("link_missing_index=", text)
         self.assertIn("freerdp_log=", text)
         self.assertIn("diagnostic_text = text", text)
-        self.assertIn("diagnostic_text = text[max(boundaries):]", text)
+        self.assertIn("text[max(boundaries):] if boundaries", text)
         self.assertIn("freerdp-terminal-ninja.log", text)
         self.assertIn("ninja_replay=yes", text)
         self.assertIn("replay_text[failed[-1]:]", text)
