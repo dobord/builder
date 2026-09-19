@@ -130,6 +130,27 @@ jobs:
               p.read_text(errors="replace")[-524288:] for p in reported_files
           )
 
+          # vcpkg_apply_patches stores git-apply stderr in dedicated logs. Read
+          # only bounded text and publish only normalized basename/reason fields.
+          patch_logs = []
+          if root.is_dir():
+              patch_logs = sorted(
+                  [p for p in root.glob("patch-*-err.log")
+                   if p.is_file() and p.stat().st_size <= 8 * 1024**2],
+                  key=lambda p: p.stat().st_mtime,
+                  reverse=True,
+              )[:16]
+          patch_text = "\n".join(
+              p.read_text(errors="replace")[-131072:] for p in patch_logs
+          )
+          patch_failed = (
+              "Applying patch failed:" in install_text
+              or bool(re.search(
+                  r"(?:patch failed:|patch does not apply|corrupt patch at line)",
+                  patch_text, re.I,
+              ))
+          )
+
           # Package/stage identity comes from vcpkg's top-level log. Compiler,
           # linker and dependency identity must come only from FreeRDP's own
           # terminal logs so a failed transitive package or configure probe
@@ -153,6 +174,7 @@ jobs:
               except (ValueError, IndexError):
                   pass
           build_stage = (
+              "patch" if patch_failed else
               "build" if (
                   re.search(r"vcpkg_execute_build_process\.cmake", install_text, re.I)
                   or re.search(r"vcpkg_execute_build_process\.cmake", freerdp_text, re.I)
@@ -188,7 +210,9 @@ jobs:
                       else text[-262144:]
                   )
           category, token = "unknown", ""
-          if build_stage == "build":
+          if build_stage == "patch":
+              category = "patch-error"
+          elif build_stage == "build":
               # Do not mistake non-fatal CMake feature-summary lines for the
               # package failure once vcpkg has already entered the build step.
               compiler = re.search(
@@ -234,6 +258,32 @@ jobs:
                   elif re.search(r"CMake Error", text):
                       category = "cmake-error"
           details = ["stage=" + build_stage]
+          if build_stage == "patch":
+              patch_names = re.findall(
+                  r"Applying patch\s+([^\s\r\n]+)", install_text
+              )
+              if patch_names:
+                  name = pathlib.PurePosixPath(
+                      patch_names[-1].replace("\\", "/")
+                  ).name
+                  if re.fullmatch(r"[A-Za-z0-9_.+-]{1,120}", name):
+                      details.append("patch_name=" + name)
+              match = re.search(
+                  r"(?:patch failed:\s*|error:\s*)([^:\r\n]+?)(?::\d+|:\s*patch does not apply)",
+                  patch_text, re.I,
+              )
+              if match:
+                  name = pathlib.PurePosixPath(
+                      match.group(1).strip().replace("\\", "/")
+                  ).name
+                  if re.fullmatch(r"[A-Za-z0-9_.+-]{1,120}", name):
+                      details.append("patch_file=" + name)
+              if re.search(r"corrupt patch at line", patch_text, re.I):
+                  details.append("patch_reason=corrupt")
+              elif re.search(r"(?:patch failed:|patch does not apply)", patch_text, re.I):
+                  details.append("patch_reason=context")
+              else:
+                  details.append("patch_reason=unknown")
           if replay_text:
               details.append("ninja_replay=yes")
           if reported_names:
