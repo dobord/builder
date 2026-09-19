@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "repository": "dobord/vcpkg-bin",
+  "commit": "e407d6b853d908b659bea8565f8a607ce5ff637d",
+  "files": {
+    "tests/vcpkg_bin_snapshot/cef_publication.py": {
+      "source": "ci/cef_publication.py",
+      "github_blob_sha": "bbb388a201990fa9cf6aec7e104d3ad8872d0288"
+    },
+    "tests/vcpkg_bin_snapshot/cef_archive_gate.py": {
+      "source": "ci/cef_archive_gate.py",
+      "github_blob_sha": "053fa3ebf5f2f33f4d6655edb3a040986f28a0ce"
+    },
+    "tests/vcpkg_bin_snapshot/test_cef_publication.py": {
+      "source": "ci/tests/test_cef_publication.py",
+      "github_blob_sha": "1d9ec24b99ebc769c5b5be45392aa3484f1e7831"
+    },
+    "tests/vcpkg_bin_snapshot/test_cef_archive_gate.py": {
+      "source": "ci/tests/test_cef_archive_gate.py",
+      "github_blob_sha": "ee076154f7ac266461fe3a8d8ce64c17dd790a84"
+    },
+    "tests/vcpkg_bin_snapshot/cef-policy.json": {
+      "source": "ci/cef-policy.json",
+      "github_blob_sha": "d5ca27d0c120b01615bcbeebf838293039ef2ef4"
+    },
+    "tests/vcpkg_bin_snapshot/publish.yml": {
+      "source": ".github/workflows/publish.yml",
+      "github_blob_sha": "f2cdee38fd999bed46a19867156b2f78e2917c00"
+    },
+    "tests/vcpkg_bin_snapshot/cef-policy.yml": {
+      "source": ".github/workflows/cef-policy.yml",
+      "github_blob_sha": "b6fb1367e7e0a0fa5bb7c01c0cf903b64ce1053e"
+    }
+  }
+}

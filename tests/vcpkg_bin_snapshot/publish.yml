@@ -1,0 +1,115 @@
+name: Verify and publish encrypted SDK
+on:
+  workflow_dispatch:
+    inputs:
+      build_run_id:
+        required: true
+        type: string
+      build_run_attempt:
+        required: true
+        type: string
+permissions: {}
+concurrency:
+  group: sdk-publication
+  cancel-in-progress: false
+env:
+  RELEASE_ENABLED: ${{ vars.RELEASE_ENABLED }}
+  BUILDER_COMMIT_SHA: ${{ vars.BUILDER_COMMIT_SHA }}
+jobs:
+  verify:
+    if: >-
+      github.repository_id == '1372873784' &&
+      github.event.repository.private == true &&
+      github.ref == 'refs/heads/main' && vars.RELEASE_ENABLED == 'true' &&
+      vars.BUILDER_COMMIT_SHA == '457fd41f39cbcff940c7af654da899d44ba5e553'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    outputs:
+      staging_digest: ${{ steps.verify.outputs.staging_digest }}
+      cef_publication_allowed: ${{ steps.cef-policy.outputs.cef_publication_allowed }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: dobord/builder
+          ref: 457fd41f39cbcff940c7af654da899d44ba5e553
+          persist-credentials: false
+      - name: Check out this private publisher's exact policy revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: dobord/vcpkg-bin
+          ref: ${{ github.sha }}
+          path: .publisher-policy
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.12'
+      - name: Install hash-pinned cryptographic libraries
+        run: |
+          python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r requirements.lock
+      - name: Verify origin and both platforms; decrypt without executing SDK code
+        id: verify
+        env:
+          BUILDER_READ_TOKEN: ${{ secrets.BUILDER_READ_TOKEN }}
+          ARTIFACT_DECRYPTION_PRIVATE_KEY: ${{ secrets.ARTIFACT_DECRYPTION_PRIVATE_KEY }}
+          ARTIFACT_ENCRYPTION_PUBLIC_KEY: ${{ secrets.ARTIFACT_ENCRYPTION_PUBLIC_KEY }}
+          REQUEST_VERIFY_PUBLIC_KEY: ${{ secrets.REQUEST_VERIFY_PUBLIC_KEY }}
+        run: python -m secure_release verify
+      - name: Independently inspect CEF qualification and target archive bytes
+        id: cef-policy
+        env:
+          STAGING_DIGEST: ${{ steps.verify.outputs.staging_digest }}
+          PYTHONPATH: ${{ github.workspace }}
+        run: python .publisher-policy/ci/cef_archive_gate.py --staging "${{ runner.temp }}/verified-release" --policy .publisher-policy/ci/cef-policy.json
+      - name: Private verified SDK staging only
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: verified-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/verified-release/*
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+      - name: Remove decryption workspace
+        if: always()
+        run: python -m secure_release cleanup
+  publish:
+    needs: verify
+    if: vars.PUBLISH_ENABLED == 'true' && needs.verify.outputs.cef_publication_allowed == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      STAGING_DIGEST: ${{ needs.verify.outputs.staging_digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: dobord/builder
+          ref: 457fd41f39cbcff940c7af654da899d44ba5e553
+          persist-credentials: false
+      - name: Check out this private publisher's exact policy revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: dobord/vcpkg-bin
+          ref: ${{ github.sha }}
+          path: .publisher-policy
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.12'
+      - name: Install hash-pinned cryptographic libraries
+        run: |
+          python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r requirements.lock
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: verified-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/verified-release
+      - name: Recheck private CEF admission and archive evidence before publication
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python .publisher-policy/ci/cef_archive_gate.py --staging "${{ runner.temp }}/verified-release" --policy .publisher-policy/ci/cef-policy.json --publish
+      - name: Publish exact verified files; no private key and no SDK execution
+        env:
+          PUBLISH_TOKEN: ${{ github.token }}
+        run: python -m secure_release publish

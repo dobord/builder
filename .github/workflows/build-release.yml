@@ -64,18 +64,19 @@ jobs:
         run: python -m secure_release cleanup
   build:
     needs: prepare
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 330
+    runs-on: ${{ fromJSON(matrix.runner_labels) }}
+    timeout-minutes: 350
     permissions:
       contents: read
+      actions: read
     strategy:
       fail-fast: false
       matrix:
         include:
           - platform: linux
-            os: ubuntu-24.04
+            runner_labels: ${{ vars.CEF_STATIC_LINUX_RUNNER_LABELS || '["ubuntu-24.04"]' }}
           - platform: windows
-            os: windows-2022
+            runner_labels: ${{ vars.CEF_STATIC_WINDOWS_RUNNER_LABELS || '["windows-2022"]' }}
     env:
       TARGET_PLATFORM: ${{ matrix.platform }}
     steps:
@@ -93,11 +94,16 @@ jobs:
       - name: Install pinned CMake
         run: |
           python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r build-tools.lock
+      - name: Release unused hosted Linux SDKs before the static graph
+        if: runner.os == 'Linux'
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /usr/local/.ghcup /opt/ghc
+          df -h /
       - name: Install Linux system prerequisites including assembler
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y autoconf autoconf-archive automake g++-14 libgl1-mesa-dev libtool ninja-build nasm
+          sudo apt-get install -y autoconf autoconf-archive automake gcc-14 g++-14 libtool pkg-config ninja-build nasm gperf flex bison gettext texinfo xvfb xauth libglib2.0-dev libnss3-dev libnspr4-dev libatk1.0-dev libatk-bridge2.0-dev libcups2-dev libx11-dev libxcomposite-dev libxdamage-dev libxext-dev libxfixes-dev libxrandr-dev libxrender-dev libxtst-dev libxi-dev libxkbcommon-dev libgbm-dev libdrm-dev libexpat1-dev uuid-dev libxcb1-dev libpci-dev libudev-dev libcairo2-dev libpango1.0-dev libasound2-dev zlib1g-dev libatspi2.0-dev libxshmfence-dev
           nasm -v
       - name: Download this attempt's encrypted source bundle
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
@@ -105,12 +111,33 @@ jobs:
           name: sources-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/cipher-input
       - name: Decrypt input, build, test final SDK and encrypt output
+        id: build-sdk
         env:
+          BUILD_CACHE_READ_TOKEN: ${{ github.token }}
           BUILDER_INPUT_PRIVATE_KEY: ${{ secrets.BUILDER_INPUT_PRIVATE_KEY }}
           REQUEST_VERIFY_PUBLIC_KEY: ${{ secrets.REQUEST_VERIFY_PUBLIC_KEY }}
           ARTIFACT_ENCRYPTION_PUBLIC_KEY: ${{ secrets.ARTIFACT_ENCRYPTION_PUBLIC_KEY }}
         run: python -m secure_release build
+      - name: Persist encrypted CEF checkpoint before diagnostics or cleanup
+        if: ${{ !cancelled() && steps.build-sdk.outputs.cef_checkpoint_ready == 'true' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: cef-checkpoint-${{ matrix.platform }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/cipher-cache/cef-checkpoint/*.enc
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+      - name: Persist encrypted completed-package cache
+        if: ${{ !cancelled() && steps.build-sdk.outputs.binary_cache_ready == 'true' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: vcpkg-binaries-${{ matrix.platform }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/cipher-cache/vcpkg-binaries/*.enc
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
       - name: Upload encrypted SDK only
+        if: success() && steps.build-sdk.outputs.sdk_ready == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: sdk-${{ matrix.platform }}-${{ github.run_id }}-${{ github.run_attempt }}

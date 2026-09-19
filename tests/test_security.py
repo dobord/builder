@@ -14,6 +14,8 @@ import zipfile
 from secure_release import crypto, safeio
 from secure_release.protocol import file_context, message_context, check_run, IDS, BUILDER
 
+ROOT = Path(__file__).resolve().parents[1]
+
 HAS_TINK = importlib.util.find_spec("tink") is not None
 if os.environ.get("REQUIRE_TINK_TESTS") == "1" and not HAS_TINK:
     raise RuntimeError("Tink tests are mandatory in CI")
@@ -94,6 +96,42 @@ class PublicValidationTests(unittest.TestCase):
                "head_sha": "a" * 40, "run_attempt": 1, "event": "workflow_dispatch", "status": "in_progress", "conclusion": None}
         with self.assertRaises(ValueError):
             check_run(run, BUILDER, "build-release.yml", "a" * 40, 1, "workflow_dispatch", success=True)
+
+    def test_publication_runs_in_builder_without_destination_actions(self):
+        workflow = (ROOT / ".github/workflows/request-publication.yml").read_text()
+        publisher = (ROOT / "secure_release/publish.py").read_text()
+        bootstrap = (ROOT / "secure_release/bootstrap.py").read_text()
+        driver = (ROOT / "secure_release/__main__.py").read_text()
+        tasks = (ROOT / "secure_release/tasks.py").read_text()
+
+        self.assertIn("python -m secure_release verify", workflow)
+        self.assertIn("python -m secure_release publish", workflow)
+        self.assertIn("BIN_PUBLISH_TOKEN", workflow)
+        self.assertIn("ARTIFACT_DECRYPTION_PRIVATE_KEY", workflow)
+        self.assertIn("steps.verify.outputs.staging_digest", workflow)
+        self.assertIn("if: vars.PUBLISH_ENABLED == 'true'", workflow)
+        job_if = workflow.split("runs-on: ubuntu-24.04", 1)[0]
+        self.assertNotIn("vars.PUBLISH_ENABLED == 'true'", job_if)
+        self.assertNotIn("BIN_DISPATCH_TOKEN", workflow)
+        self.assertNotIn("upload-artifact", workflow)
+        self.assertNotIn("download-artifact", workflow)
+
+        self.assertIn('guard(BUILDER, event="workflow_run")', publisher)
+        self.assertIn('f"/repos/{BIN}/git/ref/heads/main"', publisher)
+        self.assertIn('"target_commitish": bin_main', publisher)
+        self.assertNotIn('.dispatch(BIN, "publish.yml"', publisher)
+        self.assertNotIn('guard(BIN', publisher)
+        trusted = publisher.split("def verify_result()", 1)[0]
+        self.assertNotIn("publication disabled", trusted)
+        publish_body = publisher.split("def publish_release()", 1)[1]
+        self.assertIn("publication disabled", publish_body)
+        self.assertNotIn('"target_commitish": sha(env("GITHUB_SHA"))', publisher)
+
+        self.assertIn('secret(BUILDER, "ARTIFACT_DECRYPTION_PRIVATE_KEY"', bootstrap)
+        self.assertIn('"BIN_PUBLISH_TOKEN"', bootstrap)
+        self.assertNotIn('"BIN_DISPATCH_TOKEN"', bootstrap)
+        self.assertNotIn('"notify":', driver)
+        self.assertIn('process.remove_tree(temporary / "verified-release")', tasks)
 
 
 @unittest.skipUnless(HAS_TINK, "Tink wheel is unavailable in this local environment")

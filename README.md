@@ -8,16 +8,19 @@ repository's signed, HPKE-encrypted release plan, not in this repository.
 
 The source repository only signs/encrypts a small request and dispatches this
 repository. This repository does the actual Linux/Windows build. A separate
-`workflow_run` handler dispatches the private publisher only after successful
-completion. The private publisher independently checks the exact run, attempt,
-workflow, approved commit, both artifacts, signatures and hashes.
+`workflow_run` handler in the same reviewed builder revision independently
+checks the exact run, attempt, workflow, approved commit, both artifacts,
+signatures and hashes, decrypts them only into job-local staging, and publishes
+the verified bytes directly to private `vcpkg-bin`. No Actions runner in
+`vcpkg-bin` is required.
 
 Output SDKs and compiler logs use Tink HPKE X25519/HKDF-SHA256/AES-256-GCM to wrap
 fresh per-file Tink Streaming AEAD `AES256_GCM_HKDF_1MB` keysets. A random 32-byte
 request salt, release ID, run/attempt, purpose, platform and repository identities
 are authenticated context. Salt is not a password or authorization credential.
-The long-term output private key exists only at the private publisher and the
-operator's protected backup. Input/request transport has a DIFFERENT keypair;
+The long-term output private key exists only as a protected secret of the
+reviewed builder publication workflow and in the operator's protected backup.
+Input/request transport has a DIFFERENT keypair;
 request authorization has a separate Ed25519 signing keypair.
 
 This is NOT an offline sandbox: trusted, reviewed CMake/portfiles and compiler
@@ -35,9 +38,10 @@ Public artifact sizes, timing and opaque release/run IDs are observable.
 - `publish.py`: independent verification, retry-safe draft handling, conflict refusal.
 - `bootstrap.py`: LOCAL-only key generation and repository secret provisioning with `gh` stdin.
 - `decrypt_local.py`: LOCAL-only authenticated diagnostic decryption; does not authorize releases.
+- `fetch_sdk_local.py`: LOCAL-only download, verification and decryption of completed SDK artifacts.
 - `.github/workflows/ci.yml`: PUBLIC synthetic tests only; disposable PUBLIC test keys protect no private data.
 - `.github/workflows/build-release.yml`: real encrypted release build, disabled until configured.
-- `.github/workflows/request-publication.yml`: dispatch publisher after completed successful build.
+- `.github/workflows/request-publication.yml`: verify/decrypt in one builder job and publish directly to `vcpkg-bin`; no destination Actions.
 
 All actions are pinned by full SHA; crypto dependencies and CMake are wheel-only
 and SHA256 pinned. Source and recipient repositories are fixed by immutable IDs.
@@ -60,14 +64,67 @@ python -m secure_release.bootstrap configure --directory "$HOME/.vcpkg-release-k
 Keys never print to stdout or command arguments. `configure` installs common
 output PUBLIC keysets, separate private keysets in their intended repositories,
 verification keys and narrow API credentials. It refuses noncanonical identities
-and sets `RELEASE_ENABLED=false` everywhere and `PUBLISH_ENABLED=false` at the
-publisher. It does not enable releases or create tags. Keep a secure backup of
+and sets `RELEASE_ENABLED=false` everywhere and `PUBLISH_ENABLED=false` in
+the builder (the legacy destination flag also remains disabled). The builder
+publication job receives the output private key and a narrow `vcpkg-bin`
+Contents-write token; it does not require destination Actions. It does not
+enable releases or create tags. Keep a secure backup of
 the key directory outside any Git worktree; do not upload it to this repository.
 
 The private source repository contains the complete Russian setup guide at
 `docs/encrypted-release/SETUP_RU.md`, including the exact private source scopes,
 permission settings and first validation-only run. Enable publication only after
 the first complete two-platform verification succeeds.
+
+## Local workstation SDK retrieval
+
+A completed encrypted SDK can be fetched directly from the public builder without
+enabling publication. Keep the artifact-decryption private key in the
+operator backup outside any Git worktree. The GitHub API token is read only from
+`GH_TOKEN` (preferred) or `GITHUB_TOKEN`; private key material is read from a file.
+
+Windows PowerShell example:
+
+```powershell
+py -m pip install --require-hashes --only-binary=:all: -r requirements.lock
+$env:GH_TOKEN = gh auth token
+py -m secure_release.fetch_sdk_local `
+  --platform windows `
+  --private-key C:\secure\vcpkg-release-keys\artifact-private.json `
+  --request-verify-key C:\secure\vcpkg-release-keys\request-signing-public.json `
+  --output C:\sdk\vcpkg-windows-static.zip
+```
+
+For a normal Windows workstation the repository also includes a thin PowerShell
+wrapper. It never reads private-key contents itself; authenticated download and
+decryption stay in the Python verifier. If `GH_TOKEN`/`GITHUB_TOKEN` is unset,
+the wrapper obtains the token from an already authenticated `gh` CLI session:
+
+```powershell
+.\fetch-vcpkg.ps1 `
+  -PrivateKey C:\secure\vcpkg-release-keys\artifact-private.json `
+  -RequestVerifyKey C:\secure\vcpkg-release-keys\request-signing-public.json `
+  -Output C:\sdk\vcpkg-windows-static.zip `
+  -InstallDependencies
+```
+
+Add `-Run RUN_ID -Attempt ATTEMPT -BuilderSha FULL_SHA` to retrieve one exact
+reviewed build instead of the newest matching successful artifact.
+
+Omit `--run` to use the newest successful, unexpired SDK artifact for the
+requested platform. For an exact reviewed build, add
+`--run RUN_ID --attempt ATTEMPT --builder-sha FULL_SHA`. Use `--work-dir` when
+the temporary encrypted/decrypted files need to live on another disk. The command
+refuses to run under GitHub Actions and refuses to overwrite an existing output.
+
+With `--request-verify-key`, the tool verifies the signed source request in
+addition to the canonical builder workflow/run, GitHub artifact SHA256, encrypted
+context, decrypted manifest, SDK digest and archive layout. Without that optional
+public verification key, it still checks transport/envelope/manifest integrity but
+does not independently authenticate which source request selected the build.
+Neither mode authorizes publication; the builder publication workflow repeats
+the trusted-run, signature, manifest, digest and destination-identity checks
+before any release asset is written to `vcpkg-bin`.
 
 ## Operational limits
 

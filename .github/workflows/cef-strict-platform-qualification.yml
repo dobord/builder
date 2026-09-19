@@ -1,0 +1,240 @@
+name: Strict CEF full-platform qualification
+on:
+  push:
+    branches:
+      - feature/cef-static-integration
+    paths:
+      - .github/workflows/cef-strict-platform-qualification.yml
+permissions:
+  contents: read
+concurrency:
+  group: cef-strict-platform-qualification-1873bb62
+  cancel-in-progress: true
+jobs:
+  qualify-linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: dobord/vcpkg
+          ref: a87950eb71feeea3d29c16610894f94007786dd6
+          path: private-vcpkg
+          token: ${{ secrets.SOURCE_READ_TOKEN }}
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: microsoft/vcpkg
+          ref: 9e593bb18ea69cc5095e012465dcd675a822ed0d
+          path: private-vcpkg/.full-upstream
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: dobord/cef
+          ref: 8545a10c99f2ede0f08e75cda7c054aed424f4f5
+          path: private-vcpkg/.full-cef
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.12'
+      - name: Verify exact source revisions
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C private-vcpkg rev-parse HEAD)" = "a87950eb71feeea3d29c16610894f94007786dd6"
+          test "$(git -C private-vcpkg/.full-upstream rev-parse HEAD)" = "9e593bb18ea69cc5095e012465dcd675a822ed0d"
+          test "$(git -C private-vcpkg/.full-cef rev-parse HEAD)" = "8545a10c99f2ede0f08e75cda7c054aed424f4f5"
+      - name: Recover hosted-runner capacity and install native tools
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /usr/local/.ghcup /opt/ghc
+          sudo apt-get update
+          sudo apt-get install -y gcc-14 g++-14 autoconf autoconf-archive automake libtool pkg-config ninja-build gperf flex bison nasm gettext texinfo libltdl-dev xvfb xauth fonts-dejavu-core
+          df -h /
+      - name: Restore reviewed completed-package caches by exact artifact digest
+        env:
+          GH_TOKEN: ${{ secrets.SOURCE_READ_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/cef-cache"
+          fetch_cache() {
+            id="$1"; sha="$2"; name="$3"
+            archive="$RUNNER_TEMP/cef-cache/$name.zip"
+            target="$RUNNER_TEMP/cef-cache/$name"
+            gh api "repos/dobord/vcpkg/actions/artifacts/$id/zip" > "$archive"
+            echo "$sha  $archive" | sha256sum -c - >/dev/null
+            mkdir "$target"
+            unzip -q "$archive" -d "$target"
+            find "$target" -type f -name '*.zip' -print -quit | grep -q .
+          }
+          fetch_cache 10510999882 7fce9a50b14a91452f939011155c265ac5e996815c5d442ba7d1c6b7f5da2b05 core
+          fetch_cache 10513582038 13070e63a1a5ccdaef82d483f4296ba31fa7ef1f237cd17729cf81fddf3d118f cups
+          fetch_cache 10512319512 c837f50873e149ac8c1d823ab906fbb36217616c3198e029bc6ee647e0222b8e gbm
+      - name: Qualify exact complete static platform graph
+        shell: bash
+        env:
+          CEF_CONTRACT_SOURCE: ${{ github.workspace }}/private-vcpkg/.full-cef
+        working-directory: private-vcpkg
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/cef-strict-evidence"
+          python -I -m unittest discover -s ci/cef-full/tests -v >"$RUNNER_TEMP/cef-strict-contract.log" 2>&1
+          set +e
+          python ci/cef-full/native.py             --root .             --work "$RUNNER_TEMP/cef-strict-work"             --evidence "$RUNNER_TEMP/cef-strict-evidence"             --binary-cache "$RUNNER_TEMP/cef-cache/core"             --binary-cache "$RUNNER_TEMP/cef-cache/cups"             --binary-cache "$RUNNER_TEMP/cef-cache/gbm"             >"$RUNNER_TEMP/cef-strict-native.log" 2>&1
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ]; then
+            python - <<'PY'
+          import json, os, pathlib, re
+          root = pathlib.Path(os.environ["RUNNER_TEMP"]) / "cef-strict-evidence"
+          report = json.loads((root / "native-full.json").read_text())
+          logs = sorted(root.glob("[0-9][0-9]-command.log"))
+          command = logs[-1].stem.split("-", 1)[0] if logs else "unknown"
+          package = "unknown"
+          if logs:
+              text = logs[-1].read_text(errors="replace")
+              patterns = (
+                  r"error: building ([a-z0-9][a-z0-9+_.-]*):",
+                  r"BUILD_FAILED[^\n]*?([a-z0-9][a-z0-9+_.-]+):x64-linux-static-release",
+                  r"([a-z0-9][a-z0-9+_.-]+):x64-linux-static-release failed",
+              )
+              for pattern in patterns:
+                  match = re.search(pattern, text, re.I)
+                  if match:
+                      package = match.group(1).lower()
+                      break
+          error_type = report.get("error_type", "unknown")
+          if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_.]*", str(error_type)):
+              error_type = "unknown"
+          if not re.fullmatch(r"[a-z0-9][a-z0-9+_.-]*|unknown", package):
+              package = "unknown"
+          details = []
+          if logs and command == "06":
+              reason = None
+              for token, label in (
+                  ("did not capture all 37 modules", "module-count"),
+                  ("retained library search directories", "search-dirs"),
+                  ("non-OS DT_NEEDED", "non-os-needed"),
+                  ("runtime markers are missing", "runtime-markers"),
+                  ("Unexpected runtime module", "runtime-module"),
+                  ("Static platform preflight command failed", "nested-command"),
+              ):
+                  if token in text:
+                      reason = label
+                      break
+              if reason:
+                  details.append("preflight_reason=" + reason)
+              receipt_text = ""
+              receipt_path = root / "platform-preflight.json"
+              if receipt_path.is_file() and receipt_path.stat().st_size <= 65536:
+                  try:
+                      receipt_value = json.loads(receipt_path.read_text())
+                      receipt_text = str(receipt_value.get("error", ""))
+                  except (ValueError, OSError):
+                      receipt_text = ""
+              runtime_module = re.search(
+                  r"Unexpected runtime module in complete platform preflight:\s+([^\r\n]+)",
+                  receipt_text + "\n" + text,
+              )
+              if runtime_module:
+                  names = re.findall(
+                      r"([A-Za-z0-9_.+-]+\.so(?:\.[0-9]+)*)",
+                      runtime_module.group(1),
+                  )
+                  if names:
+                      details.append("runtime_module=" + names[-1])
+              nested = pathlib.Path(os.environ["RUNNER_TEMP"]) / "cef-strict-work/platform-preflight-work/logs"
+              if nested.is_dir():
+                  nested_logs = sorted(
+                      [p for p in nested.glob("[0-9][0-9].log") if p.is_file()],
+                      key=lambda p: p.name,
+                  )
+                  if nested_logs:
+                      number = nested_logs[-1].stem
+                      stage = (
+                          "compile" if number in {"01","02","03","04","05"}
+                          else "link" if number == "06"
+                          else "readelf" if number == "07"
+                          else "runtime" if number == "08"
+                          else "unknown"
+                      )
+                      details.append("preflight_stage=" + stage)
+                      nested_text = nested_logs[-1].read_text(errors="replace")[-262144:]
+                      missing_lib = re.search(r"(?:cannot find|unable to find)\s+-l([A-Za-z0-9_+.-]+)", nested_text, re.I)
+                      if missing_lib and re.fullmatch(r"[A-Za-z0-9_+.-]+", missing_lib.group(1)):
+                          details.append("missing_library=" + missing_lib.group(1).lower())
+              modules_path = pathlib.Path(os.environ["GITHUB_WORKSPACE"]) / "private-vcpkg/ports/cef-platform-deps/modules.json"
+              selected = json.loads(modules_path.read_text()).get("modules", [])
+              failed_module = next(
+                  (name for name in selected
+                   if re.search(r"(?<![A-Za-z0-9+_.-])" + re.escape(name) + r"(?![A-Za-z0-9+_.-])", text)),
+                  None,
+              )
+              if failed_module and re.fullmatch(r"[A-Za-z0-9+_.-]+", failed_module):
+                  details.append("pkgconfig_module=" + failed_module)
+              missing = None
+              for pattern in (
+                  r"Package\s+['\"]?([A-Za-z0-9+_.-]+)['\"]?\s+was not found",
+                  r"No package\s+['\"]?([A-Za-z0-9+_.-]+)['\"]?\s+found",
+                  r"Package\s+['\"]?([A-Za-z0-9+_.-]+)['\"]?,\s+required by",
+              ):
+                  match = re.search(pattern, text, re.I)
+                  if match and re.fullmatch(r"[A-Za-z0-9+_.-]+", match.group(1)):
+                      missing = match.group(1).lower()
+                      break
+              if missing:
+                  details.append("missing_dependency=" + missing)
+          print(
+              f"CEF_PLATFORM_NATIVE_FAILURE command={command} error_type={error_type} package={package}"
+              + (" " + " ".join(details) if details else "")
+          )
+          PY
+            exit "$rc"
+          fi
+          python -c 'import json,os,pathlib; v=json.loads((pathlib.Path(os.environ["RUNNER_TEMP"])/"cef-strict-evidence/native-full.json").read_text()); assert v.get("status")=="success" and v.get("full_platform_graph_qualified") is True and v.get("module_count")==37; print("STRICT_CEF_FULL_PLATFORM_QUALIFIED")'
+      - name: Generate and audit real Chromium GN graph against frozen prefix
+        shell: bash
+        working-directory: private-vcpkg
+        run: |
+          set -euo pipefail
+          sha="$(python -c 'import json,os,pathlib; p=pathlib.Path(os.environ["RUNNER_TEMP"])/"cef-strict-evidence/native-full.json"; print(json.loads(p.read_text())["manifest_sha256"])')"
+          set +e
+          python ci/cef-full/gn_check.py             --cef-recipe .full-cef             --manifest "$RUNNER_TEMP/cef-strict-evidence/platform-build-inputs.json"             --prefix "$RUNNER_TEMP/cef-strict-work/frozen-target-prefix"             --manifest-sha256 "$sha"             --work "$RUNNER_TEMP/cef-gn-work"             --evidence "$RUNNER_TEMP/cef-gn-evidence"             --jobs 4
+          rc=$?
+          set -e
+          cat "$RUNNER_TEMP/cef-gn-evidence/gn-qualification.json"
+          if [ "$rc" -ne 0 ]; then
+            python - <<'PY'
+          import os, pathlib, re
+          log = pathlib.Path(os.environ["RUNNER_TEMP"]) / "cef-gn-evidence/cef-gn/gn-gen.log"
+          text = log.read_text(errors="replace")[-1048576:] if log.is_file() else ""
+          checks = (
+              ("uncaptured-module", r"GN requested an uncaptured target module:\s+([A-Za-z0-9+_.-]+)"),
+              ("header-metadata", r"Header-only module metadata is not uniquely frozen:\s+([A-Za-z0-9+_.-]+)"),
+              ("header-base", r"Header-only module lacks its captured base:\s+([A-Za-z0-9+_.-]+)"),
+              ("missing-archive", r"Missing or ambiguous static target archive:\s+([A-Za-z0-9+_.-]+)"),
+          )
+          category = "unknown"
+          token = ""
+          for label, pattern in checks:
+              match = re.search(pattern, text)
+              if match and re.fullmatch(r"[A-Za-z0-9+_.-]+", match.group(1)):
+                  category, token = label, match.group(1)
+                  break
+          if category == "unknown" and "GN filter would discard a static dependency" in text:
+              category = "filter-discard"
+          if category == "unknown" and "Expected one captured module" in text:
+              category = "module-mode"
+          if category == "unknown" and "No such file or directory" in text:
+              category = "missing-path"
+              if "unix-print" in text:
+                  token = "gtk+-unix-print-3.0"
+          suffix = (" token=" + token) if token else ""
+          print("CEF_GN_FAILURE category=" + category + suffix)
+          PY
+            exit "$rc"
+          fi
+          python -c 'import json,os,pathlib; v=json.loads((pathlib.Path(os.environ["RUNNER_TEMP"])/"cef-gn-evidence/gn-qualification.json").read_text()); assert v.get("status")=="success" and v.get("gn_graph_qualified") is True and v.get("engine_link_verified") is False and v.get("engine_runtime_verified") is False; print("STRICT_CEF_GN_GRAPH_QUALIFIED")'

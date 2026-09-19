@@ -1,0 +1,167 @@
+name: CEF Windows MSVC STL full source qualification
+on:
+  push:
+    branches:
+      - feature/cef-static-integration
+    paths:
+      - .github/workflows/cef-windows-source-msvc-stl.yml
+permissions:
+  contents: read
+concurrency:
+  group: cef-windows-msvc-stl-source-build-1873bb62
+  cancel-in-progress: true
+jobs:
+  windows:
+    runs-on: ${{ fromJSON(vars.CEF_STATIC_WINDOWS_RUNNER_LABELS || '["windows-2022"]') }}
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: dobord/cef
+          ref: 5a5df2f35afabbc2177dd2724400f56b4b6003d3
+          path: private-cef
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: dobord/vcpkg
+          ref: 9cd6130b3e9d1c7b8d055dde4de9c420dc8af305
+          path: private-vcpkg
+          token: ${{ secrets.SOURCE_READ_TOKEN }}
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: dobord/lfc-ui
+          ref: 85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5
+          path: private-lfc-ui
+          token: ${{ secrets.SOURCE_READ_TOKEN }}
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.12'
+      - name: Verify exact source revisions and CEF profile
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ((git -C private-cef rev-parse HEAD) -ne '5a5df2f35afabbc2177dd2724400f56b4b6003d3') { throw 'CEF revision mismatch' }
+          if ((git -C private-vcpkg rev-parse HEAD) -ne '9cd6130b3e9d1c7b8d055dde4de9c420dc8af305') { throw 'vcpkg revision mismatch' }
+          if ((git -C private-lfc-ui rev-parse HEAD) -ne '85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5') { throw 'lfc-ui revision mismatch' }
+          python -I -m unittest discover -s private-cef/vcpkg/static/tests -p test_platform_source.py -v
+          Remove-Item -LiteralPath "$env:GITHUB_WORKSPACE/private-vcpkg/.git" -Recurse -Force
+          Remove-Item -LiteralPath "$env:GITHUB_WORKSPACE/private-cef/.git" -Recurse -Force
+          Remove-Item -LiteralPath "$env:GITHUB_WORKSPACE/private-lfc-ui/.git" -Recurse -Force
+      - name: Check full source workspace capacity
+        shell: pwsh
+        run: |
+          $drive = Get-PSDrive -Name C
+          Write-Host ("CEF_WINDOWS_SOURCE_FREE_BYTES=" + $drive.Free)
+          if ($drive.Free -lt 84825604096) { throw 'CEF_WINDOWS_SOURCE_CAPACITY_LT_79_GIB' }
+      - name: Build and runtime-verify static CEF from source
+        shell: pwsh
+        env:
+          GITHUB_SHA: 5a5df2f35afabbc2177dd2724400f56b4b6003d3
+          CEF_STATIC_BUILD_TIMEOUT_SECONDS: '18000'
+          CEF_STATIC_JOBS: '4'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $work = Join-Path $env:RUNNER_TEMP 'cef-windows-msvc-source'
+          $logs = Join-Path $env:RUNNER_TEMP 'cef-windows-msvc-logs'
+          python private-cef/vcpkg/ports/cef-static/source_build.py build --work $work --logs $logs --jobs 4
+          if ($LASTEXITCODE -ne 0) { throw 'CEF_WINDOWS_MSVC_SOURCE_BUILD_FAILED' }
+          @'
+          import json, os, pathlib
+          root = pathlib.Path(os.environ["RUNNER_TEMP"])
+          receipt = json.loads((root/"cef-windows-msvc-logs/engine-build-receipt.json").read_text())
+          if receipt.get("source_build_verified") is not True:
+              raise SystemExit("CEF_WINDOWS_SOURCE_NOT_VERIFIED")
+          if receipt.get("engine_linkage") != "static":
+              raise SystemExit("CEF_WINDOWS_ENGINE_NOT_STATIC")
+          smoke = receipt.get("smoke", {})
+          if smoke.get("third_party_modules_static") is not True:
+              raise SystemExit("CEF_WINDOWS_RUNTIME_MODULE_AUDIT_FAILED")
+          print("CEF_WINDOWS_MSVC_STL_SOURCE_ENGINE_QUALIFIED")
+          '@ | python -
+      - name: Export relocatable CEF static SDK and add native C++ support
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $work = Join-Path $env:RUNNER_TEMP 'cef-windows-msvc-source'
+          $logs = Join-Path $env:RUNNER_TEMP 'cef-windows-msvc-logs'
+          $source = Join-Path $work 'download/chromium/src'
+          $out = Join-Path $source 'out/CEF_Static_Release_x64'
+          $prefix = Join-Path $env:RUNNER_TEMP 'cef-windows-msvc-sdk'
+          python private-cef/vcpkg/ports/cef-static/export_static.py --source $source --out $out --diagnostics $logs --prefix $prefix
+          if ($LASTEXITCODE -ne 0) { throw 'CEF_WINDOWS_MSVC_EXPORT_FAILED' }
+
+          $supportBuild = Join-Path $env:RUNNER_TEMP 'cef-cpp-support-build'
+          $supportArgs = @(
+            '-S', "$env:GITHUB_WORKSPACE/private-cef/vcpkg/ports/cef-static/cpp_support",
+            '-B', $supportBuild,
+            '-G', 'Visual Studio 17 2022',
+            '-A', 'x64',
+            "-DCEF_RECIPE_SOURCE=$env:GITHUB_WORKSPACE/private-cef",
+            "-DCEF_PACKAGE_PREFIX=$prefix",
+            "-DCMAKE_INSTALL_PREFIX=$prefix",
+            '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded'
+          )
+          & cmake @supportArgs
+          if ($LASTEXITCODE -ne 0) { throw 'CEF_CPP_SUPPORT_CONFIGURE_FAILED' }
+          cmake --build $supportBuild --config Release --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw 'CEF_CPP_SUPPORT_BUILD_FAILED' }
+          cmake --install $supportBuild --config Release
+          if ($LASTEXITCODE -ne 0) { throw 'CEF_CPP_SUPPORT_INSTALL_FAILED' }
+
+          $config = Join-Path $prefix 'share/cef-static/cef-static-config.cmake'
+          @'
+          # Native-toolchain C++ client support over the static CEF engine.
+          if(NOT TARGET CEF::cpp-support)
+            add_library(CEF::cpp-support STATIC IMPORTED)
+            get_filename_component(_cef_cpp_prefix "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
+            set_target_properties(CEF::cpp-support PROPERTIES
+              IMPORTED_LOCATION "${_cef_cpp_prefix}/lib/cef-static/cef_cpp_support.lib")
+          endif()
+          if(NOT TARGET CEF::cpp)
+            add_library(CEF::cpp INTERFACE IMPORTED)
+            set_property(TARGET CEF::cpp PROPERTY INTERFACE_LINK_LIBRARIES
+              "CEF::cpp-support;CEF::static")
+          endif()
+          set(CEF_STATIC_CPP_API TRUE)
+          '@ | Add-Content -Path $config
+          if (-not (Test-Path (Join-Path $prefix 'lib/cef-static/cef_cpp_support.lib'))) { throw 'CEF_CPP_SUPPORT_ARCHIVE_MISSING' }
+          "CEF_WINDOWS_MSVC_SDK=$prefix" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Build upstream lfc-ui CEF example against source-built SDK
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git -C private-lfc-ui apply "$env:GITHUB_WORKSPACE/private-vcpkg/ports/lfc-ui/use-installed-static-cef.patch"
+          if ($LASTEXITCODE -ne 0) { throw 'LFC_UI_STATIC_CEF_PATCH_FAILED' }
+          $build = Join-Path $env:RUNNER_TEMP 'lfc-ui-windows-cef-build'
+          $lfcArgs = @(
+            '-S', "$env:GITHUB_WORKSPACE/private-lfc-ui",
+            '-B', $build,
+            '-G', 'Visual Studio 17 2022',
+            '-A', 'x64',
+            "-DCMAKE_PREFIX_PATH=$env:CEF_WINDOWS_MSVC_SDK",
+            '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded',
+            '-DLFC_UI_BUILD_TESTS=OFF',
+            '-DLFC_UI_BUILD_CI_TESTS=OFF',
+            '-DLFC_UI_BUILD_EXAMPLES=ON',
+            '-DLFC_UI_ENABLE_WEBENGINE=ON',
+            '-DLFC_UI_WEBENGINE_BACKEND=CEF',
+            '-DLFC_UI_WEBENGINE_USE_INSTALLED_CEF_STATIC=ON'
+          )
+          & cmake @lfcArgs
+          if ($LASTEXITCODE -ne 0) { throw 'LFC_UI_WINDOWS_CEF_CONFIGURE_FAILED' }
+          cmake --build $build --config Release --target web_engine_view_cef --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw 'LFC_UI_WINDOWS_CEF_BUILD_FAILED' }
+          $exe = Get-ChildItem $build -Recurse -Filter web_engine_view_cef.exe | Select-Object -First 1
+          if ($null -eq $exe -or -not $exe.Exists) { throw 'LFC_UI_WINDOWS_CEF_EXAMPLE_MISSING' }
+          $llvmReadobj = Join-Path $env:RUNNER_TEMP 'cef-windows-msvc-source/download/chromium/src/third_party/llvm-build/Release+Asserts/bin/llvm-readobj.exe'
+          if (-not (Test-Path $llvmReadobj)) { throw 'LLVM_READOBJ_MISSING' }
+          $imports = & $llvmReadobj --coff-imports $exe.FullName | Out-String
+          foreach ($name in @('libcef.dll','msvcp140.dll','vcruntime140.dll','vcruntime140_1.dll','ucrtbase.dll','ffmpeg.dll')) {
+            if ($imports.ToLowerInvariant().Contains($name)) { throw "LFC_UI_WINDOWS_CEF_FORBIDDEN_IMPORT_$name" }
+          }
+          Write-Host 'LFC_UI_WINDOWS_SOURCE_BUILT_STATIC_CEF_LINK_QUALIFIED'

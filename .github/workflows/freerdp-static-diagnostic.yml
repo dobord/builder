@@ -1,0 +1,472 @@
+name: FreeRDP static configure failure identity
+on:
+  push:
+    branches:
+      - feature/cef-static-integration
+    paths:
+      - .github/workflows/freerdp-static-diagnostic.yml
+permissions:
+  contents: read
+concurrency:
+  group: freerdp-static-configure-diagnostic-1873bb62
+  cancel-in-progress: true
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: dobord/vcpkg
+          ref: 2dd11124589be8f4549a9126e5393113e76f68da
+          path: private-vcpkg
+          token: ${{ secrets.SOURCE_READ_TOKEN }}
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: microsoft/vcpkg
+          ref: 9e593bb18ea69cc5095e012465dcd675a822ed0d
+          path: private-vcpkg/.freerdp-diag-upstream
+          persist-credentials: false
+      - name: Install native prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-14 g++-14 autoconf autoconf-archive automake libtool pkg-config ninja-build nasm yasm
+      - name: Reproduce and classify FreeRDP configure
+        shell: bash
+        env:
+          CC: gcc-14
+          CXX: g++-14
+          VCPKG_DISABLE_METRICS: "1"
+          VCPKG_BINARY_SOURCES: clear
+        run: |
+          set -euo pipefail
+          upstream="$GITHUB_WORKSPACE/private-vcpkg/.freerdp-diag-upstream"
+          test "$(git -C private-vcpkg rev-parse HEAD)" = "2dd11124589be8f4549a9126e5393113e76f68da"
+          bash "$upstream/bootstrap-vcpkg.sh" -disableMetrics >"$RUNNER_TEMP/freerdp-bootstrap.log" 2>&1
+          set +e
+          "$upstream/vcpkg" install 'freerdp[client,ffmpeg,proxy,server,urbdrc,winpr-tools,x11]'             --triplet=x64-linux-static-release             --host-triplet=x64-linux-static-release             "--overlay-ports=$GITHUB_WORKSPACE/private-vcpkg/ports"             "--overlay-triplets=$GITHUB_WORKSPACE/private-vcpkg/triplets"             "--x-install-root=$RUNNER_TEMP/freerdp-installed"             --binarysource=clear >"$RUNNER_TEMP/freerdp-install.log" 2>&1
+          rc=$?
+          set -e
+          replay="$RUNNER_TEMP/freerdp-terminal-ninja.log"
+          buildninja=""
+          if [ "$rc" -ne 0 ] && [ -d "$upstream/buildtrees/freerdp" ]; then
+            buildninja="$(find "$upstream/buildtrees/freerdp" -maxdepth 3 -type f -name build.ninja -printf '%T@ %p\n' | sort -nr | head -n1 | cut -d' ' -f2-)"
+          fi
+          if [ -n "$buildninja" ] && [ -f "$buildninja" ]; then
+            builddir="$(dirname "$buildninja")"
+            set +e
+            timeout 900 ninja -C "$builddir" -v -j1 >"$replay" 2>&1
+            replay_rc=$?
+            set -e
+            echo "FREERDP_NINJA_REPLAY_RC=$replay_rc"
+          fi
+          if [ "$rc" -eq 0 ]; then
+            echo "FREERDP_STATIC_CONFIGURE_QUALIFIED"
+            exit 0
+          fi
+          python - <<'PY'
+          import os, pathlib, re
+          workspace = pathlib.Path(os.environ["GITHUB_WORKSPACE"])
+          runner = pathlib.Path(os.environ["RUNNER_TEMP"])
+          buildtrees = workspace / "private-vcpkg/.freerdp-diag-upstream/buildtrees"
+          root = buildtrees / "freerdp"
+          install_text = (runner / "freerdp-install.log").read_text(errors="replace")[-1048576:]
+          replay_path = runner / "freerdp-terminal-ninja.log"
+          replay_text = (
+              replay_path.read_text(errors="replace")[-1048576:]
+              if replay_path.is_file() and replay_path.stat().st_size <= 64 * 1024**2
+              else ""
+          )
+          if replay_text and not re.search(
+              r"(?:^|\n)FAILED:|undefined reference|collect2: error|ld(?:\.lld)?: error|fatal error|error:",
+              replay_text, re.I,
+          ):
+              replay_text = ""
+          recent = []
+          if root.is_dir():
+              recent = sorted(
+                  [p for p in root.rglob("*") if p.is_file() and
+                   (p.suffix in {".log", ".txt"} or "config" in p.name.lower())],
+                  key=lambda p: p.stat().st_mtime,
+                  reverse=True,
+              )[:40]
+          non_probe = [
+              p for p in recent
+              if not any(
+                  part in {"CMakeScratch", "CMakeTmp"}
+                  or part.startswith("TryCompile")
+                  for part in p.parts
+              )
+          ]
+          freerdp_text = "\n".join(
+              p.read_text(errors="replace")[-262144:] for p in non_probe
+          )
+
+          # Prefer the exact log names vcpkg reports for the terminal package
+          # failure. This avoids treating non-fatal CMake try-compile probes as
+          # the final static linker edge.
+          reported_names = []
+          for name in re.findall(r"([A-Za-z0-9_.+~-]+\.log)", install_text):
+              if name not in reported_names:
+                  reported_names.append(name)
+          reported_files = []
+          if root.is_dir():
+              for name in reported_names[-12:]:
+                  matches = [
+                      p for p in root.rglob(name)
+                      if p.is_file() and not any(
+                          part in {"CMakeScratch", "CMakeTmp"}
+                          or part.startswith("TryCompile")
+                          for part in p.parts
+                      )
+                  ]
+                  if matches:
+                      reported_files.append(max(matches, key=lambda p: p.stat().st_mtime))
+          reported_text = "\n".join(
+              p.read_text(errors="replace")[-524288:] for p in reported_files
+          )
+
+          # vcpkg_apply_patches stores git-apply stderr in dedicated logs. Read
+          # only bounded text and publish only normalized basename/reason fields.
+          patch_logs = []
+          if root.is_dir():
+              patch_logs = sorted(
+                  [p for p in root.glob("patch-*-err.log")
+                   if p.is_file() and p.stat().st_size <= 8 * 1024**2],
+                  key=lambda p: p.stat().st_mtime,
+                  reverse=True,
+              )[:16]
+          patch_text = "\n".join(
+              p.read_text(errors="replace")[-131072:] for p in patch_logs
+          )
+          patch_failed = (
+              "Applying patch failed:" in install_text
+              or bool(re.search(
+                  r"(?:patch failed:|patch does not apply|corrupt patch at line)",
+                  patch_text, re.I,
+              ))
+          )
+
+          # Package/stage identity comes from vcpkg's top-level log. Compiler,
+          # linker and dependency identity must come only from FreeRDP's own
+          # terminal logs so a failed transitive package or configure probe
+          # cannot contaminate the reported static edge.
+          text = replay_text or reported_text or freerdp_text or install_text
+          package = "unknown"
+          for pattern in (
+              r"error: building ([a-z0-9][a-z0-9+_.-]*):",
+              r"BUILD_FAILED[^\n]*?([a-z0-9][a-z0-9+_.-]+):x64-linux-static-release",
+              r"([a-z0-9][a-z0-9+_.-]+):x64-linux-static-release failed",
+          ):
+              match = re.search(pattern, install_text, re.I)
+              if match:
+                  package = match.group(1).lower()
+                  break
+          if package == "unknown" and recent:
+              try:
+                  candidate = recent[0].relative_to(buildtrees).parts[0].lower()
+                  if re.fullmatch(r"[a-z0-9][a-z0-9+_.-]*", candidate):
+                      package = candidate
+              except (ValueError, IndexError):
+                  pass
+          build_stage = (
+              "patch" if patch_failed else
+              "build" if (
+                  re.search(r"vcpkg_execute_build_process\.cmake", install_text, re.I)
+                  or re.search(r"vcpkg_execute_build_process\.cmake", freerdp_text, re.I)
+              )
+              else "configure"
+          )
+          diagnostic_text = text
+          if build_stage == "build":
+              # A deterministic Ninja replay is the strongest terminal evidence.
+              # Keep the last FAILED block, not the later "ninja: build stopped"
+              # marker, otherwise the compiler/linker identity is cropped away.
+              if replay_text:
+                  failed = [
+                      m.start() for m in re.finditer(
+                          r"(?:^|\n)FAILED:\s", replay_text, re.I
+                      )
+                  ]
+                  diagnostic_text = (
+                      replay_text[failed[-1]:] if failed
+                      else replay_text[-262144:]
+                  )
+              else:
+                  boundaries = []
+                  for pattern in (
+                      r"(?:^|\n)FAILED:\s",
+                      r"(?:^|\n)make(?:\[[0-9]+\])?: \*\*\*",
+                  ):
+                      boundaries.extend(
+                          m.start() for m in re.finditer(pattern, text, re.I)
+                      )
+                  diagnostic_text = (
+                      text[max(boundaries):] if boundaries
+                      else text[-262144:]
+                  )
+          category, token = "unknown", ""
+          if build_stage == "patch":
+              category = "patch-error"
+          elif build_stage == "build":
+              # Do not mistake non-fatal CMake feature-summary lines for the
+              # package failure once vcpkg has already entered the build step.
+              compiler = re.search(
+                  r"(?:fatal\s+)?error(?:\s+([A-Z][0-9]{4}))?\s*:",
+                  diagnostic_text, re.I,
+              )
+              linker = re.search(
+                  r"(?:undefined reference|collect2: error|ld(?:\.lld)?: error|LNK[0-9]{4})",
+                  diagnostic_text, re.I,
+              )
+              if linker:
+                  category = "link-error"
+              elif compiler:
+                  category = "compiler-error"
+                  raw = (compiler.group(1) or "").lower()
+                  if re.fullmatch(r"[a-z][0-9]{4}", raw):
+                      token = raw
+              elif re.search(r"(?:FAILED:|ninja: build stopped|make(?:\[[0-9]+\])?: \*\*\*)", diagnostic_text):
+                  category = "build-error"
+          else:
+              patterns = [
+                  ("missing-cmake-package", r"Could not find a package configuration file provided by\s+['\"]?([A-Za-z0-9+_.-]+)"),
+                  ("missing-feature", r"(?:Could NOT find|Could not find)\s+([A-Za-z0-9+_.-]+)"),
+                  ("missing-pkgconfig", r"Package\s+['\"]?([A-Za-z0-9+_.-]+)['\"]?[^\n]*(?:not found|was not found)"),
+                  ("missing-library", r"(?:Could NOT find|NOTFOUND).*?([A-Za-z0-9+_.-]+)"),
+                  ("unknown-option", r"Manually-specified variables were not used by the project:\s*\n\s*([A-Za-z0-9_+.-]+)"),
+              ]
+              for label, pattern in patterns:
+                  m = re.search(pattern, text, re.I)
+                  if m:
+                      category = label
+                      raw = m.group(1).lower()
+                      if re.fullmatch(r"[a-z0-9_+.-]+", raw):
+                          token = raw
+                      break
+              if category == "unknown":
+                  if re.search(r"find_package\(X11 REQUIRED\)", text, re.I) and re.search(r"X11.*not found", text, re.I):
+                      category = "x11"
+                  elif re.search(r"libusb", text, re.I) and re.search(r"(not found|NOTFOUND)", text):
+                      category = "libusb"
+                  elif re.search(r"ffmpeg", text, re.I) and re.search(r"(not found|NOTFOUND)", text):
+                      category = "ffmpeg"
+                  elif re.search(r"CMake Error", text):
+                      category = "cmake-error"
+          details = ["stage=" + build_stage]
+          if build_stage == "patch":
+              patch_names = re.findall(
+                  r"Applying patch\s+([^\s\r\n]+)", install_text
+              )
+              if patch_names:
+                  name = pathlib.PurePosixPath(
+                      patch_names[-1].replace("\\", "/")
+                  ).name
+                  if re.fullmatch(r"[A-Za-z0-9_.+-]{1,120}", name):
+                      details.append("patch_name=" + name)
+              match = re.search(
+                  r"(?:patch failed:\s*|error:\s*)([^:\r\n]+?)(?::\d+|:\s*patch does not apply)",
+                  patch_text, re.I,
+              )
+              if match:
+                  name = pathlib.PurePosixPath(
+                      match.group(1).strip().replace("\\", "/")
+                  ).name
+                  if re.fullmatch(r"[A-Za-z0-9_.+-]{1,120}", name):
+                      details.append("patch_file=" + name)
+              if re.search(r"corrupt patch at line", patch_text, re.I):
+                  details.append("patch_reason=corrupt")
+              elif re.search(r"(?:patch failed:|patch does not apply)", patch_text, re.I):
+                  details.append("patch_reason=context")
+              else:
+                  details.append("patch_reason=unknown")
+          if replay_text:
+              details.append("ninja_replay=yes")
+          if reported_names:
+              details.append("reported_logs=" + ",".join(reported_names[-6:]))
+          if reported_files:
+              details.append("terminal_log=" + reported_files[-1].name)
+          if category == "link-error":
+              # The terminal replay itself is authoritative. Attribute the
+              # failure to the exact Ninja FAILED output/command instead of a
+              # merely recent CMake link.txt from another target.
+              failed_line = re.search(
+                  r"(?:^|\n)FAILED:\s+([^\r\n]+)", diagnostic_text, re.I
+              )
+              if failed_line:
+                  outputs = []
+                  for item in failed_line.group(1).split():
+                      name = pathlib.PurePosixPath(item.replace("\\", "/")).name
+                      if re.fullmatch(r"[A-Za-z0-9_.+~-]{1,120}", name):
+                          outputs.append(name)
+                  if outputs:
+                      details.append("failed_outputs=" + ",".join(outputs[:4]))
+                  remainder = diagnostic_text[failed_line.end():].lstrip("\r\n")
+                  command = remainder.splitlines()[0] if remainder else ""
+                  output = re.search(r"(?:^|\s)-o\s+([^\s]+)", command)
+                  if output:
+                      name = pathlib.PurePosixPath(
+                          output.group(1).replace("\\", "/")
+                      ).name
+                      if re.fullmatch(r"[A-Za-z0-9_.+~-]{1,120}", name):
+                          details.append("failed_link_output=" + name)
+                  libraries = []
+                  for item in command.split():
+                      name = None
+                      if re.fullmatch(r"-l[A-Za-z0-9_+.-]+", item):
+                          name = item[2:]
+                      elif item.endswith(".a"):
+                          base = pathlib.PurePosixPath(
+                              item.strip("'\"").replace("\\", "/")
+                          ).name
+                          if re.fullmatch(r"lib[A-Za-z0-9_+.-]+\.a", base):
+                              name = base[3:-2]
+                      if name and name not in libraries:
+                          libraries.append(name)
+                  if libraries:
+                      details.append("failed_library_count=" + str(len(libraries)))
+                      details.append(
+                          "failed_link_libraries_tail=" + ",".join(libraries[-20:])
+                      )
+                      for label, candidates in (
+                          ("libusb", ("usb-1.0", "libusb-1.0")),
+                          ("udev", ("udev",)),
+                          ("freerdp_client", ("freerdp-client3", "freerdp-client")),
+                      ):
+                          positions = [
+                              index for index, value in enumerate(libraries)
+                              if value in candidates
+                          ]
+                          details.append(
+                              "failed_" + label + "_index=" +
+                              (str(positions[-1]) if positions else "absent")
+                          )
+              if recent:
+                  log_name = recent[0].name
+                  if re.fullmatch(r"[A-Za-z0-9_.+~-]{1,120}", log_name):
+                      details.append("freerdp_log=" + log_name)
+              target = re.search(r"(?:^|\n)FAILED:\s+([^\s\r\n]+)", diagnostic_text, re.I)
+              if target:
+                  name = pathlib.PurePosixPath(target.group(1).replace("\\", "/")).name
+                  if re.fullmatch(r"[A-Za-z0-9_.+~-]{1,120}", name):
+                      details.append("link_target=" + name)
+              missing_lib = re.search(r"(?:cannot find|unable to find)\s+-l([A-Za-z0-9_+.-]+)", diagnostic_text, re.I)
+              if missing_lib:
+                  details.append("missing_library=" + missing_lib.group(1).lower())
+              undefined = re.search(
+                  r"undefined reference to [\x60'\"]?([A-Za-z_][A-Za-z0-9_@$.:+<>~/-]{0,127})",
+                  diagnostic_text, re.I,
+              )
+              if undefined:
+                  details.append("undefined_symbol=" + undefined.group(1))
+              duplicate = re.search(
+                  r"multiple definition of [\x60'\"]?([A-Za-z_][A-Za-z0-9_@$.:+<>~/-]{0,127})",
+                  diagnostic_text, re.I,
+              )
+              if duplicate:
+                  details.append("multiple_symbol=" + duplicate.group(1))
+              # Inspect generated CMake link specifications without
+              # publishing private paths or the command itself. This identifies
+              # the exact target and static library order behind the bounded
+              # linker marker.
+              link_specs = sorted(
+                  [p for p in root.rglob("link.txt") if p.is_file()],
+                  key=lambda p: p.stat().st_mtime,
+                  reverse=True,
+              )
+              wanted = ("-l" + missing_lib.group(1)) if missing_lib else ""
+              selected_link = None
+              for spec in link_specs[:200]:
+                  spec_text = spec.read_text(errors="replace")[-262144:]
+                  if wanted and wanted not in spec_text:
+                      continue
+                  selected_link = spec_text
+                  break
+              if not selected_link:
+                  ninja_files = sorted(
+                      [p for p in root.rglob("build.ninja")
+                       if p.is_file() and p.stat().st_size <= 32 * 1024 * 1024],
+                      key=lambda p: p.stat().st_mtime,
+                      reverse=True,
+                  )
+                  for ninja in ninja_files[:20]:
+                      ninja_lines = ninja.read_text(errors="replace").splitlines()
+                      for index, line in enumerate(ninja_lines):
+                          if wanted and wanted not in line:
+                              continue
+                          if "LINK_LIBRARIES =" not in line:
+                              continue
+                          selected_link = line
+                          for candidate in reversed(
+                              ninja_lines[max(0, index - 80):index]
+                          ):
+                              if candidate.startswith("build "):
+                                  target_name = candidate[6:].split(":", 1)[0].strip()
+                                  name = pathlib.PurePosixPath(
+                                      target_name.replace("\\", "/")
+                                  ).name
+                                  if re.fullmatch(r"[A-Za-z0-9_.+~-]{1,120}", name):
+                                      details.append("ninja_link_target=" + name)
+                                  break
+                          details.append("link_spec_source=build.ninja")
+                          break
+                      if selected_link:
+                          break
+              if selected_link:
+                  output_match = re.search(r"(?:^|\\s)-o\\s+([^\\s]+)", selected_link)
+                  if output_match:
+                      name = pathlib.PurePosixPath(
+                          output_match.group(1).replace("\\\\", "/")
+                      ).name
+                      if re.fullmatch(r"[A-Za-z0-9_.+~-]{1,120}", name):
+                          details.append("link_spec_target=" + name)
+                  ordered_libs = re.findall(
+                      r"(?:^|\\s)-l([A-Za-z0-9_+.-]+)", selected_link
+                  )
+                  if ordered_libs:
+                      details.append("link_library_count=" + str(len(ordered_libs)))
+                      details.append(
+                          "link_libraries_tail=" + ",".join(ordered_libs[-16:])
+                      )
+                      if "xcb" in ordered_libs:
+                          details.append(
+                              "link_xcb_index=" + str(ordered_libs.index("xcb"))
+                          )
+                      if missing_lib and missing_lib.group(1) in ordered_libs:
+                          details.append(
+                              "link_missing_index="
+                              + str(ordered_libs.index(missing_lib.group(1)))
+                          )
+          if root.is_dir():
+              caches = sorted(root.rglob("CMakeCache.txt"), key=lambda p: p.stat().st_mtime, reverse=True)
+              if caches:
+                  cache = caches[0].read_text(errors="replace")
+                  for key in ("WITH_CAIRO", "WITH_SWSCALE", "WITH_FFMPEG"):
+                      match = re.search(r"^" + key + r":(?:BOOL|UNINITIALIZED)=(ON|OFF)$", cache, re.M)
+                      if match:
+                          details.append(key.lower() + "=" + match.group(1).lower())
+          source_error = re.search(
+              r"(?:^|\n)(?:[^\r\n]*[/\\])?([A-Za-z0-9_.+-]+\.(?:c|cc|cpp|cxx|h|hpp))(?::|\()",
+              diagnostic_text, re.I,
+          )
+          if source_error and category in {"compiler-error", "build-error"}:
+              name = source_error.group(1)
+              if re.fullmatch(r"[A-Za-z0-9_.+-]+", name):
+                  details.append("source=" + name)
+          cmake_error = re.search(r"CMake Error at ([^:\r\n]+):(\d+)", diagnostic_text)
+          if cmake_error:
+              source = pathlib.PurePosixPath(cmake_error.group(1).replace("\\", "/")).name
+              if re.fullmatch(r"[A-Za-z0-9_.+-]+", source):
+                  details.append("cmake_source=" + source)
+          suffix = (" token=" + token) if token else ""
+          if details:
+              suffix += " " + " ".join(details)
+          if not re.fullmatch(r"[a-z0-9][a-z0-9+_.-]*|unknown", package):
+              package = "unknown"
+          print("FREERDP_STATIC_CONFIGURE_FAILURE package=" + package + " category=" + category + suffix)
+          PY
+          exit "$rc"
