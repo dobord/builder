@@ -21,13 +21,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/cef
-          ref: 9e8635f138ac43b62014da44fd102a9200cf44a1
+          ref: 8cc991137287ca18e989e2bb292e2323ba052b28
           path: private-cef
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/vcpkg
-          ref: 7f94dfb9b68df553983e5fa1533c9944ba7e1d03
+          ref: 114592cf5595131f9bd968e1afd1f2c575f2301c
           path: private-vcpkg
           token: ${{ secrets.SOURCE_READ_TOKEN }}
           persist-credentials: false
@@ -45,8 +45,8 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          if ((git -C private-cef rev-parse HEAD) -ne '9e8635f138ac43b62014da44fd102a9200cf44a1') { throw 'CEF revision mismatch' }
-          if ((git -C private-vcpkg rev-parse HEAD) -ne '7f94dfb9b68df553983e5fa1533c9944ba7e1d03') { throw 'vcpkg revision mismatch' }
+          if ((git -C private-cef rev-parse HEAD) -ne '8cc991137287ca18e989e2bb292e2323ba052b28') { throw 'CEF revision mismatch' }
+          if ((git -C private-vcpkg rev-parse HEAD) -ne '114592cf5595131f9bd968e1afd1f2c575f2301c') { throw 'vcpkg revision mismatch' }
           if ((git -C private-lfc-ui rev-parse HEAD) -ne '85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5') { throw 'lfc-ui revision mismatch' }
           python -I -m unittest discover -s private-cef/vcpkg/static/tests -p test_platform_source.py -v
           Remove-Item -LiteralPath "$env:GITHUB_WORKSPACE/private-vcpkg/.git" -Recurse -Force
@@ -61,7 +61,7 @@ jobs:
       - name: Build and runtime-verify static CEF from source
         shell: pwsh
         env:
-          GITHUB_SHA: 9e8635f138ac43b62014da44fd102a9200cf44a1
+          GITHUB_SHA: 8cc991137287ca18e989e2bb292e2323ba052b28
           CEF_STATIC_BUILD_TIMEOUT_SECONDS: '18000'
           CEF_STATIC_JOBS: '4'
         run: |
