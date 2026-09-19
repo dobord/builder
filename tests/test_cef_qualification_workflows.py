@@ -259,6 +259,8 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn("failed_libusb_index=", text)
         self.assertIn("failed_udev_index=", text)
         self.assertIn("failed_freerdp_client_index=", text)
+        self.assertIn('item.endswith(".a")', text)
+        self.assertIn('base[3:-2]', text)
         self.assertIn("replay_text[failed[-1]:]", text)
         self.assertNotIn("upload-artifact", text)
 

@@ -265,11 +265,18 @@ jobs:
                       if re.fullmatch(r"[A-Za-z0-9_.+~-]{1,120}", name):
                           details.append("failed_link_output=" + name)
                   libraries = []
-                  for lib in re.findall(
-                      r"(?:^|\s)-l([A-Za-z0-9_+.-]+)", command
-                  ):
-                      if lib not in libraries:
-                          libraries.append(lib)
+                  for item in command.split():
+                      name = None
+                      if re.fullmatch(r"-l[A-Za-z0-9_+.-]+", item):
+                          name = item[2:]
+                      elif item.endswith(".a"):
+                          base = pathlib.PurePosixPath(
+                              item.strip("'\"").replace("\\", "/")
+                          ).name
+                          if re.fullmatch(r"lib[A-Za-z0-9_+.-]+\.a", base):
+                              name = base[3:-2]
+                      if name and name not in libraries:
+                          libraries.append(name)
                   if libraries:
                       details.append("failed_library_count=" + str(len(libraries)))
                       details.append(
