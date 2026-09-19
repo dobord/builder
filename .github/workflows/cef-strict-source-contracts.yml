@@ -18,14 +18,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/vcpkg
-          ref: 5476b6c19e7b75b9e680d7498c10a25f734f5b50
+          ref: 18567956f7595df7936881b93c9d12028c204dc7
           path: private-vcpkg
           token: ${{ secrets.SOURCE_READ_TOKEN }}
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/cef
-          ref: f47b91a00003f9a230f9182fc61d1d8739a720c1
+          ref: ff9276b9de9361ddeaa5b53589e79e17c254d2f4
           path: private-vcpkg/.full-cef
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -44,8 +44,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C private-vcpkg rev-parse HEAD)" = "5476b6c19e7b75b9e680d7498c10a25f734f5b50"
-          test "$(git -C private-vcpkg/.full-cef rev-parse HEAD)" = "f47b91a00003f9a230f9182fc61d1d8739a720c1"
+          test "$(git -C private-vcpkg rev-parse HEAD)" = "18567956f7595df7936881b93c9d12028c204dc7"
+          test "$(git -C private-vcpkg/.full-cef rev-parse HEAD)" = "ff9276b9de9361ddeaa5b53589e79e17c254d2f4"
           test "$(git -C private-vcpkg/.contract-builder rev-parse HEAD)" = "457fd41f39cbcff940c7af654da899d44ba5e553"
           cmp triplets/x64-linux-static-release.cmake private-vcpkg/triplets/x64-linux-static-release.cmake
           cmp triplets/x64-windows-static-release.cmake private-vcpkg/triplets/x64-windows-static-release.cmake
