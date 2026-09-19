@@ -18,7 +18,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/vcpkg
-          ref: a87950eb71feeea3d29c16610894f94007786dd6
+          ref: 2dd11124589be8f4549a9126e5393113e76f68da
           path: private-vcpkg
           token: ${{ secrets.SOURCE_READ_TOKEN }}
           persist-credentials: false
@@ -44,7 +44,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C private-vcpkg rev-parse HEAD)" = "a87950eb71feeea3d29c16610894f94007786dd6"
+          test "$(git -C private-vcpkg rev-parse HEAD)" = "2dd11124589be8f4549a9126e5393113e76f68da"
           test "$(git -C private-vcpkg/.full-cef rev-parse HEAD)" = "8545a10c99f2ede0f08e75cda7c054aed424f4f5"
           test "$(git -C private-vcpkg/.contract-builder rev-parse HEAD)" = "457fd41f39cbcff940c7af654da899d44ba5e553"
           cmp triplets/x64-linux-static-release.cmake private-vcpkg/triplets/x64-linux-static-release.cmake

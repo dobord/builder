@@ -225,7 +225,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
 
     def test_freerdp_static_diagnostic_uses_deterministic_audio_revision(self):
         text = (ROOT / ".github/workflows/freerdp-static-diagnostic.yml").read_text()
-        self.assertIn("ref: 9cd6130b3e9d1c7b8d055dde4de9c420dc8af305", text)
+        self.assertIn("ref: 2dd11124589be8f4549a9126e5393113e76f68da", text)
         self.assertIn("FREERDP_STATIC_CONFIGURE_FAILURE package=", text)
         self.assertIn(" category=", text)
         self.assertIn('"WITH_CAIRO"', text)
@@ -272,7 +272,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
 
     def test_lfc_ui_static_freerdp_workflow_is_relocated_and_static(self):
         text = (ROOT / ".github/workflows/lfc-ui-static-freerdp.yml").read_text()
-        self.assertIn("ref: 9cd6130b3e9d1c7b8d055dde4de9c420dc8af305", text)
+        self.assertIn("ref: 2dd11124589be8f4549a9126e5393113e76f68da", text)
         self.assertIn("'lfc-ui[freerdp]'", text)
         self.assertIn("freerdp-server-proxy", text)
         self.assertIn("freerdp-shadow", text)
@@ -298,7 +298,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
     def test_current_private_source_contract_workflow_pins_gn_gate_revision(self):
         text = (ROOT / ".github/workflows/cef-strict-source-contracts.yml").read_text()
         self.assertIn("repository: dobord/vcpkg", text)
-        self.assertIn("ref: a87950eb71feeea3d29c16610894f94007786dd6", text)
+        self.assertIn("ref: 2dd11124589be8f4549a9126e5393113e76f68da", text)
         self.assertIn("ref: 8545a10c99f2ede0f08e75cda7c054aed424f4f5", text)
         self.assertIn("ref: 457fd41f39cbcff940c7af654da899d44ba5e553", text)
         self.assertNotIn("git -C private-vcpkg/.full-cef apply --check", text)
