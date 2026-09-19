@@ -9,7 +9,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
     def test_full_platform_workflow_is_exact_and_keeps_native_output_private(self):
         text = (ROOT / ".github/workflows/cef-strict-platform-qualification.yml").read_text()
         self.assertIn("repository: dobord/vcpkg", text)
-        self.assertIn("ref: 5fbfa70caed6db333018a66f3e7ff08c508e6691", text)
+        self.assertIn("ref: 1eeb9d01ad078310bd2a3cf69a8e0983e21e8065", text)
         self.assertIn("repository: microsoft/vcpkg", text)
         self.assertIn("ref: 9e593bb18ea69cc5095e012465dcd675a822ed0d", text)
         self.assertIn("repository: dobord/cef", text)
