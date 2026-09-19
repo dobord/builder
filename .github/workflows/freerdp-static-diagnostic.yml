@@ -62,7 +62,6 @@ jobs:
           buildtrees = workspace / "private-vcpkg/.freerdp-diag-upstream/buildtrees"
           root = buildtrees / "freerdp"
           install_text = (runner / "freerdp-install.log").read_text(errors="replace")[-1048576:]
-          pieces = [install_text]
           recent = []
           if root.is_dir():
               recent = sorted(
@@ -71,8 +70,14 @@ jobs:
                   key=lambda p: p.stat().st_mtime,
                   reverse=True,
               )[:40]
-              pieces.extend(p.read_text(errors="replace")[-262144:] for p in recent)
-          text = "\n".join(pieces)
+          freerdp_text = "\n".join(
+              p.read_text(errors="replace")[-262144:] for p in recent
+          )
+          # Package/stage identity comes from vcpkg's top-level log. Compiler,
+          # linker and dependency identity must come only from FreeRDP's own
+          # buildtree so a failed transitive package cannot contaminate the
+          # reported static edge.
+          text = freerdp_text or install_text
           package = "unknown"
           for pattern in (
               r"error: building ([a-z0-9][a-z0-9+_.-]*):",
@@ -93,7 +98,7 @@ jobs:
           build_stage = (
               "build" if (
                   re.search(r"vcpkg_execute_build_process\.cmake", install_text, re.I)
-                  or re.search(r"vcpkg_execute_build_process\.cmake", text, re.I)
+                  or re.search(r"vcpkg_execute_build_process\.cmake", freerdp_text, re.I)
               )
               else "configure"
           )
