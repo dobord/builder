@@ -224,6 +224,8 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn("undefined_symbol=", text)
         self.assertIn("multiple_symbol=", text)
         self.assertIn("freerdp_log=", text)
+        self.assertIn("diagnostic_text = text", text)
+        self.assertIn("diagnostic_text = text[max(boundaries):]", text)
         self.assertNotIn("upload-artifact", text)
 
     def test_lfc_ui_static_freerdp_workflow_is_relocated_and_static(self):

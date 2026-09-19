@@ -102,17 +102,30 @@ jobs:
               )
               else "configure"
           )
+          diagnostic_text = text
+          if build_stage == "build":
+              boundaries = []
+              for pattern in (
+                  r"(?:^|\n)FAILED:\s",
+                  r"(?:^|\n)ninja: build stopped",
+                  r"(?:^|\n)make(?:\[[0-9]+\])?: \*\*\*",
+              ):
+                  boundaries.extend(m.start() for m in re.finditer(pattern, text, re.I))
+              if boundaries:
+                  diagnostic_text = text[max(boundaries):]
+              else:
+                  diagnostic_text = text[-262144:]
           category, token = "unknown", ""
           if build_stage == "build":
               # Do not mistake non-fatal CMake feature-summary lines for the
               # package failure once vcpkg has already entered the build step.
               compiler = re.search(
                   r"(?:fatal\s+)?error(?:\s+([A-Z][0-9]{4}))?\s*:",
-                  text, re.I,
+                  diagnostic_text, re.I,
               )
               linker = re.search(
                   r"(?:undefined reference|collect2: error|ld(?:\.lld)?: error|LNK[0-9]{4})",
-                  text, re.I,
+                  diagnostic_text, re.I,
               )
               if linker:
                   category = "link-error"
@@ -121,7 +134,7 @@ jobs:
                   raw = (compiler.group(1) or "").lower()
                   if re.fullmatch(r"[a-z][0-9]{4}", raw):
                       token = raw
-              elif re.search(r"(?:FAILED:|ninja: build stopped|make(?:\[[0-9]+\])?: \*\*\*)", text):
+              elif re.search(r"(?:FAILED:|ninja: build stopped|make(?:\[[0-9]+\])?: \*\*\*)", diagnostic_text):
                   category = "build-error"
           else:
               patterns = [
@@ -154,23 +167,23 @@ jobs:
                   log_name = recent[0].name
                   if re.fullmatch(r"[A-Za-z0-9_.+~-]{1,120}", log_name):
                       details.append("freerdp_log=" + log_name)
-              target = re.search(r"(?:^|\n)FAILED:\s+([^\s\r\n]+)", text, re.I)
+              target = re.search(r"(?:^|\n)FAILED:\s+([^\s\r\n]+)", diagnostic_text, re.I)
               if target:
                   name = pathlib.PurePosixPath(target.group(1).replace("\\", "/")).name
                   if re.fullmatch(r"[A-Za-z0-9_.+~-]{1,120}", name):
                       details.append("link_target=" + name)
-              missing_lib = re.search(r"(?:cannot find|unable to find)\s+-l([A-Za-z0-9_+.-]+)", text, re.I)
+              missing_lib = re.search(r"(?:cannot find|unable to find)\s+-l([A-Za-z0-9_+.-]+)", diagnostic_text, re.I)
               if missing_lib:
                   details.append("missing_library=" + missing_lib.group(1).lower())
               undefined = re.search(
                   r"undefined reference to [\x60'\"]?([A-Za-z_][A-Za-z0-9_@$.:+<>~/-]{0,127})",
-                  text, re.I,
+                  diagnostic_text, re.I,
               )
               if undefined:
                   details.append("undefined_symbol=" + undefined.group(1))
               duplicate = re.search(
                   r"multiple definition of [\x60'\"]?([A-Za-z_][A-Za-z0-9_@$.:+<>~/-]{0,127})",
-                  text, re.I,
+                  diagnostic_text, re.I,
               )
               if duplicate:
                   details.append("multiple_symbol=" + duplicate.group(1))
@@ -184,13 +197,13 @@ jobs:
                           details.append(key.lower() + "=" + match.group(1).lower())
           source_error = re.search(
               r"(?:^|\n)(?:[^\r\n]*[/\\])?([A-Za-z0-9_.+-]+\.(?:c|cc|cpp|cxx|h|hpp))(?::|\()",
-              text, re.I,
+              diagnostic_text, re.I,
           )
           if source_error and category in {"compiler-error", "build-error"}:
               name = source_error.group(1)
               if re.fullmatch(r"[A-Za-z0-9_.+-]+", name):
                   details.append("source=" + name)
-          cmake_error = re.search(r"CMake Error at ([^:\r\n]+):(\d+)", text)
+          cmake_error = re.search(r"CMake Error at ([^:\r\n]+):(\d+)", diagnostic_text)
           if cmake_error:
               source = pathlib.PurePosixPath(cmake_error.group(1).replace("\\", "/")).name
               if re.fullmatch(r"[A-Za-z0-9_.+-]+", source):
