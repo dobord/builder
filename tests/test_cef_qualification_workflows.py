@@ -76,7 +76,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         text = (ROOT / ".github/workflows/cef-strict-sdk-deps.yml").read_text()
         self.assertIn("repository: dobord/lockfreecoro", text)
         self.assertIn("repository: dobord/lfc-ui", text)
-        self.assertIn("ref: 5fbfa70caed6db333018a66f3e7ff08c508e6691", text)
+        self.assertIn("ref: 20acf029a5fbf1eacb4e77a8de4d853e562e4aed", text)
         self.assertIn("persist-credentials: false", text)
         self.assertIn("sdk-deps-install.log", text)
         self.assertIn("sdk-deps-consumer-build.log", text)
