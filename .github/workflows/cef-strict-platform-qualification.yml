@@ -211,14 +211,29 @@ jobs:
           import os, pathlib, re
           log = pathlib.Path(os.environ["RUNNER_TEMP"]) / "cef-gn-evidence/cef-gn/gn-gen.log"
           text = log.read_text(errors="replace")[-1048576:] if log.is_file() else ""
-          module = re.search(
-              r"GN requested an uncaptured target module:\s+([A-Za-z0-9+_.-]+)",
-              text,
+          checks = (
+              ("uncaptured-module", r"GN requested an uncaptured target module:\s+([A-Za-z0-9+_.-]+)"),
+              ("header-metadata", r"Header-only module metadata is not uniquely frozen:\s+([A-Za-z0-9+_.-]+)"),
+              ("header-base", r"Header-only module lacks its captured base:\s+([A-Za-z0-9+_.-]+)"),
+              ("missing-archive", r"Missing or ambiguous static target archive:\s+([A-Za-z0-9+_.-]+)"),
           )
-          if module and re.fullmatch(r"[A-Za-z0-9+_.-]+", module.group(1)):
-              print("CEF_GN_FAILURE category=uncaptured-module module=" + module.group(1))
-          else:
-              print("CEF_GN_FAILURE category=unknown")
+          category = "unknown"
+          token = ""
+          for label, pattern in checks:
+              match = re.search(pattern, text)
+              if match and re.fullmatch(r"[A-Za-z0-9+_.-]+", match.group(1)):
+                  category, token = label, match.group(1)
+                  break
+          if category == "unknown" and "GN filter would discard a static dependency" in text:
+              category = "filter-discard"
+          if category == "unknown" and "Expected one captured module" in text:
+              category = "module-mode"
+          if category == "unknown" and "No such file or directory" in text:
+              category = "missing-path"
+              if "unix-print" in text:
+                  token = "gtk+-unix-print-3.0"
+          suffix = (" token=" + token) if token else ""
+          print("CEF_GN_FAILURE category=" + category + suffix)
           PY
             exit "$rc"
           fi

@@ -29,6 +29,9 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn("runtime_module=", text)
         self.assertIn("CEF_GN_FAILURE category=", text)
         self.assertIn("uncaptured-module", text)
+        self.assertIn("header-metadata", text)
+        self.assertIn("header-base", text)
+        self.assertIn("missing-path", text)
 
     def test_production_build_accepts_trusted_large_disk_runner_labels(self):
         text=(ROOT/'.github/workflows/build-release.yml').read_text()
