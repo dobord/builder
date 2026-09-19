@@ -144,6 +144,27 @@ jobs:
                   elif re.search(r"CMake Error", text):
                       category = "cmake-error"
           details = ["stage=" + build_stage]
+          if category == "link-error":
+              target = re.search(r"(?:^|\n)FAILED:\s+([^\s\r\n]+)", text, re.I)
+              if target:
+                  name = pathlib.PurePosixPath(target.group(1).replace("\\", "/")).name
+                  if re.fullmatch(r"[A-Za-z0-9_.+~-]{1,120}", name):
+                      details.append("link_target=" + name)
+              missing_lib = re.search(r"(?:cannot find|unable to find)\s+-l([A-Za-z0-9_+.-]+)", text, re.I)
+              if missing_lib:
+                  details.append("missing_library=" + missing_lib.group(1).lower())
+              undefined = re.search(
+                  r"undefined reference to [\x60'\"]?([A-Za-z_][A-Za-z0-9_@$.:+<>~/-]{0,127})",
+                  text, re.I,
+              )
+              if undefined:
+                  details.append("undefined_symbol=" + undefined.group(1))
+              duplicate = re.search(
+                  r"multiple definition of [\x60'\"]?([A-Za-z_][A-Za-z0-9_@$.:+<>~/-]{0,127})",
+                  text, re.I,
+              )
+              if duplicate:
+                  details.append("multiple_symbol=" + duplicate.group(1))
           if root.is_dir():
               caches = sorted(root.rglob("CMakeCache.txt"), key=lambda p: p.stat().st_mtime, reverse=True)
               if caches:
