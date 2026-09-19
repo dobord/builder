@@ -91,7 +91,10 @@ jobs:
               except (ValueError, IndexError):
                   pass
           build_stage = (
-              "build" if re.search(r"vcpkg_execute_build_process\.cmake", install_text, re.I)
+              "build" if (
+                  re.search(r"vcpkg_execute_build_process\.cmake", install_text, re.I)
+                  or re.search(r"vcpkg_execute_build_process\.cmake", text, re.I)
+              )
               else "configure"
           )
           category, token = "unknown", ""
