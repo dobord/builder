@@ -90,32 +90,57 @@ jobs:
                       package = candidate
               except (ValueError, IndexError):
                   pass
+          build_stage = (
+              "build" if re.search(r"vcpkg_execute_build_process\.cmake", install_text, re.I)
+              else "configure"
+          )
           category, token = "unknown", ""
-          patterns = [
-              ("missing-cmake-package", r"Could not find a package configuration file provided by\s+['\"]?([A-Za-z0-9+_.-]+)"),
-              ("missing-feature", r"(?:Could NOT find|Could not find)\s+([A-Za-z0-9+_.-]+)"),
-              ("missing-pkgconfig", r"Package\s+['\"]?([A-Za-z0-9+_.-]+)['\"]?[^\n]*(?:not found|was not found)"),
-              ("missing-library", r"(?:Could NOT find|NOTFOUND).*?([A-Za-z0-9+_.-]+)"),
-              ("unknown-option", r"Manually-specified variables were not used by the project:\s*\n\s*([A-Za-z0-9_+.-]+)"),
-          ]
-          for label, pattern in patterns:
-              m = re.search(pattern, text, re.I)
-              if m:
-                  category = label
-                  raw = m.group(1).lower()
-                  if re.fullmatch(r"[a-z0-9_+.-]+", raw):
+          if build_stage == "build":
+              # Do not mistake non-fatal CMake feature-summary lines for the
+              # package failure once vcpkg has already entered the build step.
+              compiler = re.search(
+                  r"(?:fatal\s+)?error(?:\s+([A-Z][0-9]{4}))?\s*:",
+                  text, re.I,
+              )
+              linker = re.search(
+                  r"(?:undefined reference|collect2: error|ld(?:\.lld)?: error|LNK[0-9]{4})",
+                  text, re.I,
+              )
+              if linker:
+                  category = "link-error"
+              elif compiler:
+                  category = "compiler-error"
+                  raw = (compiler.group(1) or "").lower()
+                  if re.fullmatch(r"[a-z][0-9]{4}", raw):
                       token = raw
-                  break
-          if category == "unknown":
-              if re.search(r"find_package\(X11 REQUIRED\)", text, re.I) and re.search(r"X11.*not found", text, re.I):
-                  category = "x11"
-              elif re.search(r"libusb", text, re.I) and re.search(r"(not found|NOTFOUND)", text):
-                  category = "libusb"
-              elif re.search(r"ffmpeg", text, re.I) and re.search(r"(not found|NOTFOUND)", text):
-                  category = "ffmpeg"
-              elif re.search(r"CMake Error", text):
-                  category = "cmake-error"
-          details = []
+              elif re.search(r"(?:FAILED:|ninja: build stopped|make(?:\[[0-9]+\])?: \*\*\*)", text):
+                  category = "build-error"
+          else:
+              patterns = [
+                  ("missing-cmake-package", r"Could not find a package configuration file provided by\s+['\"]?([A-Za-z0-9+_.-]+)"),
+                  ("missing-feature", r"(?:Could NOT find|Could not find)\s+([A-Za-z0-9+_.-]+)"),
+                  ("missing-pkgconfig", r"Package\s+['\"]?([A-Za-z0-9+_.-]+)['\"]?[^\n]*(?:not found|was not found)"),
+                  ("missing-library", r"(?:Could NOT find|NOTFOUND).*?([A-Za-z0-9+_.-]+)"),
+                  ("unknown-option", r"Manually-specified variables were not used by the project:\s*\n\s*([A-Za-z0-9_+.-]+)"),
+              ]
+              for label, pattern in patterns:
+                  m = re.search(pattern, text, re.I)
+                  if m:
+                      category = label
+                      raw = m.group(1).lower()
+                      if re.fullmatch(r"[a-z0-9_+.-]+", raw):
+                          token = raw
+                      break
+              if category == "unknown":
+                  if re.search(r"find_package\(X11 REQUIRED\)", text, re.I) and re.search(r"X11.*not found", text, re.I):
+                      category = "x11"
+                  elif re.search(r"libusb", text, re.I) and re.search(r"(not found|NOTFOUND)", text):
+                      category = "libusb"
+                  elif re.search(r"ffmpeg", text, re.I) and re.search(r"(not found|NOTFOUND)", text):
+                      category = "ffmpeg"
+                  elif re.search(r"CMake Error", text):
+                      category = "cmake-error"
+          details = ["stage=" + build_stage]
           if root.is_dir():
               caches = sorted(root.rglob("CMakeCache.txt"), key=lambda p: p.stat().st_mtime, reverse=True)
               if caches:
@@ -124,6 +149,14 @@ jobs:
                       match = re.search(r"^" + key + r":(?:BOOL|UNINITIALIZED)=(ON|OFF)$", cache, re.M)
                       if match:
                           details.append(key.lower() + "=" + match.group(1).lower())
+          source_error = re.search(
+              r"(?:^|\n)(?:[^\r\n]*[/\\])?([A-Za-z0-9_.+-]+\.(?:c|cc|cpp|cxx|h|hpp))(?::|\()",
+              text, re.I,
+          )
+          if source_error and category in {"compiler-error", "build-error"}:
+              name = source_error.group(1)
+              if re.fullmatch(r"[A-Za-z0-9_.+-]+", name):
+                  details.append("source=" + name)
           cmake_error = re.search(r"CMake Error at ([^:\r\n]+):(\d+)", text)
           if cmake_error:
               source = pathlib.PurePosixPath(cmake_error.group(1).replace("\\", "/")).name
