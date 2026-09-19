@@ -52,6 +52,8 @@ jobs:
           cd private-vcpkg
           python -I -m unittest discover -s ci/cef/tests -v
           python -I -m unittest discover -s ci/cef-full/tests -v
+          python -I .full-cef/vcpkg/static/tests/test_platform_contract.py -v
+          python -I .full-cef/vcpkg/static/tests/test_platform_gn.py -v
           python -m py_compile ci/cef-full/verify_prefix.py ci/cef-full/native.py ci/cef-full/gn_check.py
       - name: Verify strict release import remains fail-closed in reviewed CEF bytes
         shell: bash

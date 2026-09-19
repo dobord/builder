@@ -288,6 +288,8 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn("cpp_support", text)
         self.assertIn("python -I -m unittest discover -s ci/cef-full/tests -v", text)
         self.assertIn("ci/cef-full/gn_check.py", text)
+        self.assertIn("test_platform_contract.py", text)
+        self.assertIn("test_platform_gn.py", text)
         self.assertNotIn("upload-artifact", text)
         self.assertNotIn("actions/cache", text)
 
