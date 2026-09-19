@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "platform": "linux",
-  "vcpkg_commit": "1669f647f46fc6eaa9f73fcbb0ff79857b780071",
+  "vcpkg_commit": "5556ced2e671509c1dce8a19fd3b709cf748acb6",
   "upstream_commit": "9e593bb18ea69cc5095e012465dcd675a822ed0d",
   "cef_recipe_commit": "c7eb018bc78a7d278df6ed53ff93544ea2cdb3e7",
   "checkpoint": null

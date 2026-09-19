@@ -8,7 +8,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: cef-windows-msvc-stl-source-build-c7eb018b
+  group: cef-windows-msvc-stl-source-build-5556ced2
   cancel-in-progress: true
 jobs:
   windows:
@@ -27,7 +27,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/vcpkg
-          ref: 1669f647f46fc6eaa9f73fcbb0ff79857b780071
+          ref: 5556ced2e671509c1dce8a19fd3b709cf748acb6
           path: private-vcpkg
           token: ${{ secrets.SOURCE_READ_TOKEN }}
           persist-credentials: false
@@ -46,7 +46,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           if ((git -C private-cef rev-parse HEAD) -ne 'c7eb018bc78a7d278df6ed53ff93544ea2cdb3e7') { throw 'CEF revision mismatch' }
-          if ((git -C private-vcpkg rev-parse HEAD) -ne '1669f647f46fc6eaa9f73fcbb0ff79857b780071') { throw 'vcpkg revision mismatch' }
+          if ((git -C private-vcpkg rev-parse HEAD) -ne '5556ced2e671509c1dce8a19fd3b709cf748acb6') { throw 'vcpkg revision mismatch' }
           if ((git -C private-lfc-ui rev-parse HEAD) -ne '85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5') { throw 'lfc-ui revision mismatch' }
           python -I -m unittest discover -s private-cef/vcpkg/static/tests -p test_platform_source.py -v
           Remove-Item -LiteralPath "$env:GITHUB_WORKSPACE/private-vcpkg/.git" -Recurse -Force
