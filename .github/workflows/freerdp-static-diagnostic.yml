@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/vcpkg
-          ref: 57d5564b8e4aabd707f5b69a41153e67c68e6ebb
+          ref: 1669f647f46fc6eaa9f73fcbb0ff79857b780071
           path: private-vcpkg
           token: ${{ secrets.SOURCE_READ_TOKEN }}
           persist-credentials: false
@@ -45,7 +45,7 @@ jobs:
         run: |
           set -euo pipefail
           upstream="$GITHUB_WORKSPACE/private-vcpkg/.freerdp-diag-upstream"
-          test "$(git -C private-vcpkg rev-parse HEAD)" = "57d5564b8e4aabd707f5b69a41153e67c68e6ebb"
+          test "$(git -C private-vcpkg rev-parse HEAD)" = "1669f647f46fc6eaa9f73fcbb0ff79857b780071"
           bash "$upstream/bootstrap-vcpkg.sh" -disableMetrics >"$RUNNER_TEMP/freerdp-bootstrap.log" 2>&1
           set +e
           "$upstream/vcpkg" install 'freerdp[client,ffmpeg,proxy,server,urbdrc,winpr-tools,x11]'             --triplet=x64-linux-static-release             --host-triplet=x64-linux-static-release             "--overlay-ports=$GITHUB_WORKSPACE/private-vcpkg/ports"             "--overlay-triplets=$GITHUB_WORKSPACE/private-vcpkg/triplets"             "--x-install-root=$RUNNER_TEMP/freerdp-installed"             --binarysource=clear >"$RUNNER_TEMP/freerdp-install.log" 2>&1
@@ -241,6 +241,39 @@ jobs:
           if reported_files:
               details.append("terminal_log=" + reported_files[-1].name)
           if category == "link-error":
+              # The terminal replay itself is authoritative. Attribute the
+              # failure to the exact Ninja FAILED output/command instead of a
+              # merely recent CMake link.txt from another target.
+              failed_line = re.search(
+                  r"(?:^|\n)FAILED:\s+([^\r\n]+)", diagnostic_text, re.I
+              )
+              if failed_line:
+                  outputs = []
+                  for item in failed_line.group(1).split():
+                      name = pathlib.PurePosixPath(item.replace("\\", "/")).name
+                      if re.fullmatch(r"[A-Za-z0-9_.+~-]{1,120}", name):
+                          outputs.append(name)
+                  if outputs:
+                      details.append("failed_outputs=" + ",".join(outputs[:4]))
+                  remainder = diagnostic_text[failed_line.end():].lstrip("\r\n")
+                  command = remainder.splitlines()[0] if remainder else ""
+                  output = re.search(r"(?:^|\s)-o\s+([^\s]+)", command)
+                  if output:
+                      name = pathlib.PurePosixPath(
+                          output.group(1).replace("\\", "/")
+                      ).name
+                      if re.fullmatch(r"[A-Za-z0-9_.+~-]{1,120}", name):
+                          details.append("failed_link_output=" + name)
+                  libraries = []
+                  for lib in re.findall(
+                      r"(?:^|\s)-l([A-Za-z0-9_+.-]+)", command
+                  ):
+                      if lib not in libraries:
+                          libraries.append(lib)
+                  if libraries:
+                      details.append(
+                          "failed_link_libraries_tail=" + ",".join(libraries[-20:])
+                      )
               if recent:
                   log_name = recent[0].name
                   if re.fullmatch(r"[A-Za-z0-9_.+~-]{1,120}", log_name):
