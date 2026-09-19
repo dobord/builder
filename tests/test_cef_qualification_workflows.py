@@ -221,7 +221,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
 
     def test_freerdp_static_diagnostic_uses_deterministic_audio_revision(self):
         text = (ROOT / ".github/workflows/freerdp-static-diagnostic.yml").read_text()
-        self.assertIn("ref: a6adaa2ff68841d932595d4519bd202021dfbd99", text)
+        self.assertIn("ref: 57d5564b8e4aabd707f5b69a41153e67c68e6ebb", text)
         self.assertIn("FREERDP_STATIC_CONFIGURE_FAILURE package=", text)
         self.assertIn(" category=", text)
         self.assertIn('"WITH_CAIRO"', text)
@@ -248,6 +248,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn("diagnostic_text = text[max(boundaries):]", text)
         self.assertIn("freerdp-terminal-ninja.log", text)
         self.assertIn("ninja_replay=yes", text)
+        self.assertIn("replay_text[failed[-1]:]", text)
         self.assertNotIn("upload-artifact", text)
 
     def test_lfc_ui_static_freerdp_workflow_is_relocated_and_static(self):
