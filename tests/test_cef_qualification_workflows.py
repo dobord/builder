@@ -173,8 +173,8 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
 
     def test_windows_msvc_stl_full_source_gate_builds_lfc_ui_example(self):
         text = (ROOT / ".github/workflows/cef-windows-source-msvc-stl.yml").read_text()
-        self.assertIn("ref: 8e76fadd560bc192484bad16427338fee8f632b7", text)
-        self.assertIn("ref: 5fbfa70caed6db333018a66f3e7ff08c508e6691", text)
+        self.assertIn("ref: 755aa5db4bfb9e5ffd87dd4ee575ae75203d62ca", text)
+        self.assertIn("ref: 20acf029a5fbf1eacb4e77a8de4d853e562e4aed", text)
         self.assertIn("source_build.py build", text)
         self.assertIn("export_static.py", text)
         self.assertIn("cef_cpp_support.lib", text)
