@@ -204,6 +204,36 @@ jobs:
                       continue
                   selected_link = spec_text
                   break
+              if not selected_link:
+                  ninja_files = sorted(
+                      [p for p in root.rglob("build.ninja")
+                       if p.is_file() and p.stat().st_size <= 32 * 1024 * 1024],
+                      key=lambda p: p.stat().st_mtime,
+                      reverse=True,
+                  )
+                  for ninja in ninja_files[:20]:
+                      ninja_lines = ninja.read_text(errors="replace").splitlines()
+                      for index, line in enumerate(ninja_lines):
+                          if wanted and wanted not in line:
+                              continue
+                          if "LINK_LIBRARIES =" not in line:
+                              continue
+                          selected_link = line
+                          for candidate in reversed(
+                              ninja_lines[max(0, index - 80):index]
+                          ):
+                              if candidate.startswith("build "):
+                                  target_name = candidate[6:].split(":", 1)[0].strip()
+                                  name = pathlib.PurePosixPath(
+                                      target_name.replace("\\", "/")
+                                  ).name
+                                  if re.fullmatch(r"[A-Za-z0-9_.+~-]{1,120}", name):
+                                      details.append("ninja_link_target=" + name)
+                                  break
+                          details.append("link_spec_source=build.ninja")
+                          break
+                      if selected_link:
+                          break
               if selected_link:
                   output_match = re.search(r"(?:^|\\s)-o\\s+([^\\s]+)", selected_link)
                   if output_match:

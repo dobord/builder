@@ -225,6 +225,8 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn("undefined_symbol=", text)
         self.assertIn("multiple_symbol=", text)
         self.assertIn("link_spec_target=", text)
+        self.assertIn("ninja_link_target=", text)
+        self.assertIn("link_spec_source=build.ninja", text)
         self.assertIn("link_library_count=", text)
         self.assertIn("link_libraries_tail=", text)
         self.assertIn("link_xcb_index=", text)
