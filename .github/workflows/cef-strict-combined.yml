@@ -47,14 +47,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/vcpkg
-          ref: 034a94f6b57c9e0aaa8722401c2d7f6ddc055e03
+          ref: 5fbfa70caed6db333018a66f3e7ff08c508e6691
           path: private-vcpkg
           token: ${{ secrets.SOURCE_READ_TOKEN }}
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/vcpkg
-          ref: 034a94f6b57c9e0aaa8722401c2d7f6ddc055e03
+          ref: 5fbfa70caed6db333018a66f3e7ff08c508e6691
           path: private-engine-vcpkg
           token: ${{ secrets.SOURCE_READ_TOKEN }}
           persist-credentials: false
