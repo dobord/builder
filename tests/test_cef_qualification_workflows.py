@@ -264,7 +264,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
     def test_current_private_source_contract_workflow_pins_gn_gate_revision(self):
         text = (ROOT / ".github/workflows/cef-strict-source-contracts.yml").read_text()
         self.assertIn("repository: dobord/vcpkg", text)
-        self.assertIn("ref: 7f94dfb9b68df553983e5fa1533c9944ba7e1d03", text)
+        self.assertIn("ref: 5a07233624274048619e5ce904f537946978ee95", text)
         self.assertIn("ref: 9e8635f138ac43b62014da44fd102a9200cf44a1", text)
         self.assertIn("ref: 457fd41f39cbcff940c7af654da899d44ba5e553", text)
         self.assertNotIn("git -C private-vcpkg/.full-cef apply --check", text)
