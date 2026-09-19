@@ -11,37 +11,41 @@ from .protocol import *
 from .tasks import event, work
 
 
-def notify():
+def _trusted_builder_result() -> tuple[Client, int, int, str]:
+    """Revalidate the exact successful Build static SDK attempt from builder."""
     guard(BUILDER, event="workflow_run")
+    if env("PUBLISH_ENABLED") != "true":
+        raise ValueError("publication disabled")
     run = event()["workflow_run"]
     approved = sha(env("BUILDER_COMMIT_SHA"))
-    check_run(run, BUILDER, "build-release.yml", approved, number(run["run_attempt"]), "workflow_dispatch", success=True)
-    api = Client(env("BUILDER_TOKEN"))
+    attempt = number(run["run_attempt"])
+    check_run(
+        run, BUILDER, "build-release.yml", approved, attempt,
+        "workflow_dispatch", success=True,
+    )
+    api = Client(env("BUILDER_READ_TOKEN"))
     workflow = api.get(f"/repos/{BUILDER}/actions/workflows/build-release.yml")
     if run["workflow_id"] != workflow["id"]:
         raise ValueError("wrong workflow identifier")
-    api_run = api.get(f"/repos/{BUILDER}/actions/runs/{run['id']}/attempts/{run['run_attempt']}")
-    check_run(api_run, BUILDER, "build-release.yml", approved, number(run["run_attempt"]), "workflow_dispatch", success=True)
-    available = {a["name"] for a in api.artifacts(BUILDER, run["id"]) if not a["expired"]}
-    required = {f"sdk-{platform}-{run['id']}-{run['run_attempt']}" for platform in ("linux", "windows")}
-    if not required.issubset(available):
-        return
-    Client(env("BIN_DISPATCH_TOKEN")).dispatch(BIN, "publish.yml", {"build_run_id": str(run["id"]), "build_run_attempt": str(run["run_attempt"])})
+    exact = api.get(
+        f"/repos/{BUILDER}/actions/runs/{run['id']}/attempts/{attempt}"
+    )
+    check_run(
+        exact, BUILDER, "build-release.yml", approved, attempt,
+        "workflow_dispatch", success=True,
+    )
+    current = api.get(f"/repos/{BUILDER}/actions/runs/{run['id']}")
+    if (current.get("run_attempt") != attempt
+            or current.get("status") != "completed"
+            or current.get("conclusion") != "success"
+            or current.get("head_sha") != approved
+            or current.get("workflow_id") != workflow["id"]):
+        raise ValueError("builder run changed after workflow_run event")
+    return api, number(run["id"]), attempt, approved
 
 
 def verify_result():
-    guard(BIN, event="workflow_dispatch")
-    inputs = event()["inputs"]
-    run_id, attempt = number(inputs["build_run_id"]), number(inputs["build_run_attempt"])
-    approved = sha(env("BUILDER_COMMIT_SHA"))
-    api = Client(env("BUILDER_READ_TOKEN"))
-    run = api.get(f"/repos/{BUILDER}/actions/runs/{run_id}/attempts/{attempt}")
-    check_run(run, BUILDER, "build-release.yml", approved, attempt, "workflow_dispatch", success=True)
-    current = api.get(f"/repos/{BUILDER}/actions/runs/{run_id}")
-    if current["run_attempt"] != attempt or current["status"] != "completed":
-        raise ValueError("a different build attempt is active")
-    if run["workflow_id"] != api.get(f"/repos/{BUILDER}/actions/workflows/build-release.yml")["id"]:
-        raise ValueError("wrong builder workflow")
+    api, run_id, attempt, approved = _trusted_builder_result()
     artifacts = api.artifacts(BUILDER, run_id)
     root = work()
     staging = Path(env("STAGING_DIR"))
@@ -140,7 +144,7 @@ def verify_result():
 
 
 def publish_release():
-    guard(BIN, event="workflow_dispatch")
+    _, run_id, attempt, approved = _trusted_builder_result()
     root = Path(env("STAGING_DIR"))
     sums = root / "SHA256SUMS"
     if crypto.digest(sums) != env("STAGING_DIGEST"):
@@ -154,15 +158,24 @@ def publish_release():
     files["SHA256SUMS"] = crypto.digest(sums)
     manifest = crypto.parse((root / "release-manifest.json").read_bytes())
     tag = manifest["source_tag"]
-    if not TAG.fullmatch(tag) or set(manifest["platforms"]) != {"linux", "windows"} or manifest["builder_sha"] != env("BUILDER_COMMIT_SHA"):
+    if (not TAG.fullmatch(tag)
+            or set(manifest["platforms"]) != {"linux", "windows"}
+            or manifest["builder_sha"] != approved
+            or manifest.get("build_run") != run_id
+            or manifest.get("build_attempt") != attempt):
         raise ValueError("invalid publication manifest")
     expected_names = {"release-manifest.json", "SHA256SUMS", f"vcpkg-{tag}-linux-x64-static-release.zip", f"vcpkg-{tag}-windows-x64-static-release.zip"}
     if set(files) != expected_names or set(p.name for p in root.iterdir()) != expected_names:
         raise ValueError("unexpected publication assets")
     api = Client(env("PUBLISH_TOKEN"))
     repo = api.get(f"/repos/{BIN}")
-    if repo["id"] != IDS[BIN] or not repo["private"]:
-        raise ValueError("destination must be canonical and private")
+    if (repo["id"] != IDS[BIN] or not repo["private"]
+            or repo.get("default_branch") != "main"):
+        raise ValueError("destination must be canonical, private and main-based")
+    main_ref = api.get(f"/repos/{BIN}/git/ref/heads/main")
+    if main_ref.get("object", {}).get("type") != "commit":
+        raise ValueError("destination main ref is not a commit")
+    bin_main = sha(main_ref["object"]["sha"])
     marker = "Encrypted pipeline manifest SHA256: " + files["release-manifest.json"]
     try:
         release = api.get(f"/repos/{BIN}/releases/tags/{tag}")
@@ -180,7 +193,7 @@ def publish_release():
         if len(matches) > 1:
             raise ValueError("ambiguous existing release")
         release = matches[0] if matches else api.json("POST", f"/repos/{BIN}/releases", {
-            "tag_name": tag, "target_commitish": sha(env("GITHUB_SHA")),
+            "tag_name": tag, "target_commitish": bin_main,
             "name": tag, "body": marker, "draft": True, "prerelease": False})
     if release["body"] != marker:
         raise ValueError("conflicting release; never overwrite")

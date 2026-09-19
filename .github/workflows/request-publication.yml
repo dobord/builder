@@ -1,26 +1,31 @@
-name: Request verified publication
+name: Verify and publish encrypted SDK
 on:
   workflow_run:
     workflows: ['Build static SDK']
     branches: [main]
     types: [completed]
 permissions: {}
+concurrency:
+  group: sdk-publication
+  cancel-in-progress: false
 jobs:
-  notify:
+  publish:
     if: >-
       github.repository_id == '1372874997' &&
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'workflow_dispatch' &&
       github.event.workflow_run.head_repository.id == 1372874997 &&
       github.event.workflow_run.head_sha == vars.BUILDER_COMMIT_SHA &&
-      vars.RELEASE_ENABLED == 'true'
+      vars.RELEASE_ENABLED == 'true' &&
+      vars.PUBLISH_ENABLED == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 75
     permissions:
       contents: read
       actions: read
     env:
       RELEASE_ENABLED: ${{ vars.RELEASE_ENABLED }}
+      PUBLISH_ENABLED: ${{ vars.PUBLISH_ENABLED }}
       BUILDER_COMMIT_SHA: ${{ vars.BUILDER_COMMIT_SHA }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -34,8 +39,20 @@ jobs:
       - name: Install hash-pinned cryptographic libraries
         run: |
           python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r requirements.lock
-      - name: Validate completed run and dispatch publisher; never execute artifacts
+      - name: Verify exact builder attempt and decrypt both SDKs without executing them
+        id: verify
         env:
-          BUILDER_TOKEN: ${{ github.token }}
-          BIN_DISPATCH_TOKEN: ${{ secrets.BIN_DISPATCH_TOKEN }}
-        run: python -m secure_release notify
+          BUILDER_READ_TOKEN: ${{ github.token }}
+          ARTIFACT_DECRYPTION_PRIVATE_KEY: ${{ secrets.ARTIFACT_DECRYPTION_PRIVATE_KEY }}
+          ARTIFACT_ENCRYPTION_PUBLIC_KEY: ${{ secrets.ARTIFACT_ENCRYPTION_PUBLIC_KEY }}
+          REQUEST_VERIFY_PUBLIC_KEY: ${{ secrets.REQUEST_VERIFY_PUBLIC_KEY }}
+        run: python -m secure_release verify
+      - name: Publish exact verified files directly to vcpkg-bin
+        env:
+          BUILDER_READ_TOKEN: ${{ github.token }}
+          STAGING_DIGEST: ${{ steps.verify.outputs.staging_digest }}
+          PUBLISH_TOKEN: ${{ secrets.BIN_PUBLISH_TOKEN }}
+        run: python -m secure_release publish
+      - name: Remove decrypted publication staging
+        if: always()
+        run: python -m secure_release cleanup

@@ -433,4 +433,6 @@ def diagnostics():
 
 
 def cleanup():
-    process.remove_tree(Path(env("RUNNER_TEMP")) / "encrypted-release-private")
+    temporary = Path(env("RUNNER_TEMP"))
+    process.remove_tree(temporary / "encrypted-release-private")
+    process.remove_tree(temporary / "verified-release")
