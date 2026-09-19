@@ -218,6 +218,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn("missing_library=", text)
         self.assertIn("undefined_symbol=", text)
         self.assertIn("multiple_symbol=", text)
+        self.assertIn("freerdp_log=", text)
         self.assertNotIn("upload-artifact", text)
 
     def test_lfc_ui_static_freerdp_workflow_is_relocated_and_static(self):
