@@ -271,9 +271,23 @@ jobs:
                       if lib not in libraries:
                           libraries.append(lib)
                   if libraries:
+                      details.append("failed_library_count=" + str(len(libraries)))
                       details.append(
                           "failed_link_libraries_tail=" + ",".join(libraries[-20:])
                       )
+                      for label, candidates in (
+                          ("libusb", ("usb-1.0", "libusb-1.0")),
+                          ("udev", ("udev",)),
+                          ("freerdp_client", ("freerdp-client3", "freerdp-client")),
+                      ):
+                          positions = [
+                              index for index, value in enumerate(libraries)
+                              if value in candidates
+                          ]
+                          details.append(
+                              "failed_" + label + "_index=" +
+                              (str(positions[-1]) if positions else "absent")
+                          )
               if recent:
                   log_name = recent[0].name
                   if re.fullmatch(r"[A-Za-z0-9_.+~-]{1,120}", log_name):

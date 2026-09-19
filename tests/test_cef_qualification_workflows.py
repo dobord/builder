@@ -255,6 +255,10 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn("failed_outputs=", text)
         self.assertIn("failed_link_output=", text)
         self.assertIn("failed_link_libraries_tail=", text)
+        self.assertIn("failed_library_count=", text)
+        self.assertIn("failed_libusb_index=", text)
+        self.assertIn("failed_udev_index=", text)
+        self.assertIn("failed_freerdp_client_index=", text)
         self.assertIn("replay_text[failed[-1]:]", text)
         self.assertNotIn("upload-artifact", text)
 
