@@ -427,51 +427,54 @@ def main() -> None:
         )
 
         stage = "lfc-ui-freerdp-cef-consumer"
-        proxy_source = root / "lfc-ui-freerdp-cef-source"
-        proxy_source.mkdir()
         canonical_proxy_example = (
             lfc_ui / "examples/freerdp_proxy_web_engine_view_cef.cpp"
         )
-        if not canonical_proxy_example.is_file():
+        canonical_graphics_args = (
+            lfc_ui / "examples/freerdp_graphics_mode_args.hpp"
+        )
+        if not canonical_proxy_example.is_file() or not canonical_graphics_args.is_file():
             raise ValueError("Pinned lfc-ui lacks the canonical FreeRDP/CEF example")
-        summary["lfc_ui_freerdp_cef_example_source_sha256"] = crypto.digest(
-            canonical_proxy_example
+
+        proxy_source = (
+            consumer_sdk / "installed" / TRIPLET
+            / "share/lfc-ui/examples/freerdp-proxy-cef"
         )
-        shutil.copy2(canonical_proxy_example, proxy_source / canonical_proxy_example.name)
-        shutil.copy2(
-            lfc_ui / "examples/freerdp_graphics_mode_args.hpp",
-            proxy_source / "freerdp_graphics_mode_args.hpp",
+        installed_proxy_example = (
+            proxy_source / "freerdp_proxy_web_engine_view_cef.cpp"
         )
-        (proxy_source / "CMakeLists.txt").write_text(
-            """cmake_minimum_required(VERSION 3.32)
-project(lfc_ui_freerdp_cef_qualification LANGUAGES C CXX)
-set(CMAKE_CXX_STANDARD 23)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-find_package(lfc-ui CONFIG REQUIRED COMPONENTS WebEngine)
-foreach(required_target IN ITEMS
-    lfc::ui
-    lfc::ui-webengine
-    CEF::static
-    CEF::cpp
-    freerdp
-    freerdp-client
-    freerdp-server
-    freerdp-server-proxy
-    freerdp-shadow)
-  if(NOT TARGET ${required_target})
-    message(FATAL_ERROR "Missing final SDK target: ${required_target}")
-  endif()
-endforeach()
-add_executable(freerdp_proxy_web_engine_view_cef
-    freerdp_proxy_web_engine_view_cef.cpp)
-target_link_libraries(freerdp_proxy_web_engine_view_cef PRIVATE
-    lfc::ui-webengine)
-target_link_options(freerdp_proxy_web_engine_view_cef PRIVATE
-    -static-libstdc++ -static-libgcc)
-cef_static_deploy_resources(freerdp_proxy_web_engine_view_cef)
-""",
-            encoding="utf-8",
-        )
+        installed_graphics_args = proxy_source / "freerdp_graphics_mode_args.hpp"
+        installed_project = proxy_source / "CMakeLists.txt"
+        for required in (
+            installed_proxy_example, installed_graphics_args, installed_project
+        ):
+            if not required.is_file() or required.is_symlink():
+                raise RuntimeError(
+                    "Final SDK is missing the installed canonical FreeRDP/CEF example"
+                )
+        source_sha = crypto.digest(canonical_proxy_example)
+        if crypto.digest(installed_proxy_example) != source_sha:
+            raise RuntimeError(
+                "Installed FreeRDP/CEF example differs from the pinned lfc-ui source"
+            )
+        if crypto.digest(installed_graphics_args) != crypto.digest(canonical_graphics_args):
+            raise RuntimeError(
+                "Installed FreeRDP/CEF helper differs from the pinned lfc-ui source"
+            )
+        project_text = installed_project.read_text(encoding="utf-8")
+        for required_text in (
+            "find_package(lfc-ui CONFIG REQUIRED COMPONENTS WebEngine)",
+            "freerdp-server-proxy",
+            "target_link_libraries(freerdp_proxy_web_engine_view_cef PRIVATE",
+            "lfc::ui-webengine",
+            "cef_static_deploy_resources(freerdp_proxy_web_engine_view_cef)",
+        ):
+            if required_text not in project_text:
+                raise RuntimeError(
+                    "Installed FreeRDP/CEF example project lost its static SDK contract"
+                )
+        summary["lfc_ui_freerdp_cef_example_source_sha256"] = source_sha
+        summary["lfc_ui_freerdp_cef_installed_example_verified"] = True
         proxy_build = root / "lfc-ui-freerdp-cef-build"
         proxy_configure = build_support.consumer_configure_command(
             proxy_source, proxy_build, consumer_sdk, TRIPLET
