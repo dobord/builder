@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/vcpkg
-          ref: 0dc4c581aef8c06a7f7a570b2be93e91072f6fcf
+          ref: a6adaa2ff68841d932595d4519bd202021dfbd99
           path: private-vcpkg
           token: ${{ secrets.SOURCE_READ_TOKEN }}
           persist-credentials: false
@@ -45,7 +45,7 @@ jobs:
         run: |
           set -euo pipefail
           upstream="$GITHUB_WORKSPACE/private-vcpkg/.freerdp-diag-upstream"
-          test "$(git -C private-vcpkg rev-parse HEAD)" = "0dc4c581aef8c06a7f7a570b2be93e91072f6fcf"
+          test "$(git -C private-vcpkg rev-parse HEAD)" = "a6adaa2ff68841d932595d4519bd202021dfbd99"
           bash "$upstream/bootstrap-vcpkg.sh" -disableMetrics >"$RUNNER_TEMP/freerdp-bootstrap.log" 2>&1
           set +e
           "$upstream/vcpkg" install 'freerdp[client,ffmpeg,proxy,server,urbdrc,winpr-tools,x11]'             --triplet=x64-linux-static-release             --host-triplet=x64-linux-static-release             "--overlay-ports=$GITHUB_WORKSPACE/private-vcpkg/ports"             "--overlay-triplets=$GITHUB_WORKSPACE/private-vcpkg/triplets"             "--x-install-root=$RUNNER_TEMP/freerdp-installed"             --binarysource=clear >"$RUNNER_TEMP/freerdp-install.log" 2>&1
