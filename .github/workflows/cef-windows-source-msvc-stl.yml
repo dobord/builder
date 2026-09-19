@@ -8,7 +8,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: cef-windows-msvc-stl-source-build
+  group: cef-windows-msvc-stl-source-build-28c00c60
   cancel-in-progress: true
 jobs:
   windows:
@@ -21,13 +21,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/cef
-          ref: a7c1b48415a69b095aa329b1cad443948fad4c82
+          ref: 28c00c60b52fdb9d5fefc34f8ae8484aa3e7ff11
           path: private-cef
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/vcpkg
-          ref: 0dc4c581aef8c06a7f7a570b2be93e91072f6fcf
+          ref: 57d5564b8e4aabd707f5b69a41153e67c68e6ebb
           path: private-vcpkg
           token: ${{ secrets.SOURCE_READ_TOKEN }}
           persist-credentials: false
@@ -45,8 +45,8 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          if ((git -C private-cef rev-parse HEAD) -ne 'a7c1b48415a69b095aa329b1cad443948fad4c82') { throw 'CEF revision mismatch' }
-          if ((git -C private-vcpkg rev-parse HEAD) -ne '0dc4c581aef8c06a7f7a570b2be93e91072f6fcf') { throw 'vcpkg revision mismatch' }
+          if ((git -C private-cef rev-parse HEAD) -ne '28c00c60b52fdb9d5fefc34f8ae8484aa3e7ff11') { throw 'CEF revision mismatch' }
+          if ((git -C private-vcpkg rev-parse HEAD) -ne '57d5564b8e4aabd707f5b69a41153e67c68e6ebb') { throw 'vcpkg revision mismatch' }
           if ((git -C private-lfc-ui rev-parse HEAD) -ne '85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5') { throw 'lfc-ui revision mismatch' }
           python -I -m unittest discover -s private-cef/vcpkg/static/tests -p test_platform_source.py -v
           Remove-Item -LiteralPath "$env:GITHUB_WORKSPACE/private-vcpkg/.git" -Recurse -Force
@@ -61,7 +61,7 @@ jobs:
       - name: Build and runtime-verify static CEF from source
         shell: pwsh
         env:
-          GITHUB_SHA: a7c1b48415a69b095aa329b1cad443948fad4c82
+          GITHUB_SHA: 28c00c60b52fdb9d5fefc34f8ae8484aa3e7ff11
           CEF_STATIC_BUILD_TIMEOUT_SECONDS: '18000'
           CEF_STATIC_JOBS: '4'
         run: |

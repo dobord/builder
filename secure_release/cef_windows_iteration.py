@@ -22,8 +22,8 @@ from . import cef_cache, cef_contract, crypto, safeio
 from .github import Client
 from .protocol import BUILDER, check_run
 
-VCPKG = "0dc4c581aef8c06a7f7a570b2be93e91072f6fcf"
-CEF = "a7c1b48415a69b095aa329b1cad443948fad4c82"
+VCPKG = "57d5564b8e4aabd707f5b69a41153e67c68e6ebb"
+CEF = "28c00c60b52fdb9d5fefc34f8ae8484aa3e7ff11"
 TRIPLET = "x64-windows-static-release"
 WORKFLOW = "cef-windows-engine-iteration.yml"
 
