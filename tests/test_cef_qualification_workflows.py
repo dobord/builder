@@ -214,6 +214,10 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn('"WITH_CAIRO"', text)
         self.assertIn('key.lower() + "=" + match.group(1).lower()', text)
         self.assertIn("cmake_source=", text)
+        self.assertIn("link_target=", text)
+        self.assertIn("missing_library=", text)
+        self.assertIn("undefined_symbol=", text)
+        self.assertIn("multiple_symbol=", text)
         self.assertNotIn("upload-artifact", text)
 
     def test_lfc_ui_static_freerdp_workflow_is_relocated_and_static(self):
