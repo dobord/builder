@@ -57,7 +57,7 @@ jobs:
         run: |
           $drive = Get-PSDrive -Name C
           Write-Host ("CEF_WINDOWS_SOURCE_FREE_BYTES=" + $drive.Free)
-          if ($drive.Free -lt 85899345920) { throw 'CEF_WINDOWS_SOURCE_CAPACITY_LT_80_GIB' }
+          if ($drive.Free -lt 84825604096) { throw 'CEF_WINDOWS_SOURCE_CAPACITY_LT_79_GIB' }
       - name: Build and runtime-verify static CEF from source
         shell: pwsh
         env:

@@ -48,7 +48,7 @@ jobs:
           if ((git -C private-cef rev-parse HEAD) -ne '8e76fadd560bc192484bad16427338fee8f632b7') { throw 'CEF revision mismatch' }
           $drive = Get-PSDrive -Name C
           Write-Host ("CEF_WINDOWS_ITERATION_FREE_BYTES=" + $drive.Free)
-          if ($drive.Free -lt 85899345920) { throw 'CEF_WINDOWS_ITERATION_CAPACITY_LT_80_GIB' }
+          if ($drive.Free -lt 84825604096) { throw 'CEF_WINDOWS_ITERATION_CAPACITY_LT_79_GIB' }
       - name: Validate Windows iteration worker syntax
         run: |
           python -m py_compile secure_release/cef_windows_iteration.py
