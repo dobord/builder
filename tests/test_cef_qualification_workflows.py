@@ -218,7 +218,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
 
     def test_freerdp_static_diagnostic_uses_deterministic_audio_revision(self):
         text = (ROOT / ".github/workflows/freerdp-static-diagnostic.yml").read_text()
-        self.assertIn("ref: 5a07233624274048619e5ce904f537946978ee95", text)
+        self.assertIn("ref: 0dc4c581aef8c06a7f7a570b2be93e91072f6fcf", text)
         self.assertIn("FREERDP_STATIC_CONFIGURE_FAILURE package=", text)
         self.assertIn(" category=", text)
         self.assertIn('"WITH_CAIRO"', text)

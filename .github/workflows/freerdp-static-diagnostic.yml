@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/vcpkg
-          ref: 5a07233624274048619e5ce904f537946978ee95
+          ref: 0dc4c581aef8c06a7f7a570b2be93e91072f6fcf
           path: private-vcpkg
           token: ${{ secrets.SOURCE_READ_TOKEN }}
           persist-credentials: false
@@ -45,15 +45,19 @@ jobs:
         run: |
           set -euo pipefail
           upstream="$GITHUB_WORKSPACE/private-vcpkg/.freerdp-diag-upstream"
-          test "$(git -C private-vcpkg rev-parse HEAD)" = "5a07233624274048619e5ce904f537946978ee95"
+          test "$(git -C private-vcpkg rev-parse HEAD)" = "0dc4c581aef8c06a7f7a570b2be93e91072f6fcf"
           bash "$upstream/bootstrap-vcpkg.sh" -disableMetrics >"$RUNNER_TEMP/freerdp-bootstrap.log" 2>&1
           set +e
           "$upstream/vcpkg" install 'freerdp[client,ffmpeg,proxy,server,urbdrc,winpr-tools,x11]'             --triplet=x64-linux-static-release             --host-triplet=x64-linux-static-release             "--overlay-ports=$GITHUB_WORKSPACE/private-vcpkg/ports"             "--overlay-triplets=$GITHUB_WORKSPACE/private-vcpkg/triplets"             "--x-install-root=$RUNNER_TEMP/freerdp-installed"             --binarysource=clear >"$RUNNER_TEMP/freerdp-install.log" 2>&1
           rc=$?
           set -e
           replay="$RUNNER_TEMP/freerdp-terminal-ninja.log"
-          builddir="$upstream/buildtrees/freerdp/x64-linux-static-release"
-          if [ "$rc" -ne 0 ] && [ -f "$builddir/build.ninja" ]; then
+          buildninja=""
+          if [ "$rc" -ne 0 ] && [ -d "$upstream/buildtrees/freerdp" ]; then
+            buildninja="$(find "$upstream/buildtrees/freerdp" -maxdepth 3 -type f -name build.ninja -printf '%T@ %p\n' | sort -nr | head -n1 | cut -d' ' -f2-)"
+          fi
+          if [ -n "$buildninja" ] && [ -f "$buildninja" ]; then
+            builddir="$(dirname "$buildninja")"
             set +e
             timeout 900 ninja -C "$builddir" -v -j1 >"$replay" 2>&1
             replay_rc=$?
