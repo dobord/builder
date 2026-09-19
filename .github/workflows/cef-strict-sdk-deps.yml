@@ -32,7 +32,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/vcpkg
-          ref: 7f94dfb9b68df553983e5fa1533c9944ba7e1d03
+          ref: 0dc4c581aef8c06a7f7a570b2be93e91072f6fcf
           path: private-vcpkg
           token: ${{ secrets.SOURCE_READ_TOKEN }}
           persist-credentials: false
@@ -60,7 +60,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C private-vcpkg rev-parse HEAD)" = "7f94dfb9b68df553983e5fa1533c9944ba7e1d03"
+          test "$(git -C private-vcpkg rev-parse HEAD)" = "0dc4c581aef8c06a7f7a570b2be93e91072f6fcf"
           test "$(git -C private-vcpkg/.sdk-upstream rev-parse HEAD)" = "9e593bb18ea69cc5095e012465dcd675a822ed0d"
           test "$(git -C private-lockfreecoro rev-parse HEAD)" = "24038aed3a0be642adb60e71bd994ae8f0d90140"
           test "$(git -C private-lfc-ui rev-parse HEAD)" = "85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5"
