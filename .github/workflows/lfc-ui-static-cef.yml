@@ -8,7 +8,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: cef-strict-release-import-rejection
+  group: cef-strict-release-import-rejection-18567956
   cancel-in-progress: true
 jobs:
   windows:
@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/vcpkg
-          ref: e9c09478ea2ea57e65688d3477de04f774bd39d4
+          ref: 18567956f7595df7936881b93c9d12028c204dc7
           path: private-vcpkg
           token: ${{ secrets.SOURCE_READ_TOKEN }}
           persist-credentials: false
@@ -34,7 +34,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/cef
-          ref: f47b91a00003f9a230f9182fc61d1d8739a720c1
+          ref: ff9276b9de9361ddeaa5b53589e79e17c254d2f4
           path: private-cef
           persist-credentials: false
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
@@ -50,7 +50,7 @@ jobs:
           lock = json.loads(Path("private-cef/vcpkg/integration/release.lock.json").read_text())
           contract = {
               "schema": 1,
-              "recipe_commit": "f47b91a00003f9a230f9182fc61d1d8739a720c1",
+              "recipe_commit": "ff9276b9de9361ddeaa5b53589e79e17c254d2f4",
               "profile": "static-third-party",
               "mode": "release-import",
               "triplet": "x64-windows-static-release",

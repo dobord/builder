@@ -11,7 +11,7 @@ permissions:
   contents: read
   actions: read
 concurrency:
-  group: cef-windows-engine-iteration-5556ced2
+  group: cef-windows-engine-iteration-18567956
   cancel-in-progress: true
 jobs:
   windows:
@@ -24,14 +24,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/vcpkg
-          ref: e9c09478ea2ea57e65688d3477de04f774bd39d4
+          ref: 18567956f7595df7936881b93c9d12028c204dc7
           path: private-vcpkg
           token: ${{ secrets.SOURCE_READ_TOKEN }}
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/cef
-          ref: f47b91a00003f9a230f9182fc61d1d8739a720c1
+          ref: ff9276b9de9361ddeaa5b53589e79e17c254d2f4
           path: private-cef
           persist-credentials: false
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
@@ -44,8 +44,8 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          if ((git -C private-vcpkg rev-parse HEAD) -ne 'e9c09478ea2ea57e65688d3477de04f774bd39d4') { throw 'vcpkg revision mismatch' }
-          if ((git -C private-cef rev-parse HEAD) -ne 'f47b91a00003f9a230f9182fc61d1d8739a720c1') { throw 'CEF revision mismatch' }
+          if ((git -C private-vcpkg rev-parse HEAD) -ne '18567956f7595df7936881b93c9d12028c204dc7') { throw 'vcpkg revision mismatch' }
+          if ((git -C private-cef rev-parse HEAD) -ne 'ff9276b9de9361ddeaa5b53589e79e17c254d2f4') { throw 'CEF revision mismatch' }
           $drive = Get-PSDrive -Name C
           Write-Host ("CEF_WINDOWS_ITERATION_FREE_BYTES=" + $drive.Free)
           if ($drive.Free -lt 84825604096) { throw 'CEF_WINDOWS_ITERATION_CAPACITY_LT_79_GIB' }
