@@ -21,10 +21,10 @@ import time
 from . import build_support, cef_build, cef_contract, crypto, safeio
 from . import cef_strict_iteration
 
-ENGINE_VCPKG = "ba7efc391ec56c717ae4bfda839286b52eca1559"
-SDK_VCPKG = "ba7efc391ec56c717ae4bfda839286b52eca1559"
+ENGINE_VCPKG = "1669f647f46fc6eaa9f73fcbb0ff79857b780071"
+SDK_VCPKG = "1669f647f46fc6eaa9f73fcbb0ff79857b780071"
 UPSTREAM = "9e593bb18ea69cc5095e012465dcd675a822ed0d"
-CEF = "28c00c60b52fdb9d5fefc34f8ae8484aa3e7ff11"
+CEF = "c7eb018bc78a7d278df6ed53ff93544ea2cdb3e7"
 LOCKFREECORO = "24038aed3a0be642adb60e71bd994ae8f0d90140"
 LFC_UI = "85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5"
 TRIPLET = "x64-linux-static-release"
