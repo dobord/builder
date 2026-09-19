@@ -51,6 +51,15 @@ jobs:
           "$upstream/vcpkg" install 'freerdp[client,ffmpeg,proxy,server,urbdrc,winpr-tools,x11]'             --triplet=x64-linux-static-release             --host-triplet=x64-linux-static-release             "--overlay-ports=$GITHUB_WORKSPACE/private-vcpkg/ports"             "--overlay-triplets=$GITHUB_WORKSPACE/private-vcpkg/triplets"             "--x-install-root=$RUNNER_TEMP/freerdp-installed"             --binarysource=clear >"$RUNNER_TEMP/freerdp-install.log" 2>&1
           rc=$?
           set -e
+          replay="$RUNNER_TEMP/freerdp-terminal-ninja.log"
+          builddir="$upstream/buildtrees/freerdp/x64-linux-static-release"
+          if [ "$rc" -ne 0 ] && [ -f "$builddir/build.ninja" ]; then
+            set +e
+            timeout 900 ninja -C "$builddir" -v -j1 >"$replay" 2>&1
+            replay_rc=$?
+            set -e
+            echo "FREERDP_NINJA_REPLAY_RC=$replay_rc"
+          fi
           if [ "$rc" -eq 0 ]; then
             echo "FREERDP_STATIC_CONFIGURE_QUALIFIED"
             exit 0
@@ -62,6 +71,17 @@ jobs:
           buildtrees = workspace / "private-vcpkg/.freerdp-diag-upstream/buildtrees"
           root = buildtrees / "freerdp"
           install_text = (runner / "freerdp-install.log").read_text(errors="replace")[-1048576:]
+          replay_path = runner / "freerdp-terminal-ninja.log"
+          replay_text = (
+              replay_path.read_text(errors="replace")[-1048576:]
+              if replay_path.is_file() and replay_path.stat().st_size <= 64 * 1024**2
+              else ""
+          )
+          if replay_text and not re.search(
+              r"(?:^|\n)FAILED:|undefined reference|collect2: error|ld(?:\.lld)?: error|fatal error|error:",
+              replay_text, re.I,
+          ):
+              replay_text = ""
           recent = []
           if root.is_dir():
               recent = sorted(
@@ -110,7 +130,7 @@ jobs:
           # linker and dependency identity must come only from FreeRDP's own
           # terminal logs so a failed transitive package or configure probe
           # cannot contaminate the reported static edge.
-          text = reported_text or freerdp_text or install_text
+          text = replay_text or reported_text or freerdp_text or install_text
           package = "unknown"
           for pattern in (
               r"error: building ([a-z0-9][a-z0-9+_.-]*):",
@@ -195,6 +215,8 @@ jobs:
                   elif re.search(r"CMake Error", text):
                       category = "cmake-error"
           details = ["stage=" + build_stage]
+          if replay_text:
+              details.append("ninja_replay=yes")
           if reported_names:
               details.append("reported_logs=" + ",".join(reported_names[-6:]))
           if reported_files:

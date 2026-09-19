@@ -27,6 +27,8 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn("preflight_stage=", text)
         self.assertIn("missing_library=", text)
         self.assertIn("runtime_module=", text)
+        self.assertIn("CEF_GN_FAILURE category=", text)
+        self.assertIn("uncaptured-module", text)
 
     def test_production_build_accepts_trusted_large_disk_runner_labels(self):
         text=(ROOT/'.github/workflows/build-release.yml').read_text()
@@ -166,6 +168,8 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn("classify_private_failure", worker)
         self.assertIn('"failure_category"', worker)
         self.assertIn('"failure_token"', worker)
+        self.assertIn("header_patterns", worker)
+        self.assertIn('return "missing-header", name', worker)
         lock = (ROOT / "ci/cef-windows-engine-lock.json").read_text()
         self.assertIn('"platform": "windows"', lock)
         self.assertIn('"vcpkg_commit": "7f94dfb9b68df553983e5fa1533c9944ba7e1d03"', lock)
@@ -239,6 +243,8 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn("freerdp_log=", text)
         self.assertIn("diagnostic_text = text", text)
         self.assertIn("diagnostic_text = text[max(boundaries):]", text)
+        self.assertIn("freerdp-terminal-ninja.log", text)
+        self.assertIn("ninja_replay=yes", text)
         self.assertNotIn("upload-artifact", text)
 
     def test_lfc_ui_static_freerdp_workflow_is_relocated_and_static(self):

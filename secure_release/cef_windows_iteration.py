@@ -77,6 +77,17 @@ def classify_private_failure(primary: Path, logs: Path) -> tuple[str, str]:
         if total >= 8 * 1024**2:
             break
     text = "\n".join(pieces)
+    header_patterns = (
+        r"C1083:\s*Cannot open include file:\s*['\"]([^'\"]+)['\"]",
+        r"(?:fatal error:\s*)?['\"]([^'\"]+\.(?:h|hpp|inc))['\"]\s*(?:file not found|: No such file or directory)",
+    )
+    for pattern in header_patterns:
+        match = re.search(pattern, text, re.I)
+        if match:
+            name = match.group(1).replace("\\", "/").rsplit("/", 1)[-1].lower()
+            if re.fullmatch(r"[a-z0-9_.+-]{1,120}", name):
+                return "missing-header", name
+
     checks = (
         ("ctad-warning", r"\[-Werror,(-Wctad-maybe-unsupported)\]"),
         ("clang-warning", r"\[-Werror,(-W[A-Za-z0-9_.+-]+)\]"),

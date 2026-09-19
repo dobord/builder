@@ -206,5 +206,20 @@ jobs:
           rc=$?
           set -e
           cat "$RUNNER_TEMP/cef-gn-evidence/gn-qualification.json"
-          test "$rc" -eq 0
+          if [ "$rc" -ne 0 ]; then
+            python - <<'PY'
+          import os, pathlib, re
+          log = pathlib.Path(os.environ["RUNNER_TEMP"]) / "cef-gn-evidence/cef-gn/gn-gen.log"
+          text = log.read_text(errors="replace")[-1048576:] if log.is_file() else ""
+          module = re.search(
+              r"GN requested an uncaptured target module:\s+([A-Za-z0-9+_.-]+)",
+              text,
+          )
+          if module and re.fullmatch(r"[A-Za-z0-9+_.-]+", module.group(1)):
+              print("CEF_GN_FAILURE category=uncaptured-module module=" + module.group(1))
+          else:
+              print("CEF_GN_FAILURE category=unknown")
+          PY
+            exit "$rc"
+          fi
           python -c 'import json,os,pathlib; v=json.loads((pathlib.Path(os.environ["RUNNER_TEMP"])/"cef-gn-evidence/gn-qualification.json").read_text()); assert v.get("status")=="success" and v.get("gn_graph_qualified") is True and v.get("engine_link_verified") is False and v.get("engine_runtime_verified") is False; print("STRICT_CEF_GN_GRAPH_QUALIFIED")'

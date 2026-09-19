@@ -52,7 +52,7 @@ jobs:
       - name: Validate Windows iteration worker syntax
         run: |
           python -m py_compile secure_release/cef_windows_iteration.py
-      - name: Run exact Windows CEF compilation slice
+      - name: Run exact Windows CEF compilation slice with bounded header identity
         id: iteration
         env:
           BUILDER_INPUT_PRIVATE_KEY: ${{ secrets.BUILDER_INPUT_PRIVATE_KEY }}
