@@ -465,8 +465,10 @@ def main() -> None:
         for required_text in (
             "find_package(lfc-ui CONFIG REQUIRED COMPONENTS WebEngine)",
             "freerdp-server-proxy",
+            "freerdp-shadow",
             "target_link_libraries(freerdp_proxy_web_engine_view_cef PRIVATE",
             "lfc::ui-webengine",
+            "-static-libstdc++ -static-libgcc",
             "cef_static_deploy_resources(freerdp_proxy_web_engine_view_cef)",
         ):
             if required_text not in project_text:
