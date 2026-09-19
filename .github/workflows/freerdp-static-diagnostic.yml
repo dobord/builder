@@ -64,9 +64,9 @@ jobs:
           install_text = (runner / "freerdp-install.log").read_text(errors="replace")[-1048576:]
           pieces = [install_text]
           recent = []
-          if buildtrees.is_dir():
+          if root.is_dir():
               recent = sorted(
-                  [p for p in buildtrees.rglob("*") if p.is_file() and
+                  [p for p in root.rglob("*") if p.is_file() and
                    (p.suffix in {".log", ".txt"} or "config" in p.name.lower())],
                   key=lambda p: p.stat().st_mtime,
                   reverse=True,
@@ -145,6 +145,10 @@ jobs:
                       category = "cmake-error"
           details = ["stage=" + build_stage]
           if category == "link-error":
+              if recent:
+                  log_name = recent[0].name
+                  if re.fullmatch(r"[A-Za-z0-9_.+~-]{1,120}", log_name):
+                      details.append("freerdp_log=" + log_name)
               target = re.search(r"(?:^|\n)FAILED:\s+([^\s\r\n]+)", text, re.I)
               if target:
                   name = pathlib.PurePosixPath(target.group(1).replace("\\", "/")).name
