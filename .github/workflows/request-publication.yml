@@ -16,8 +16,7 @@ jobs:
       github.event.workflow_run.event == 'workflow_dispatch' &&
       github.event.workflow_run.head_repository.id == 1372874997 &&
       github.event.workflow_run.head_sha == vars.BUILDER_COMMIT_SHA &&
-      vars.RELEASE_ENABLED == 'true' &&
-      vars.PUBLISH_ENABLED == 'true'
+      vars.RELEASE_ENABLED == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 75
     permissions:
@@ -48,6 +47,7 @@ jobs:
           REQUEST_VERIFY_PUBLIC_KEY: ${{ secrets.REQUEST_VERIFY_PUBLIC_KEY }}
         run: python -m secure_release verify
       - name: Publish exact verified files directly to vcpkg-bin
+        if: vars.PUBLISH_ENABLED == 'true'
         env:
           BUILDER_READ_TOKEN: ${{ github.token }}
           STAGING_DIGEST: ${{ steps.verify.outputs.staging_digest }}

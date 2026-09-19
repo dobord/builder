@@ -14,8 +14,6 @@ from .tasks import event, work
 def _trusted_builder_result() -> tuple[Client, int, int, str]:
     """Revalidate the exact successful Build static SDK attempt from builder."""
     guard(BUILDER, event="workflow_run")
-    if env("PUBLISH_ENABLED") != "true":
-        raise ValueError("publication disabled")
     run = event()["workflow_run"]
     approved = sha(env("BUILDER_COMMIT_SHA"))
     attempt = number(run["run_attempt"])
@@ -144,6 +142,8 @@ def verify_result():
 
 
 def publish_release():
+    if env("PUBLISH_ENABLED") != "true":
+        raise ValueError("publication disabled")
     _, run_id, attempt, approved = _trusted_builder_result()
     root = Path(env("STAGING_DIR"))
     sums = root / "SHA256SUMS"

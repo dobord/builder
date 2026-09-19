@@ -109,6 +109,9 @@ class PublicValidationTests(unittest.TestCase):
         self.assertIn("BIN_PUBLISH_TOKEN", workflow)
         self.assertIn("ARTIFACT_DECRYPTION_PRIVATE_KEY", workflow)
         self.assertIn("steps.verify.outputs.staging_digest", workflow)
+        self.assertIn("if: vars.PUBLISH_ENABLED == 'true'", workflow)
+        job_if = workflow.split("runs-on: ubuntu-24.04", 1)[0]
+        self.assertNotIn("vars.PUBLISH_ENABLED == 'true'", job_if)
         self.assertNotIn("BIN_DISPATCH_TOKEN", workflow)
         self.assertNotIn("upload-artifact", workflow)
         self.assertNotIn("download-artifact", workflow)
@@ -118,6 +121,10 @@ class PublicValidationTests(unittest.TestCase):
         self.assertIn('"target_commitish": bin_main', publisher)
         self.assertNotIn('.dispatch(BIN, "publish.yml"', publisher)
         self.assertNotIn('guard(BIN', publisher)
+        trusted = publisher.split("def verify_result()", 1)[0]
+        self.assertNotIn("publication disabled", trusted)
+        publish_body = publisher.split("def publish_release()", 1)[1]
+        self.assertIn("publication disabled", publish_body)
         self.assertNotIn('"target_commitish": sha(env("GITHUB_SHA"))', publisher)
 
         self.assertIn('secret(BUILDER, "ARTIFACT_DECRYPTION_PRIVATE_KEY"', bootstrap)
