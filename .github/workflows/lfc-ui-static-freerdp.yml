@@ -80,38 +80,129 @@ jobs:
           if [ "$rc" -ne 0 ]; then
             python - <<'PY'
           import os, pathlib, re
-          text = (pathlib.Path(os.environ["RUNNER_TEMP"]) / "lfc-ui-freerdp-install.log").read_text(errors="replace")
+          runner = pathlib.Path(os.environ["RUNNER_TEMP"])
+          workspace = pathlib.Path(os.environ["GITHUB_WORKSPACE"])
+          install_text = (runner / "lfc-ui-freerdp-install.log").read_text(errors="replace")
+          buildtrees = workspace / "private-vcpkg/.freerdp-upstream/buildtrees"
+          root = buildtrees / "lfc-ui"
+
           package = "unknown"
           for pattern in (
               r"error: building ([a-z0-9][a-z0-9+_.-]*):x64-linux-static-release",
               r"([a-z0-9][a-z0-9+_.-]*):x64-linux-static-release failed",
               r"BUILD_FAILED[^\n]*?([a-z0-9][a-z0-9+_.-]+):x64-linux-static-release",
           ):
-              match = re.search(pattern, text, re.I)
+              match = re.search(pattern, install_text, re.I)
               if match:
                   package = match.group(1).lower()
                   break
-          reason = "unknown"
-          missing = re.search(
-              r'Could not find a package configuration file provided by\s+["\']?([A-Za-z0-9+_.-]+)',
-              text, re.I,
+
+          reported_names = []
+          for name in re.findall(r"([A-Za-z0-9_.+~-]+\.log)", install_text):
+              if name not in reported_names:
+                  reported_names.append(name)
+          terminal_files = []
+          if root.is_dir():
+              for name in reported_names[-12:]:
+                  matches = [
+                      p for p in root.rglob(name)
+                      if p.is_file() and not any(
+                          part in {"CMakeScratch", "CMakeTmp"}
+                          or part.startswith("TryCompile")
+                          for part in p.parts
+                      )
+                  ]
+                  if matches:
+                      terminal_files.append(max(matches, key=lambda p: p.stat().st_mtime))
+              if not terminal_files:
+                  terminal_files = sorted(
+                      [p for p in root.rglob("*.log")
+                       if p.is_file() and p.stat().st_size <= 16 * 1024**2
+                       and not any(
+                           part in {"CMakeScratch", "CMakeTmp"}
+                           or part.startswith("TryCompile")
+                           for part in p.parts
+                       )],
+                      key=lambda p: p.stat().st_mtime,
+                      reverse=True,
+                  )[:12]
+          terminal_text = "\n".join(
+              p.read_text(errors="replace")[-524288:] for p in terminal_files
           )
-          if missing and re.fullmatch(r"[A-Za-z0-9+_.-]+", missing.group(1)):
-              reason = "missing-cmake-package-" + missing.group(1).lower()
-          elif re.search(r"(patch failed|does not apply|corrupt patch)", text, re.I):
-              reason = "patch"
-          elif re.search(r"(failed to download|download failed|curl.*error)", text, re.I):
-              reason = "download"
-          elif re.search(r"(configuring .* failed|cmake error)", text, re.I):
-              reason = "configure"
-          elif re.search(r"(build failed|ninja: build stopped|make: \*\*\*)", text, re.I):
-              reason = "build"
-          if not re.fullmatch(r"[a-z0-9][a-z0-9+_.-]*|unknown", package):
-              package = "unknown"
-          if not re.fullmatch(r"[a-z0-9+_.-]+", reason):
-              reason = "unknown"
+          diagnostic_text = terminal_text or install_text[-1048576:]
+
+          category = "unknown"
           details = []
-          ffmpeg_root = pathlib.Path(os.environ["GITHUB_WORKSPACE"]) / "private-vcpkg/.freerdp-upstream/buildtrees/ffmpeg"
+          target_missing = re.search(
+              r'(?:link interface of target|Target)\s+"([^"]+)"[\s\S]{0,320}?'
+              r'([A-Za-z0-9_.+-]+::[A-Za-z0-9_.+-]+)[\s\S]{0,220}?target was not found',
+              diagnostic_text, re.I,
+          )
+          pkgconfig_missing = re.search(
+              r"Package\s+['\"]?([A-Za-z0-9+_.-]+)['\"]?,\s+required by[^\n]*not found",
+              diagnostic_text, re.I,
+          )
+          cmake_package = re.search(
+              r'Could not find a package configuration file provided by\s+["\']?([A-Za-z0-9+_.-]+)',
+              diagnostic_text, re.I,
+          )
+          missing_path = re.search(
+              r'(?:includes non-existent path|references the file)\s*["\']([^"\'\r\n]+)',
+              diagnostic_text, re.I,
+          )
+          if re.search(r"(patch failed|does not apply|corrupt patch)", install_text, re.I):
+              category = "patch"
+          elif target_missing:
+              category = "missing-target"
+              owner = target_missing.group(1)
+              target = target_missing.group(2)
+              if re.fullmatch(r"[A-Za-z0-9_.+-]{1,120}", owner):
+                  details.append("owner_target=" + owner)
+              if re.fullmatch(r"[A-Za-z0-9_.:+-]{1,160}", target):
+                  details.append("missing_target=" + target)
+          elif pkgconfig_missing:
+              category = "missing-pkgconfig"
+              token = pkgconfig_missing.group(1).lower()
+              if re.fullmatch(r"[a-z0-9+_.-]+", token):
+                  details.append("missing_pkgconfig=" + token)
+          elif cmake_package:
+              category = "missing-cmake-package"
+              token = cmake_package.group(1).lower()
+              if re.fullmatch(r"[a-z0-9+_.-]+", token):
+                  details.append("missing_package=" + token)
+          elif missing_path:
+              category = "missing-path"
+              name = pathlib.PurePosixPath(
+                  missing_path.group(1).replace("\\", "/")
+              ).name
+              if re.fullmatch(r"[A-Za-z0-9_.+-]{1,160}", name):
+                  details.append("missing_path=" + name)
+          elif re.search(r"CMake Error", diagnostic_text):
+              category = "cmake-error"
+          elif re.search(r"(FAILED:|ninja: build stopped|undefined reference|collect2: error)", diagnostic_text, re.I):
+              category = "build-error"
+
+          cmake_error = re.search(
+              r"CMake Error at ([^:\r\n]+):(\d+)\s+\(([^)]+)\)",
+              diagnostic_text,
+          )
+          if cmake_error:
+              source = pathlib.PurePosixPath(
+                  cmake_error.group(1).replace("\\", "/")
+              ).name
+              command = cmake_error.group(3)
+              if re.fullmatch(r"[A-Za-z0-9_.+-]{1,120}", source):
+                  details.append("cmake_source=" + source)
+              if re.fullmatch(r"[A-Za-z0-9_.+-]{1,80}", command):
+                  details.append("cmake_command=" + command)
+          if reported_names:
+              details.append("reported_logs=" + ",".join(reported_names[-6:]))
+          if terminal_files:
+              name = terminal_files[0].name
+              if re.fullmatch(r"[A-Za-z0-9_.+~-]{1,120}", name):
+                  details.append("lfcui_terminal_log=" + name)
+
+          ffmpeg_root = buildtrees / "ffmpeg"
           if ffmpeg_root.is_dir():
               candidates = sorted(
                   [p for p in ffmpeg_root.rglob("*.log") if p.is_file()],
@@ -132,15 +223,12 @@ jobs:
                       break
               if token:
                   details.append("ffmpeg_dependency=" + token)
-              for label, pattern in (
-                  ("pkgconfig", r"not found using pkg-config"),
-                  ("compile-test", r"failed to compile"),
-                  ("link-test", r"failed to link"),
-              ):
-                  if re.search(pattern, merged, re.I):
-                      details.append("ffmpeg_reason=" + label)
-                      break
-          print(f"LFC_UI_FREERDP_INSTALL_FAILURE package={package} reason={reason}" + (" " + " ".join(details) if details else ""))
+          if not re.fullmatch(r"[a-z0-9][a-z0-9+_.-]*|unknown", package):
+              package = "unknown"
+          print(
+              f"LFC_UI_FREERDP_INSTALL_FAILURE package={package} category={category}"
+              + (" " + " ".join(details) if details else "")
+          )
           PY
             exit "$rc"
           fi

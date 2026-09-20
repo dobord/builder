@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/vcpkg
-          ref: 39dccd415da14d8051559d66069019475d95787c
+          ref: fdeb98947b5f9aac49b140a81d82607fde933732
           path: private-vcpkg
           token: ${{ secrets.SOURCE_READ_TOKEN }}
           persist-credentials: false
@@ -34,7 +34,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/cef
-          ref: 03abd124ebe3b8a57fb78470a75b5aa3ce064e31
+          ref: 7e79d179fc704222097e77d653c755031f956b00
           path: private-vcpkg/.full-cef
           persist-credentials: false
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
@@ -44,9 +44,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C private-vcpkg rev-parse HEAD)" = "39dccd415da14d8051559d66069019475d95787c"
+          test "$(git -C private-vcpkg rev-parse HEAD)" = "fdeb98947b5f9aac49b140a81d82607fde933732"
           test "$(git -C private-vcpkg/.full-upstream rev-parse HEAD)" = "9e593bb18ea69cc5095e012465dcd675a822ed0d"
-          test "$(git -C private-vcpkg/.full-cef rev-parse HEAD)" = "03abd124ebe3b8a57fb78470a75b5aa3ce064e31"
+          test "$(git -C private-vcpkg/.full-cef rev-parse HEAD)" = "7e79d179fc704222097e77d653c755031f956b00"
       - name: Recover hosted-runner capacity and install native tools
         run: |
           sudo rm -rf /usr/local/lib/android /usr/share/dotnet /usr/local/.ghcup /opt/ghc
@@ -216,6 +216,7 @@ jobs:
               ("header-metadata", r"Header-only module metadata is not uniquely frozen:\s+([A-Za-z0-9+_.-]+)"),
               ("header-base", r"Header-only module lacks its captured base:\s+([A-Za-z0-9+_.-]+)"),
               ("missing-archive", r"Missing or ambiguous static target archive:\s+([A-Za-z0-9+_.-]+)"),
+              ("external-archive", r"GN archive outside target prefix or native build:\s+[^\r\n]*/([A-Za-z0-9_.+-]+\.a)"),
           )
           category = "unknown"
           token = ""
@@ -228,6 +229,10 @@ jobs:
               category = "filter-discard"
           if category == "unknown" and "Expected one captured module" in text:
               category = "module-mode"
+          if category == "unknown" and "Pinned Chromium Clang package revision changed" in text:
+              category = "clang-revision"
+          if category == "unknown" and "Pinned Chromium compiler runtime archive is missing" in text:
+              category = "clang-runtime-missing"
           if category == "unknown" and "No such file or directory" in text:
               category = "missing-path"
               if "unix-print" in text:
