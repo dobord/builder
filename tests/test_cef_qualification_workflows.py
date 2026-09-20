@@ -225,6 +225,16 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertNotIn("upload-artifact", text)
         self.assertNotIn("cat $RUNNER_TEMP", text)
 
+    def test_freerdp_v22_relocated_client_is_pkgconfig_independent(self):
+        text = (ROOT / ".github/workflows/freerdp-relocated-client.yml").read_text()
+        self.assertIn("ref: e2ef567fa720498603d79889936b3a656532c17e", text)
+        self.assertIn("'freerdp[client,urbdrc]'", text)
+        self.assertIn("-DCMAKE_DISABLE_FIND_PACKAGE_PkgConfig=TRUE", text)
+        self.assertIn("FreeRDP::libusb-static", text)
+        self.assertIn("libudev.a;libusb-1.0.a", text)
+        self.assertIn("FREERDP_V22_RELOCATED_CLIENT_QUALIFIED", text)
+        self.assertNotIn("upload-artifact", text)
+
     def test_freerdp_static_diagnostic_uses_deterministic_audio_revision(self):
         text = (ROOT / ".github/workflows/freerdp-static-diagnostic.yml").read_text()
         self.assertIn("ref: c47b1b3cae1b2291b558ec674f61d653614ff637", text)

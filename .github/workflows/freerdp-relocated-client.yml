@@ -1,0 +1,99 @@
+name: FreeRDP relocated static client qualification
+on:
+  push:
+    branches:
+      - feature/cef-static-integration
+    paths:
+      - .github/workflows/freerdp-relocated-client.yml
+permissions:
+  contents: read
+concurrency:
+  group: freerdp-relocated-client-v22
+  cancel-in-progress: true
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: dobord/vcpkg
+          ref: e2ef567fa720498603d79889936b3a656532c17e
+          path: private-vcpkg
+          token: ${{ secrets.SOURCE_READ_TOKEN }}
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: microsoft/vcpkg
+          ref: 9e593bb18ea69cc5095e012465dcd675a822ed0d
+          path: private-vcpkg/.relocated-upstream
+          persist-credentials: false
+      - name: Install native prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-14 g++-14 autoconf autoconf-archive automake libtool pkg-config ninja-build
+      - name: Install minimal static FreeRDP client graph
+        shell: bash
+        env:
+          CC: gcc-14
+          CXX: g++-14
+          VCPKG_DISABLE_METRICS: "1"
+          VCPKG_BINARY_SOURCES: clear
+        run: |
+          set -euo pipefail
+          test "$(git -C private-vcpkg rev-parse HEAD)" = "e2ef567fa720498603d79889936b3a656532c17e"
+          upstream="$GITHUB_WORKSPACE/private-vcpkg/.relocated-upstream"
+          test "$(git -C "$upstream" rev-parse HEAD)" = "9e593bb18ea69cc5095e012465dcd675a822ed0d"
+          bash "$upstream/bootstrap-vcpkg.sh" -disableMetrics >"$RUNNER_TEMP/freerdp-v22-bootstrap.log" 2>&1
+          "$upstream/vcpkg" install 'freerdp[client,urbdrc]' \
+            --triplet=x64-linux-static-release \
+            --host-triplet=x64-linux-static-release \
+            "--overlay-ports=$GITHUB_WORKSPACE/private-vcpkg/ports" \
+            "--overlay-triplets=$GITHUB_WORKSPACE/private-vcpkg/triplets" \
+            "--x-install-root=$RUNNER_TEMP/freerdp-v22-installed" \
+            --binarysource=clear >"$RUNNER_TEMP/freerdp-v22-install.log" 2>&1
+      - name: Configure relocated client without pkg-config
+        shell: bash
+        run: |
+          set -euo pipefail
+          prefix="$RUNNER_TEMP/freerdp-v22-installed/x64-linux-static-release"
+          src="$RUNNER_TEMP/freerdp-v22-consumer"
+          build="$RUNNER_TEMP/freerdp-v22-consumer-build"
+          mkdir -p "$src"
+          cat >"$src/CMakeLists.txt" <<'CMAKE'
+          cmake_minimum_required(VERSION 3.32)
+          project(freerdp_v22_relocated LANGUAGES C)
+          find_package(FreeRDP-Client 3.31.1 EXACT CONFIG REQUIRED)
+          foreach(target IN ITEMS freerdp-client FreeRDP::libusb-static)
+            if(NOT TARGET ${target})
+              message(FATAL_ERROR "missing target ${target}")
+            endif()
+          endforeach()
+          get_target_property(_closure FreeRDP::libusb-static INTERFACE_LINK_LIBRARIES)
+          if(NOT _closure)
+            message(FATAL_ERROR "empty libusb static closure")
+          endif()
+          list(LENGTH _closure _closure_count)
+          if(NOT _closure_count EQUAL 2)
+            message(FATAL_ERROR "unexpected libusb static closure count")
+          endif()
+          set(_names)
+          foreach(item IN LISTS _closure)
+            if(NOT IS_ABSOLUTE "${item}" OR NOT EXISTS "${item}")
+              message(FATAL_ERROR "non-relocatable or missing static closure item")
+            endif()
+            get_filename_component(_name "${item}" NAME)
+            list(APPEND _names "${_name}")
+          endforeach()
+          list(SORT _names)
+          if(NOT _names STREQUAL "libudev.a;libusb-1.0.a")
+            message(FATAL_ERROR "unexpected Linux libusb static closure")
+          endif()
+          CMAKE
+          cmake -S "$src" -B "$build" -G Ninja \
+            "-DCMAKE_PREFIX_PATH=$prefix" \
+            -DCMAKE_DISABLE_FIND_PACKAGE_PkgConfig=TRUE
+          echo "FREERDP_V22_RELOCATED_CLIENT_QUALIFIED"
