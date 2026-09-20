@@ -313,6 +313,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn("ci/cef-full/gn_check.py", text)
         self.assertIn("test_platform_contract.py", text)
         self.assertIn("test_platform_gn.py", text)
+        self.assertIn("test_native_regressions.py", text)
         self.assertNotIn("upload-artifact", text)
         self.assertNotIn("actions/cache", text)
 
