@@ -64,7 +64,7 @@ def verify_engine_registry_delta(engine: Path, sdk: Path) -> None:
         if before.get(name) != after.get(name)
     }
     required = {
-        "ports/freerdp/portfile.cmake",
+        "ports/freerdp/static-libusb-client.patch",
         "ports/freerdp/vcpkg.json",
         "versions/baseline.json",
         "versions/f-/freerdp.json",
@@ -88,9 +88,9 @@ def verify_engine_registry_delta(engine: Path, sdk: Path) -> None:
     new_freerdp = new_baseline["default"].pop("freerdp")
     if old_baseline != new_baseline:
         raise ValueError("Registry baseline changed outside FreeRDP")
-    if (old_freerdp.get("baseline"), old_freerdp.get("port-version")) != ("3.31.1", 10):
+    if (old_freerdp.get("baseline"), old_freerdp.get("port-version")) != ("3.31.1", 21):
         raise ValueError("Unexpected engine-registry FreeRDP baseline")
-    if (new_freerdp.get("baseline"), new_freerdp.get("port-version")) != ("3.31.1", 12):
+    if (new_freerdp.get("baseline"), new_freerdp.get("port-version")) != ("3.31.1", 22):
         raise ValueError("Unexpected final-registry FreeRDP baseline")
 
 

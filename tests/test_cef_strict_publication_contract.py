@@ -4,7 +4,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
-from secure_release import cef_build
+from secure_release import cef_build, cef_strict_combined
 from test_cef_contract import config
 
 
@@ -69,11 +69,69 @@ def proof(platform: str) -> dict:
     return value
 
 
+def write_registry_fixture(root: Path, port_version: int, suffix: str) -> None:
+    files = {
+        "ports/freerdp/portfile.cmake": "same-portfile\n",
+        "ports/freerdp/static-libusb-client.patch": f"closure-{suffix}\n",
+        "ports/freerdp/vcpkg.json": json.dumps({
+            "name": "freerdp", "version": "3.31.1", "port-version": port_version
+        }, sort_keys=True) + "\n",
+        "versions/baseline.json": json.dumps({
+            "default": {
+                "freerdp": {"baseline": "3.31.1", "port-version": port_version},
+                "cef-static": {"baseline": "152.0.6", "port-version": 15},
+            }
+        }, sort_keys=True) + "\n",
+        "versions/f-/freerdp.json": f"registry-{suffix}\n",
+        "ci/cef/tests/test_contracts.py": f"contracts-{suffix}\n",
+        "ports/cef-static/vcpkg.json": "unchanged-engine-port\n",
+    }
+    for relative, content in files.items():
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
 class StrictPublicationContractTests(unittest.TestCase):
     def strict(self):
         cfg = config()
         cfg["profile"] = "static-third-party"
         return cfg
+
+    def test_reviewed_freerdp_v21_to_v22_registry_delta_is_accepted(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            engine, sdk = root / "engine", root / "sdk"
+            write_registry_fixture(engine, 21, "v21")
+            write_registry_fixture(sdk, 22, "v22")
+            engine_sha, sdk_sha = "1" * 40, "2" * 40
+
+            def fake_head(path):
+                return engine_sha if Path(path) == engine else sdk_sha
+
+            with patch.object(cef_strict_combined, "ENGINE_VCPKG", engine_sha), \
+                 patch.object(cef_strict_combined, "SDK_VCPKG", sdk_sha), \
+                 patch.object(cef_strict_combined, "git_head", side_effect=fake_head):
+                cef_strict_combined.verify_engine_registry_delta(engine, sdk)
+
+    def test_registry_delta_rejects_non_freerdp_change(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            engine, sdk = root / "engine", root / "sdk"
+            write_registry_fixture(engine, 21, "v21")
+            write_registry_fixture(sdk, 22, "v22")
+            (sdk / "ports/cef-static/vcpkg.json").write_text(
+                "changed-engine-port\n", encoding="utf-8"
+            )
+            engine_sha, sdk_sha = "1" * 40, "2" * 40
+
+            def fake_head(path):
+                return engine_sha if Path(path) == engine else sdk_sha
+
+            with patch.object(cef_strict_combined, "ENGINE_VCPKG", engine_sha), \
+                 patch.object(cef_strict_combined, "SDK_VCPKG", sdk_sha), \
+                 patch.object(cef_strict_combined, "git_head", side_effect=fake_head):
+                with self.assertRaisesRegex(ValueError, "outside the reviewed FreeRDP delta"):
+                    cef_strict_combined.verify_engine_registry_delta(engine, sdk)
 
     def test_strict_linux_capture_requires_complete_signed_preflight(self):
         cfg = self.strict()
