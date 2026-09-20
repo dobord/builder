@@ -287,7 +287,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn("missing_pkgconfig=", text)
         self.assertIn("cmake_source=", text)
         self.assertIn("lfcui_terminal_log=", text)
-        self.assertIn("buildtrees/ffmpeg", text)
+        self.assertIn('buildtrees / "ffmpeg"', text)
         self.assertNotIn("upload-artifact", text)
 
     def test_strict_release_import_workflow_proves_fail_closed_rejection(self):
