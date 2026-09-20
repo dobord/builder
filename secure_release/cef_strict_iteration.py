@@ -20,9 +20,9 @@ from . import cef_cache, cef_contract, crypto, safeio
 from .github import Client
 from .protocol import BUILDER, check_run
 
-VCPKG = "a87950eb71feeea3d29c16610894f94007786dd6"
+VCPKG = "39dccd415da14d8051559d66069019475d95787c"
 UPSTREAM = "9e593bb18ea69cc5095e012465dcd675a822ed0d"
-CEF = "8545a10c99f2ede0f08e75cda7c054aed424f4f5"
+CEF = "03abd124ebe3b8a57fb78470a75b5aa3ce064e31"
 TRIPLET = "x64-linux-static-release"
 
 
