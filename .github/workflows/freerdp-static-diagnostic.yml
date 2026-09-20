@@ -66,7 +66,88 @@ jobs:
           fi
           if [ "$rc" -eq 0 ]; then
             echo "FREERDP_STATIC_CONFIGURE_QUALIFIED"
-            exit 0
+            prefix="$RUNNER_TEMP/freerdp-installed/x64-linux-static-release"
+            probe_src="$RUNNER_TEMP/freerdp-client-config-probe"
+            probe_build="$RUNNER_TEMP/freerdp-client-config-probe-build"
+            retry_build="$RUNNER_TEMP/freerdp-client-config-probe-retry"
+            mkdir -p "$probe_src"
+            cat >"$probe_src/CMakeLists.txt" <<'CMAKE'
+          cmake_minimum_required(VERSION 3.32)
+          project(freerdp_client_config_probe LANGUAGES C)
+          find_package(FreeRDP-Client 3.31.1 EXACT CONFIG REQUIRED)
+          foreach(target IN ITEMS freerdp-client FreeRDP::libusb-static)
+            if(NOT TARGET ${target})
+              message(FATAL_ERROR "missing target ${target}")
+            endif()
+          endforeach()
+          get_target_property(_closure FreeRDP::libusb-static INTERFACE_LINK_LIBRARIES)
+          if(NOT _closure)
+            message(FATAL_ERROR "FreeRDP::libusb-static has empty link closure")
+          endif()
+          CMAKE
+            set +e
+            cmake -S "$probe_src" -B "$probe_build" -G Ninja \
+              "-DCMAKE_PREFIX_PATH=$prefix" \
+              >"$RUNNER_TEMP/freerdp-client-config-probe.log" 2>&1
+            probe_rc=$?
+            set -e
+            if [ "$probe_rc" -eq 0 ]; then
+              echo "FREERDP_RELOCATED_CLIENT_CONFIG_QUALIFIED"
+              exit 0
+            fi
+            set +e
+            PKG_CONFIG_PATH="$prefix/lib/pkgconfig:$prefix/share/pkgconfig" \
+            PKG_CONFIG_LIBDIR="$prefix/lib/pkgconfig:$prefix/share/pkgconfig" \
+              cmake -S "$probe_src" -B "$retry_build" -G Ninja \
+                "-DCMAKE_PREFIX_PATH=$prefix" \
+                >"$RUNNER_TEMP/freerdp-client-config-probe-retry.log" 2>&1
+            retry_rc=$?
+            set -e
+            if [ "$retry_rc" -eq 0 ]; then
+              echo "FREERDP_RELOCATED_CLIENT_CONFIG_NEEDS_PKG_CONFIG_PATH"
+              exit 1
+            fi
+            python - <<'PY'
+          import os, pathlib, re
+          runner = pathlib.Path(os.environ["RUNNER_TEMP"])
+          text = "\n".join(
+              (runner / name).read_text(errors="replace")[-262144:]
+              for name in (
+                  "freerdp-client-config-probe.log",
+                  "freerdp-client-config-probe-retry.log",
+              )
+              if (runner / name).is_file()
+          )
+          category = "cmake-error"
+          details = []
+          pkg = re.search(
+              r"Package\s+['\"]?([A-Za-z0-9+_.-]+)['\"]?[^\n]*(?:not found|was not found)",
+              text, re.I,
+          )
+          target = re.search(
+              r"(?:link interface of target|Target)\s+[\"']?([A-Za-z0-9_.:+-]+)[\"']?"
+              r"[\s\S]{0,360}?([A-Za-z0-9_.+-]+::[A-Za-z0-9_.+-]+)"
+              r"[\s\S]{0,220}?target was not found",
+              text, re.I,
+          )
+          if pkg:
+              category = "missing-pkgconfig"
+              token = pkg.group(1).lower()
+              if re.fullmatch(r"[a-z0-9+_.-]+", token):
+                  details.append("missing_pkgconfig=" + token)
+          elif target:
+              category = "missing-target"
+              token = target.group(2)
+              if re.fullmatch(r"[A-Za-z0-9_.:+-]+", token):
+                  details.append("missing_target=" + token)
+          elif "empty link closure" in text:
+              category = "empty-closure"
+          print(
+              "FREERDP_RELOCATED_CLIENT_CONFIG_FAILURE category=" + category
+              + ((" " + " ".join(details)) if details else "")
+          )
+          PY
+            exit "$probe_rc"
           fi
           python - <<'PY'
           import os, pathlib, re
