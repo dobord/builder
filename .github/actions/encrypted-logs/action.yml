@@ -2,7 +2,7 @@ name: Upload encrypted CI logs
 description: Encrypt runner-local diagnostics and upload ciphertext-only artifact.
 inputs:
   public_key_b64:
-    description: Base64-encoded Tink public hybrid keyset.
+    description: Optional Base64-encoded Tink public hybrid keyset override; defaults to the pinned repository public key.
     required: false
     default: ""
   roots:
@@ -12,19 +12,13 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Report missing encrypted-log key
-      if: ${{ inputs.public_key_b64 == '' }}
-      shell: bash
-      run: echo "::warning::BUILDER_ENCRYPTED_LOGS_PUBLIC_KEY_B64 is not configured; encrypted log artifact skipped"
     - name: Install pinned log-encryption runtime
-      if: ${{ inputs.public_key_b64 != '' }}
       shell: bash
       run: |
         set -euo pipefail
         tool_root="$(cd "$GITHUB_ACTION_PATH/../../.." && pwd)"
         python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r "$tool_root/requirements.lock"
     - name: Encrypt runner-local diagnostics
-      if: ${{ inputs.public_key_b64 != '' }}
       shell: bash
       env:
         BUILDER_ENCRYPTED_LOGS_PUBLIC_KEY_B64: ${{ inputs.public_key_b64 }}
@@ -34,6 +28,11 @@ runs:
         out="$RUNNER_TEMP/builder-encrypted-logs/${GITHUB_JOB}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.enc"
         mkdir -p "$(dirname "$out")"
         tool_root="$(cd "$GITHUB_ACTION_PATH/../../.." && pwd)"
+        if [ -z "${BUILDER_ENCRYPTED_LOGS_PUBLIC_KEY_B64:-}" ]; then
+          export BUILDER_ENCRYPTED_LOGS_PUBLIC_KEY_B64
+          BUILDER_ENCRYPTED_LOGS_PUBLIC_KEY_B64="$(tr -d '\r\n' < "$tool_root/ci/builder-logs-public-key.b64")"
+        fi
+        test -n "$BUILDER_ENCRYPTED_LOGS_PUBLIC_KEY_B64"
         PYTHONPATH="$tool_root" python -m secure_release.encrypted_logs collect --output "$out"
         test -s "$out"
         if find "$RUNNER_TEMP/builder-encrypted-logs" -type f ! -name '*.enc' -print -quit | grep -q .; then
@@ -41,7 +40,7 @@ runs:
           exit 1
         fi
     - name: Upload ШИФРОВАНЫЕ ЛОГИ
-      if: ${{ always() && inputs.public_key_b64 != '' }}
+      if: ${{ always() }}
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       with:
         name: ШИФРОВАНЫЕ ЛОГИ-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
