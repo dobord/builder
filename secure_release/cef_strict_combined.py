@@ -22,7 +22,7 @@ from . import build_support, cef_build, cef_contract, crypto, safeio
 from . import cef_strict_iteration
 
 ENGINE_VCPKG = "b4bb281192ea8bb004542012ac804b988a4ff403"
-SDK_VCPKG = "f693b42b65e6449310754b1dd2cacc402fea558f"
+SDK_VCPKG = "936bbb0e7cb7d6d10f8f5ef5874521466278c799"
 UPSTREAM = "9e593bb18ea69cc5095e012465dcd675a822ed0d"
 CEF = "2aff22e09daaa5c28780c5766a70ee13e61c93b6"
 LOCKFREECORO = "24038aed3a0be642adb60e71bd994ae8f0d90140"
@@ -69,6 +69,7 @@ def verify_engine_registry_delta(engine: Path, sdk: Path) -> None:
         "ports/freerdp/static-shadow-winpr-tools-dependency.patch",
         "ports/freerdp/vcpkg.json",
         "ports/lfc-ui/portfile.cmake",
+        "ports/lfc-ui/use-installed-lockfreecoro.patch",
         "ports/lfc-ui/usage",
         "ports/lfc-ui/vcpkg.json",
         "versions/baseline.json",
@@ -190,10 +191,44 @@ index 3a7f5aa..4bc04cf 100644
             or new_versions["versions"][1:] != old_versions["versions"]):
         raise ValueError("Unexpected FreeRDP versions registry delta")
 
+    old_lockfree_patch = (
+        engine / "ports/lfc-ui/use-installed-lockfreecoro.patch"
+    ).read_text()
+    new_lockfree_patch = (
+        sdk / "ports/lfc-ui/use-installed-lockfreecoro.patch"
+    ).read_text()
+    old_config_hunk = """@@ -1,6 +1,10 @@
+ @PACKAGE_INIT@
+ 
+ include(CMakeFindDependencyMacro)
++if(@LFC_UI_PACKAGE_HAS_LOCKFREECORO@)
++    find_dependency(lockfreecoro CONFIG COMPONENTS core)
++endif()
++
+ include("${CMAKE_CURRENT_LIST_DIR}/lfc_ui_compiler_requirements.cmake")
+ lfc_ui_require_supported_compiler("${CMAKE_CXX_COMPILER_ID}" "${CMAKE_CXX_COMPILER_VERSION}")
+"""
+    new_config_hunk = """@@ -1,7 +1,11 @@
+ @PACKAGE_INIT@
+ 
+ include(CMakeFindDependencyMacro)
++if(@LFC_UI_PACKAGE_HAS_LOCKFREECORO@)
++    find_dependency(lockfreecoro CONFIG COMPONENTS core)
++endif()
++
+ include("${CMAKE_CURRENT_LIST_DIR}/lfc_ui_compiler_requirements.cmake")
+ include("${CMAKE_CURRENT_LIST_DIR}/lfc_ui_pkgconfig_runtime.cmake")
+ lfc_ui_require_supported_compiler("${CMAKE_CXX_COMPILER_ID}" "${CMAKE_CXX_COMPILER_VERSION}")
+"""
+    if (old_lockfree_patch.count(old_config_hunk) != 1
+            or old_lockfree_patch.replace(
+                old_config_hunk, new_config_hunk, 1) != new_lockfree_patch):
+        raise ValueError("Unexpected lfc-ui lockfreecoro overlay rebase")
+
     old_lfc_versions = json.loads((engine / "versions/l-/lfc-ui.json").read_text())
     new_lfc_versions = json.loads((sdk / "versions/l-/lfc-ui.json").read_text())
     expected_lfc_entries = [
-        {"git-tree": "32031e102f46733d5ff6fefc0954652e2eb17fcd",
+        {"git-tree": "d635813c8ca3903f7300987e3d24d1c8c6cdea9a",
          "version": "0.3.0", "port-version": 11},
         {"git-tree": "9cc7498e3dd005babec671f17cc7dcea26797c45",
          "version": "0.3.0", "port-version": 10},

@@ -24,7 +24,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/vcpkg
-          ref: f693b42b65e6449310754b1dd2cacc402fea558f
+          ref: 936bbb0e7cb7d6d10f8f5ef5874521466278c799
           path: private-vcpkg
           token: ${{ secrets.SOURCE_READ_TOKEN }}
           persist-credentials: false
@@ -63,7 +63,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C private-vcpkg rev-parse HEAD)" = "f693b42b65e6449310754b1dd2cacc402fea558f"
+          test "$(git -C private-vcpkg rev-parse HEAD)" = "936bbb0e7cb7d6d10f8f5ef5874521466278c799"
           test "$(git -C private-vcpkg/.freerdp-upstream rev-parse HEAD)" = "9e593bb18ea69cc5095e012465dcd675a822ed0d"
           test "$(git -C private-lfc-ui rev-parse HEAD)" = "307afeab287b283514e036aa82ea1bd331dbac2a"
           mkdir -p private-vcpkg/.freerdp-upstream/downloads

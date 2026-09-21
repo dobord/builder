@@ -117,6 +117,32 @@ index 3a7f5aa..4bc04cf 100644
 """ if minimal else None
         ),
         "ports/lfc-ui/vcpkg.json": json.dumps(lfc_manifest, sort_keys=True) + "\n",
+        "ports/lfc-ui/use-installed-lockfreecoro.patch": (
+            """@@ -1,7 +1,11 @@
+ @PACKAGE_INIT@
+ 
+ include(CMakeFindDependencyMacro)
++if(@LFC_UI_PACKAGE_HAS_LOCKFREECORO@)
++    find_dependency(lockfreecoro CONFIG COMPONENTS core)
++endif()
++
+ include("${CMAKE_CURRENT_LIST_DIR}/lfc_ui_compiler_requirements.cmake")
+ include("${CMAKE_CURRENT_LIST_DIR}/lfc_ui_pkgconfig_runtime.cmake")
+ lfc_ui_require_supported_compiler("${CMAKE_CXX_COMPILER_ID}" "${CMAKE_CXX_COMPILER_VERSION}")
+"""
+            if minimal else
+            """@@ -1,6 +1,10 @@
+ @PACKAGE_INIT@
+ 
+ include(CMakeFindDependencyMacro)
++if(@LFC_UI_PACKAGE_HAS_LOCKFREECORO@)
++    find_dependency(lockfreecoro CONFIG COMPONENTS core)
++endif()
++
+ include("${CMAKE_CURRENT_LIST_DIR}/lfc_ui_compiler_requirements.cmake")
+ lfc_ui_require_supported_compiler("${CMAKE_CXX_COMPILER_ID}" "${CMAKE_CXX_COMPILER_VERSION}")
+"""
+        ),
         "ports/lfc-ui/usage": ("ffmpeg-minimal\n" if minimal else "full\n"),
         "ports/lfc-ui/portfile.cmake": (
             'REF "307afeab287b283514e036aa82ea1bd331dbac2a"\n'
@@ -162,7 +188,7 @@ index 3a7f5aa..4bc04cf 100644
         "versions/l-/lfc-ui.json": json.dumps({
             "versions": (
                 [{
-                    "git-tree": "32031e102f46733d5ff6fefc0954652e2eb17fcd",
+                    "git-tree": "d635813c8ca3903f7300987e3d24d1c8c6cdea9a",
                     "version": "0.3.0",
                     "port-version": 11,
                 }, {

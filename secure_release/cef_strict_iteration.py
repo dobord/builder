@@ -120,11 +120,12 @@ def ensure_chromium_sysroot(
 
 
 
-DAWN_X11_PATCH_MARKER = "# CEF_STATIC_DAWN_X11_HEADERS_V1"
+DAWN_X11_PATCH_MARKER_V1 = "# CEF_STATIC_DAWN_X11_HEADERS_V1"
+DAWN_X11_PATCH_MARKER = "# CEF_STATIC_DAWN_X11_HEADERS_V2"
 
 
 def ensure_dawn_static_x11_headers(source: Path, summary: dict) -> None:
-    """Give Dawn X11 compilation headers from the reviewed frozen platform prefix."""
+    """Give all Dawn native X11 users headers from the frozen platform prefix."""
     if git_head(source) != CHROMIUM:
         raise ValueError("Pinned Chromium source revision mismatch before Dawn repair")
     deps = source / "DEPS"
@@ -144,7 +145,12 @@ def ensure_dawn_static_x11_headers(source: Path, summary: dict) -> None:
     if not build.is_file() or build.is_symlink():
         raise ValueError("Pinned Dawn native BUILD.gn is missing or redirected")
     text = build.read_text(encoding="utf-8")
+
     import_anchor = 'import("${dawn_root}/scripts/dawn_features.gni")\n'
+    patched_import_v1 = (
+        import_anchor + DAWN_X11_PATCH_MARKER_V1 + "\n"
+        + 'import("//build/config/linux/pkg_config.gni")\n'
+    )
     patched_import = (
         import_anchor + DAWN_X11_PATCH_MARKER + "\n"
         + 'import("//build/config/linux/pkg_config.gni")\n'
@@ -157,23 +163,55 @@ def ensure_dawn_static_x11_headers(source: Path, summary: dict) -> None:
         '    }\n'
         '    sources += [\n'
     )
+    component_anchor = (
+        'dawn_component("native") {\n'
+        '  DEFINE_PREFIX = "DAWN_NATIVE"\n'
+    )
+    patched_component = (
+        component_anchor
+        + '\n'
+        + '  if (dawn_use_x11 && cef_static_platform_manifest != "") {\n'
+        + '    include_dirs = [ cef_static_platform_prefix + "/include" ]\n'
+        + '  }\n'
+    )
+
     repaired = False
     if DAWN_X11_PATCH_MARKER in text:
         if (text.count(DAWN_X11_PATCH_MARKER) != 1
-                or patched_import not in text or patched_x11 not in text):
-            raise ValueError("Existing Dawn static X11 header repair is malformed")
+                or DAWN_X11_PATCH_MARKER_V1 in text
+                or patched_import not in text
+                or patched_x11 not in text
+                or patched_component not in text):
+            raise ValueError("Existing Dawn static X11 header repair V2 is malformed")
+    elif DAWN_X11_PATCH_MARKER_V1 in text:
+        if (text.count(DAWN_X11_PATCH_MARKER_V1) != 1
+                or patched_import_v1 not in text
+                or patched_x11 not in text
+                or text.count(component_anchor) != 1
+                or patched_component in text):
+            raise ValueError("Existing Dawn static X11 header repair V1 is malformed")
+        text = text.replace(patched_import_v1, patched_import, 1)
+        text = text.replace(component_anchor, patched_component, 1)
+        build.write_text(text, encoding="utf-8", newline="\n")
+        repaired = True
     else:
-        if (text.count(import_anchor) != 1 or text.count(x11_anchor) != 1
+        if (text.count(import_anchor) != 1
+                or text.count(x11_anchor) != 1
+                or text.count(component_anchor) != 1
                 or 'cef_static_platform_prefix + "/include"' in text):
             raise ValueError("Pinned Dawn X11 GN anchors differ from reviewed source")
         text = text.replace(import_anchor, patched_import, 1)
         text = text.replace(x11_anchor, patched_x11, 1)
+        text = text.replace(component_anchor, patched_component, 1)
         build.write_text(text, encoding="utf-8", newline="\n")
         repaired = True
+
     summary["chromium_commit"] = CHROMIUM
     summary["dawn_revision"] = revision
     summary["dawn_x11_headers_repaired"] = repaired
     summary["dawn_x11_headers_verified"] = True
+    summary["dawn_x11_component_headers_verified"] = True
+
 
 def classify_private_log(path: Path) -> tuple[str, str]:
     """Return only bounded failure identity; never expose private build output."""
