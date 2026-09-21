@@ -48,6 +48,7 @@ jobs:
           upstream="$GITHUB_WORKSPACE/private-vcpkg/.relocated-upstream"
           test "$(git -C "$upstream" rev-parse HEAD)" = "9e593bb18ea69cc5095e012465dcd675a822ed0d"
           bash "$upstream/bootstrap-vcpkg.sh" -disableMetrics >"$RUNNER_TEMP/freerdp-v22-bootstrap.log" 2>&1
+          set +e
           "$upstream/vcpkg" install 'freerdp[client,urbdrc]' \
             --triplet=x64-linux-static-release \
             --host-triplet=x64-linux-static-release \
@@ -55,6 +56,85 @@ jobs:
             "--overlay-triplets=$GITHUB_WORKSPACE/private-vcpkg/triplets" \
             "--x-install-root=$RUNNER_TEMP/freerdp-v22-installed" \
             --binarysource=clear >"$RUNNER_TEMP/freerdp-v22-install.log" 2>&1
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ]; then
+            python - <<'PY'
+          import os, pathlib, re
+          runner = pathlib.Path(os.environ["RUNNER_TEMP"])
+          workspace = pathlib.Path(os.environ["GITHUB_WORKSPACE"])
+          install = (runner/"freerdp-v22-install.log").read_text(errors="replace")[-1048576:]
+          buildtrees = workspace/"private-vcpkg/.relocated-upstream/buildtrees"
+          package = "unknown"
+          for pattern in (
+              r"error: building ([a-z0-9][a-z0-9+_.-]*):",
+              r"BUILD_FAILED[^\n]*?([a-z0-9][a-z0-9+_.-]+):x64-linux-static-release",
+              r"([a-z0-9][a-z0-9+_.-]+):x64-linux-static-release failed",
+          ):
+              match = re.search(pattern, install, re.I)
+              if match:
+                  package = match.group(1).lower()
+                  break
+          root = buildtrees/package if package != "unknown" else buildtrees/"freerdp"
+          names = []
+          for name in re.findall(r"([A-Za-z0-9_.+~-]+\.log)", install):
+              if name not in names:
+                  names.append(name)
+          files = []
+          if root.is_dir():
+              for name in names[-12:]:
+                  matches=[p for p in root.rglob(name) if p.is_file()
+                           and not any(part in {"CMakeScratch","CMakeTmp"}
+                                       or part.startswith("TryCompile") for part in p.parts)]
+                  if matches:
+                      files.append(max(matches,key=lambda p:p.stat().st_mtime))
+              if not files:
+                  files=sorted(
+                      [p for p in root.rglob("*.log") if p.is_file()
+                       and p.stat().st_size <= 16*1024**2
+                       and not any(part in {"CMakeScratch","CMakeTmp"}
+                                   or part.startswith("TryCompile") for part in p.parts)],
+                      key=lambda p:p.stat().st_mtime,reverse=True
+                  )[:10]
+          text="\n".join(p.read_text(errors="replace")[-524288:] for p in files) or install
+          category="unknown"; details=[]
+          patch_text=""
+          if root.is_dir():
+              patch_logs=[p for p in root.glob("patch-*-err.log") if p.is_file()]
+              patch_text="\n".join(p.read_text(errors="replace")[-131072:] for p in patch_logs[-12:])
+          if re.search(r"(patch failed:|patch does not apply|corrupt patch at line|Applying patch failed:)", install+"\n"+patch_text, re.I):
+              category="patch"
+          elif re.search(r"(undefined reference|collect2: error|ld(?:\.lld)?: error)", text, re.I):
+              category="link-error"
+          elif re.search(r"(?:fatal\s+)?error\s*:", text, re.I):
+              category="compiler-error"
+          elif re.search(r"CMake Error", text):
+              category="cmake-error"
+          elif re.search(r"(FAILED:|ninja: build stopped|make(?:\[[0-9]+\])?: \*\*\*)", text):
+              category="build-error"
+          missing = re.search(r"Could not find a package configuration file provided by\s+['\"]?([A-Za-z0-9+_.-]+)", text, re.I)
+          if missing:
+              category="missing-cmake-package"
+              details.append("missing_package="+missing.group(1).lower())
+          cmake = re.search(r"CMake Error at ([^:\r\n]+):(\d+)", text)
+          if cmake:
+              name=pathlib.PurePosixPath(cmake.group(1).replace("\\","/")).name
+              if re.fullmatch(r"[A-Za-z0-9_.+-]{1,120}",name):
+                  details.append("cmake_source="+name)
+          undefined = re.search(r"undefined reference to [\x60'\"]?([A-Za-z_][A-Za-z0-9_@$.:+<>~/-]{0,127})", text, re.I)
+          if undefined:
+              details.append("undefined_symbol="+undefined.group(1))
+          if names:
+              details.append("reported_logs="+",".join(names[-6:]))
+          if files:
+              name=files[0].name
+              if re.fullmatch(r"[A-Za-z0-9_.+~-]{1,120}",name):
+                  details.append("terminal_log="+name)
+          print("FREERDP_V22_INSTALL_FAILURE package="+package+" category="+category+
+                ((" "+" ".join(details)) if details else ""))
+          PY
+            exit "$rc"
+          fi
       - name: Configure relocated client without pkg-config
         shell: bash
         run: |

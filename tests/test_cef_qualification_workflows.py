@@ -233,6 +233,9 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn("FreeRDP::libusb-static", text)
         self.assertIn("libudev.a;libusb-1.0.a", text)
         self.assertIn("FREERDP_V22_RELOCATED_CLIENT_QUALIFIED", text)
+        self.assertIn("FREERDP_V22_INSTALL_FAILURE package=", text)
+        self.assertIn(" category=", text)
+        self.assertIn("terminal_log=", text)
         self.assertNotIn("upload-artifact", text)
 
     def test_freerdp_static_diagnostic_uses_deterministic_audio_revision(self):
