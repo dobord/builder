@@ -656,7 +656,7 @@ def main() -> None:
             dynamic, encoding="utf-8"
         )
         needed = re.findall(
-            r"\\(NEEDED\\).*?Shared library:\\s*\\[([^\\]]+)\\]",
+            r"\(NEEDED\).*?Shared library:\s*\[([^\]]+)\]",
             dynamic,
         )
         forbidden_prefixes = (
