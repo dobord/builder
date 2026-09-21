@@ -22,11 +22,11 @@ from . import build_support, cef_build, cef_contract, crypto, safeio
 from . import cef_strict_iteration
 
 ENGINE_VCPKG = "b4bb281192ea8bb004542012ac804b988a4ff403"
-SDK_VCPKG = "60c9e0c043702334036d1b7b8b8cd67c97318da2"
+SDK_VCPKG = "665244504c5ac3f5f87371e59d6d382e4a68ac83"
 UPSTREAM = "9e593bb18ea69cc5095e012465dcd675a822ed0d"
 CEF = "2aff22e09daaa5c28780c5766a70ee13e61c93b6"
 LOCKFREECORO = "24038aed3a0be642adb60e71bd994ae8f0d90140"
-LFC_UI = "85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5"
+LFC_UI = "34849ac3ad69471d811ea889060c6a602291db28"
 TRIPLET = "x64-linux-static-release"
 
 
@@ -64,6 +64,8 @@ def verify_engine_registry_delta(engine: Path, sdk: Path) -> None:
         if before.get(name) != after.get(name)
     }
     required = {
+        "ci/release-plan.json",
+        "ports/lfc-ui/portfile.cmake",
         "ports/lfc-ui/usage",
         "ports/lfc-ui/vcpkg.json",
         "versions/baseline.json",
@@ -80,7 +82,7 @@ def verify_engine_registry_delta(engine: Path, sdk: Path) -> None:
         raise ValueError("Registry baseline changed outside lfc-ui")
     if (old_lfc.get("baseline"), old_lfc.get("port-version")) != ("0.3.0", 8):
         raise ValueError("Unexpected engine-registry lfc-ui baseline")
-    if (new_lfc.get("baseline"), new_lfc.get("port-version")) != ("0.3.0", 9):
+    if (new_lfc.get("baseline"), new_lfc.get("port-version")) != ("0.3.0", 10):
         raise ValueError("Unexpected final-registry lfc-ui baseline")
 
     old_manifest = json.loads((engine / "ports/lfc-ui/vcpkg.json").read_text())
@@ -89,7 +91,7 @@ def verify_engine_registry_delta(engine: Path, sdk: Path) -> None:
     new_port_version = new_manifest.pop("port-version")
     old_feature = old_manifest["features"].pop("freerdp")
     new_feature = new_manifest["features"].pop("freerdp")
-    if old_port_version != 8 or new_port_version != 9 or old_manifest != new_manifest:
+    if old_port_version != 8 or new_port_version != 10 or old_manifest != new_manifest:
         raise ValueError("lfc-ui registry delta changed outside the reviewed FreeRDP dependency request")
     if old_feature.get("supports") != "linux" or new_feature.get("supports") != "linux":
         raise ValueError("lfc-ui FreeRDP platform contract changed")
@@ -97,11 +99,32 @@ def verify_engine_registry_delta(engine: Path, sdk: Path) -> None:
         "name": "freerdp", "default-features": False, "features": ["full"]
     }]
     expected_new = [{
-        "name": "freerdp", "default-features": False, "features": ["proxy", "x11"]
+        "name": "freerdp", "default-features": False,
+        "features": ["ffmpeg", "proxy", "x11"]
     }]
     if (old_feature.get("dependencies") != expected_old
             or new_feature.get("dependencies") != expected_new):
         raise ValueError("Unexpected lfc-ui FreeRDP dependency transition")
+
+    old_portfile = (engine / "ports/lfc-ui/portfile.cmake").read_text()
+    new_portfile = (sdk / "ports/lfc-ui/portfile.cmake").read_text()
+    if old_portfile.replace(
+            "85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5",
+            "34849ac3ad69471d811ea889060c6a602291db28",
+            1) != new_portfile:
+        raise ValueError("lfc-ui source pin changed outside the reviewed FFmpeg revision")
+
+    old_plan = json.loads((engine / "ci/release-plan.json").read_text())
+    new_plan = json.loads((sdk / "ci/release-plan.json").read_text())
+    old_lfc_source = next(item for item in old_plan["ports"] if item["name"] == "lfc-ui")
+    new_lfc_source = next(item for item in new_plan["ports"] if item["name"] == "lfc-ui")
+    if old_lfc_source.get("sha") != "85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5":
+        raise ValueError("Unexpected engine release-plan lfc-ui source")
+    if new_lfc_source.get("sha") != "34849ac3ad69471d811ea889060c6a602291db28":
+        raise ValueError("Unexpected final release-plan lfc-ui source")
+    old_lfc_source["sha"] = new_lfc_source["sha"]
+    if old_plan != new_plan:
+        raise ValueError("Release plan changed outside the reviewed lfc-ui source revision")
 
 
 def clean_environment() -> dict[str, str]:
