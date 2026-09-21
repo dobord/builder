@@ -219,6 +219,28 @@ def run(command, *, cwd: Path, env: dict, log: Path, timeout: int) -> None:
         raise RuntimeError("strict combined SDK subprocess failed at " + log.stem)
 
 
+def verify_relocated_metadata(sdk: Path, forbidden_roots: list[Path]) -> None:
+    """Reject exported CMake/pkg-config metadata tied to producer-only roots."""
+    needles = [
+        str(path.resolve()).replace("\\", "/")
+        for path in forbidden_roots
+    ]
+    hits = []
+    for path in sdk.rglob("*"):
+        if (not path.is_file() or path.is_symlink()
+                or path.suffix.lower() not in {".cmake", ".pc", ".la"}
+                or path.stat().st_size > 16 * 1024**2):
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace").replace("\\", "/")
+        if any(needle in text for needle in needles):
+            hits.append(path.relative_to(sdk).as_posix())
+    if hits:
+        raise RuntimeError(
+            "Final SDK metadata retains producer-only absolute paths: "
+            + ", ".join(Path(item).name for item in hits[:20])
+        )
+
+
 def archive_checkout(source: Path, revision: str, target: Path) -> None:
     if git_head(source) != revision or target.exists():
         raise ValueError("Private source checkout/revision mismatch")
@@ -367,6 +389,12 @@ def main() -> None:
             cwd=recipe, env=clean_environment(),
             log=root / "install-build-deps.log", timeout=1800,
         )
+        stage = "engine-sysroot-preflight"
+        cef_strict_iteration.ensure_chromium_sysroot(
+            engine_work / "download/chromium/src",
+            root, clean_environment(), summary,
+        )
+        stage = "engine-runtime"
         run(
             [sys.executable, source_build, "build",
              "--work", engine_work, "--logs", engine_logs, "--jobs", "2",
@@ -489,6 +517,16 @@ def main() -> None:
         safeio.sdk_zip(sdk, sdk_zip)
         consumer_sdk = root / "consumer-sdk"
         safeio.extract_zip(sdk_zip, consumer_sdk)
+        verify_relocated_metadata(
+            consumer_sdk,
+            [installed, sdk, upstream / "buildtrees", upstream / "packages"],
+        )
+        shutil.rmtree(installed)
+        shutil.rmtree(export_root)
+        if installed.exists() or export_root.exists():
+            raise RuntimeError("Producer SDK roots survived relocation boundary")
+        summary["producer_sdk_roots_removed"] = True
+        summary["relocated_metadata_verified"] = True
 
         expected_contract = cef_contract.port_contract(cfg, "linux", platform_sha)
         contract_path = (
@@ -613,17 +651,26 @@ def main() -> None:
             )
         dynamic = subprocess.check_output(
             ["readelf", "-d", proxy_exe], text=True, timeout=120
-        ).lower()
-        forbidden_needed = [
-            token for token in (
-                "libcef.so", "libfreerdp", "libwinpr", "libavcodec",
-                "libavformat", "libavutil", "libavfilter", "libswscale",
-                "libswresample", "libx264", "libx265", "libvpx",
-                "libaom", "libopus", "libssl.so", "libcrypto.so",
-                "libstdc++.so", "libgcc_s.so",
-            )
-            if token in dynamic
-        ]
+        )
+        (root / "lfc-ui-freerdp-cef-readelf.log").write_text(
+            dynamic, encoding="utf-8"
+        )
+        needed = re.findall(
+            r"\\(NEEDED\\).*?Shared library:\\s*\\[([^\\]]+)\\]",
+            dynamic,
+        )
+        forbidden_prefixes = (
+            "libcef.so", "libfreerdp", "libwinpr", "libavcodec",
+            "libavformat", "libavutil", "libavfilter", "libswscale",
+            "libswresample", "libx264", "libx265", "libvpx",
+            "libaom", "libopus", "libssl.so", "libcrypto.so",
+            "libstdc++.so", "libgcc_s.so",
+        )
+        forbidden_needed = sorted({
+            name for name in needed
+            if any(name.lower().startswith(prefix) for prefix in forbidden_prefixes)
+        })
+        summary["lfc_ui_freerdp_cef_dt_needed_count"] = len(needed)
         if forbidden_needed:
             raise RuntimeError(
                 "Final FreeRDP/CEF executable has shared third-party runtime dependencies: "
