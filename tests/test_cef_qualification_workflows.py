@@ -104,9 +104,9 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn('"--seconds", "9000", "--jobs", "2"',worker)
         self.assertNotIn('print(text',worker)
         lock=(ROOT/'ci/cef-strict-engine-lock.json').read_text()
-        self.assertIn('"run": 35609668632',lock)
-        self.assertIn('"artifact_id": 10645368328',lock)
-        self.assertIn('"summary_artifact_id": 10645807907',lock)
+        self.assertIn('"run": 35619740607',lock)
+        self.assertIn('"artifact_id": 10660212482',lock)
+        self.assertIn('"summary_artifact_id": 10660092755',lock)
         self.assertIn('"vcpkg_commit": "b4bb281192ea8bb004542012ac804b988a4ff403"',lock)
         self.assertIn('"cef_recipe_commit": "2aff22e09daaa5c28780c5766a70ee13e61c93b6"',lock)
 
