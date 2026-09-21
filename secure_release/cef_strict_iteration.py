@@ -212,6 +212,8 @@ def verify_producer_summary(api: Client, selected: dict) -> dict:
         if len(files) != 1 or files[0].name != "cef-strict-iteration-summary.json":
             raise ValueError("Unexpected strict CEF summary artifact members")
         value = crypto.parse(files[0].read_bytes())
+    if not isinstance(value, dict):
+        raise ValueError("Strict CEF producer summary is not a JSON object")
     resumable_compile_failure = (
         value.get("status") == "failed"
         and value.get("failure_stage") == "compile-slice"
@@ -222,7 +224,7 @@ def verify_producer_summary(api: Client, selected: dict) -> dict:
         and value.get("runtime_verified") is False
     )
     reusable_status = value.get("status") == "success" or resumable_compile_failure
-    if (not isinstance(value, dict) or value.get("schema") != 1
+    if (value.get("schema") != 1
             or not reusable_status
             or value.get("checkpoint_ready") is not True
             or value.get("platform_graph_qualified") is not True
@@ -238,7 +240,7 @@ def verify_producer_summary(api: Client, selected: dict) -> dict:
 def restore_checkpoint(selected: dict, destination: Path, build_key: str,
                        private_key: str) -> dict:
     api = Client(os.environ["GITHUB_TOKEN"])
-    verify_producer_summary(api, selected)
+    producer_summary = verify_producer_summary(api, selected)
     if build_key != selected["build_key"]:
         raise ValueError("Strict CEF checkpoint build key differs from producer summary")
     run, attempt, revision = (
@@ -249,8 +251,12 @@ def restore_checkpoint(selected: dict, destination: Path, build_key: str,
         producer, BUILDER, "cef-strict-engine-iteration.yml", revision,
         attempt, "push", success=False
     )
-    if producer.get("status") != "completed":
-        raise ValueError("Strict CEF checkpoint producer is still running")
+    expected_conclusion = (
+        "failure" if producer_summary.get("status") == "failed" else "success"
+    )
+    if (producer.get("status") != "completed"
+            or producer.get("conclusion") != expected_conclusion):
+        raise ValueError("Strict CEF checkpoint producer conclusion mismatch")
     current = api.get(f"/repos/{BUILDER}/actions/runs/{run}")
     if (current.get("run_attempt") != attempt or current.get("status") != "completed"
             or current.get("head_sha") != revision):
