@@ -1,4 +1,5 @@
 name: Bootstrap builder log encryption key
+
 "on":
   workflow_dispatch: {}
   push:
@@ -26,50 +27,59 @@ jobs:
           python-version: "3.12"
 
       - name: Install pinned Tink runtime
-        run: python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r requirements.lock
+        run: >-
+          python -m pip install --disable-pip-version-check
+          --require-hashes --only-binary=:all: -r requirements.lock
 
-      - name: Generate builder log keypair
-        run: python -m secure_release.encrypted_logs keygen --prefix "$RUNNER_TEMP/builder-ci-log-key"
-
-      - name: Store private key in dobord/builder-logs repository secret
-        id: store
-        continue-on-error: true
+      - name: Generate and install builder log key
         env:
           GH_TOKEN: ${{ secrets.SOURCE_READ_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
-          test -n "$GH_TOKEN"
-          private="$(tr -d '\r\n' < "$RUNNER_TEMP/builder-ci-log-key.private.b64")"
-          test -n "$private"
-          gh secret set BUILDER_LOGS_PRIVATE_KEY_B64             --repo dobord/builder-logs             --body "$private"
-          gh secret list --repo dobord/builder-logs --app actions             | grep -E '^BUILDER_LOGS_PRIVATE_KEY_B64[[:space:]]'
-          unset private
-          rm -f "$RUNNER_TEMP/builder-ci-log-key.private.b64"
-          echo "stored=true" >> "$GITHUB_OUTPUT"
+          prefix="$RUNNER_TEMP/builder-ci-log-key"
+          python -m secure_release.encrypted_logs keygen --prefix "$prefix"
+          mkdir -p "$RUNNER_TEMP/builder-log-key-public" "$RUNNER_TEMP/builder-log-key-fallback"
+          cp "$prefix.public.b64" "$RUNNER_TEMP/builder-log-key-public/public.b64"
+          if [ -n "${GH_TOKEN:-}" ]; then
+            private="$(tr -d '\r\n' < "$prefix.private.b64")"
+            if gh secret set BUILDER_LOGS_PRIVATE_KEY_B64 --repo dobord/builder-logs --body "$private"; then
+              unset private
+              rm -f "$prefix.private.b64"
+              printf 'stored\n' > "$RUNNER_TEMP/builder-log-key-stored"
+            else
+              unset private
+              cp "$prefix.private.b64" "$RUNNER_TEMP/builder-log-key-fallback/private.b64"
+            fi
+          else
+            cp "$prefix.private.b64" "$RUNNER_TEMP/builder-log-key-fallback/private.b64"
+          fi
 
       - name: Upload public key
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: builder-logs-public-key-${{ github.run_id }}
-          path: ${{ runner.temp }}/builder-ci-log-key.public.b64
+          path: ${{ runner.temp }}/builder-log-key-public/public.b64
           retention-days: 7
           compression-level: 0
           if-no-files-found: error
 
-      - name: Upload private-key fallback only when secret storage failed
-        if: ${{ steps.store.outputs.stored != 'true' }}
+      - name: Upload private-key fallback if needed
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: builder-logs-private-key-fallback-${{ github.run_id }}
-          path: ${{ runner.temp }}/builder-ci-log-key.private.b64
+          path: ${{ runner.temp }}/builder-log-key-fallback/private.b64
           retention-days: 1
           compression-level: 0
-          if-no-files-found: error
+          if-no-files-found: ignore
 
-      - name: Fail if repository secret storage failed
-        if: ${{ steps.store.outputs.stored != 'true' }}
+      - name: Require repository secret storage
+        if: always()
+        shell: bash
         run: |
-          echo "BUILDER_LOGS_SECRET_BOOTSTRAP_FAILED" >&2
-          exit 1
+          test -f "$RUNNER_TEMP/builder-log-key-stored" || {
+            echo "BUILDER_LOGS_SECRET_BOOTSTRAP_FAILED" >&2
+            exit 1
+          }
