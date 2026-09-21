@@ -225,15 +225,15 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertNotIn("upload-artifact", text)
         self.assertNotIn("cat $RUNNER_TEMP", text)
 
-    def test_freerdp_v22_relocated_client_is_pkgconfig_independent(self):
+    def test_freerdp_v23_relocated_client_is_pkgconfig_independent(self):
         text = (ROOT / ".github/workflows/freerdp-relocated-client.yml").read_text()
-        self.assertIn("ref: e2ef567fa720498603d79889936b3a656532c17e", text)
+        self.assertIn("ref: b4bb281192ea8bb004542012ac804b988a4ff403", text)
         self.assertIn("'freerdp[client,urbdrc]'", text)
         self.assertIn("-DCMAKE_DISABLE_FIND_PACKAGE_PkgConfig=TRUE", text)
         self.assertIn("FreeRDP::libusb-static", text)
         self.assertIn("libudev.a;libusb-1.0.a", text)
-        self.assertIn("FREERDP_V22_RELOCATED_CLIENT_QUALIFIED", text)
-        self.assertIn("FREERDP_V22_INSTALL_FAILURE package=", text)
+        self.assertIn("FREERDP_V23_RELOCATED_CLIENT_QUALIFIED", text)
+        self.assertIn("FREERDP_V23_INSTALL_FAILURE package=", text)
         self.assertIn(" category=", text)
         self.assertIn("terminal_log=", text)
         self.assertIn("patch_name=", text)
@@ -325,7 +325,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
     def test_current_private_source_contract_workflow_pins_gn_gate_revision(self):
         text = (ROOT / ".github/workflows/cef-strict-source-contracts.yml").read_text()
         self.assertIn("repository: dobord/vcpkg", text)
-        self.assertIn("ref: 4a94dfc437c30afe29ad4d53c24f8591f13c939d", text)
+        self.assertIn("ref: b4bb281192ea8bb004542012ac804b988a4ff403", text)
         self.assertIn("ref: 2aff22e09daaa5c28780c5766a70ee13e61c93b6", text)
         self.assertIn("ref: 457fd41f39cbcff940c7af654da899d44ba5e553", text)
         self.assertNotIn("git -C private-vcpkg/.full-cef apply --check", text)

@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/vcpkg
-          ref: e2ef567fa720498603d79889936b3a656532c17e
+          ref: b4bb281192ea8bb004542012ac804b988a4ff403
           path: private-vcpkg
           token: ${{ secrets.SOURCE_READ_TOKEN }}
           persist-credentials: false
@@ -44,7 +44,7 @@ jobs:
           VCPKG_BINARY_SOURCES: clear
         run: |
           set -euo pipefail
-          test "$(git -C private-vcpkg rev-parse HEAD)" = "e2ef567fa720498603d79889936b3a656532c17e"
+          test "$(git -C private-vcpkg rev-parse HEAD)" = "b4bb281192ea8bb004542012ac804b988a4ff403"
           upstream="$GITHUB_WORKSPACE/private-vcpkg/.relocated-upstream"
           test "$(git -C "$upstream" rev-parse HEAD)" = "9e593bb18ea69cc5095e012465dcd675a822ed0d"
           bash "$upstream/bootstrap-vcpkg.sh" -disableMetrics >"$RUNNER_TEMP/freerdp-v22-bootstrap.log" 2>&1
@@ -149,7 +149,7 @@ jobs:
               name=files[0].name
               if re.fullmatch(r"[A-Za-z0-9_.+~-]{1,120}",name):
                   details.append("terminal_log="+name)
-          print("FREERDP_V22_INSTALL_FAILURE package="+package+" category="+category+
+          print("FREERDP_V23_INSTALL_FAILURE package="+package+" category="+category+
                 ((" "+" ".join(details)) if details else ""))
           PY
             exit "$rc"
@@ -195,4 +195,4 @@ jobs:
           cmake -S "$src" -B "$build" -G Ninja \
             "-DCMAKE_PREFIX_PATH=$prefix" \
             -DCMAKE_DISABLE_FIND_PACKAGE_PkgConfig=TRUE
-          echo "FREERDP_V22_RELOCATED_CLIENT_QUALIFIED"
+          echo "FREERDP_V23_RELOCATED_CLIENT_QUALIFIED"
