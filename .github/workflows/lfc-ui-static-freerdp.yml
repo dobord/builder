@@ -362,7 +362,7 @@ jobs:
         if: always()
         uses: ./.github/actions/encrypted-logs
         with:
-          public-key-b64: ${{ secrets.BUILDER_ENCRYPTED_LOGS_PUBLIC_KEY_B64 }}
+          public_key_b64: ${{ secrets.BUILDER_ENCRYPTED_LOGS_PUBLIC_KEY_B64 }}
           roots: |
             ${{ runner.temp }}
             ${{ github.workspace }}/private-vcpkg/.freerdp-upstream/buildtrees
