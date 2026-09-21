@@ -304,6 +304,8 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn("freerdp-shadow", text)
         self.assertIn("LFC_UI_FREERDP_SHARED_TARGET_PAYLOAD", text)
         self.assertIn("-static-libstdc++ -static-libgcc", text)
+        self.assertIn("cmake_minimum_required(VERSION 3.31)", text)
+        self.assertNotIn("cmake_minimum_required(VERSION 3.32)", text)
         self.assertIn("LFC_UI_STATIC_FREERDP_QUALIFIED", text)
         self.assertIn("ffmpeg_dependency=", text)
         self.assertIn("category=", text)
