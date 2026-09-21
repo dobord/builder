@@ -23,6 +23,7 @@ from .protocol import BUILDER, check_run
 VCPKG = "b4bb281192ea8bb004542012ac804b988a4ff403"
 UPSTREAM = "9e593bb18ea69cc5095e012465dcd675a822ed0d"
 CEF = "2aff22e09daaa5c28780c5766a70ee13e61c93b6"
+CHROMIUM = "79460ebecaa5625e57a5fb679a735659e73dc687"
 TRIPLET = "x64-linux-static-release"
 CHROMIUM_SYSROOT_AMD64 = {
     "Sha256Sum": "52d61d4446ffebfaa3dda2cd02da4ab4876ff237853f46d273e7f9b666652e1d",
@@ -117,6 +118,62 @@ def ensure_chromium_sysroot(
     summary["sysroot_header_verified"] = True
     summary["sysroot_name"] = CHROMIUM_SYSROOT_AMD64["SysrootDir"]
 
+
+
+DAWN_X11_PATCH_MARKER = "# CEF_STATIC_DAWN_X11_HEADERS_V1"
+
+
+def ensure_dawn_static_x11_headers(source: Path, summary: dict) -> None:
+    """Give Dawn X11 compilation headers from the reviewed frozen platform prefix."""
+    if git_head(source) != CHROMIUM:
+        raise ValueError("Pinned Chromium source revision mismatch before Dawn repair")
+    deps = source / "DEPS"
+    if not deps.is_file() or deps.is_symlink():
+        raise ValueError("Pinned Chromium DEPS is missing or redirected")
+    revisions = re.findall(
+        r"(?m)^\s*['\"]dawn_revision['\"]\s*:\s*['\"]([0-9a-f]{40})['\"]\s*,?\s*$",
+        deps.read_text(encoding="utf-8"),
+    )
+    if len(revisions) != 1:
+        raise ValueError("Pinned Chromium DEPS has an unexpected Dawn revision contract")
+    dawn = source / "third_party/dawn"
+    revision = revisions[0]
+    if git_head(dawn) != revision:
+        raise ValueError("Dawn checkout differs from pinned Chromium DEPS")
+    build = dawn / "src/dawn/native/BUILD.gn"
+    if not build.is_file() or build.is_symlink():
+        raise ValueError("Pinned Dawn native BUILD.gn is missing or redirected")
+    text = build.read_text(encoding="utf-8")
+    import_anchor = 'import("${dawn_root}/scripts/dawn_features.gni")\n'
+    patched_import = (
+        import_anchor + DAWN_X11_PATCH_MARKER + "\n"
+        + 'import("//build/config/linux/pkg_config.gni")\n'
+    )
+    x11_anchor = '  if (dawn_use_x11) {\n    sources += [\n'
+    patched_x11 = (
+        '  if (dawn_use_x11) {\n'
+        '    if (cef_static_platform_manifest != "") {\n'
+        '      include_dirs += [ cef_static_platform_prefix + "/include" ]\n'
+        '    }\n'
+        '    sources += [\n'
+    )
+    repaired = False
+    if DAWN_X11_PATCH_MARKER in text:
+        if (text.count(DAWN_X11_PATCH_MARKER) != 1
+                or patched_import not in text or patched_x11 not in text):
+            raise ValueError("Existing Dawn static X11 header repair is malformed")
+    else:
+        if (text.count(import_anchor) != 1 or text.count(x11_anchor) != 1
+                or 'cef_static_platform_prefix + "/include"' in text):
+            raise ValueError("Pinned Dawn X11 GN anchors differ from reviewed source")
+        text = text.replace(import_anchor, patched_import, 1)
+        text = text.replace(x11_anchor, patched_x11, 1)
+        build.write_text(text, encoding="utf-8", newline="\n")
+        repaired = True
+    summary["chromium_commit"] = CHROMIUM
+    summary["dawn_revision"] = revision
+    summary["dawn_x11_headers_repaired"] = repaired
+    summary["dawn_x11_headers_verified"] = True
 
 def classify_private_log(path: Path) -> tuple[str, str]:
     """Return only bounded failure identity; never expose private build output."""
@@ -575,6 +632,11 @@ def main() -> None:
         stage = "sysroot-preflight"
         ensure_chromium_sysroot(
             engine_work / "download/chromium/src", temp, clean_env, summary
+        )
+
+        stage = "dawn-x11-headers"
+        ensure_dawn_static_x11_headers(
+            engine_work / "download/chromium/src", summary
         )
 
         stage = "gn-check"

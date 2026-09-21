@@ -22,11 +22,11 @@ from . import build_support, cef_build, cef_contract, crypto, safeio
 from . import cef_strict_iteration
 
 ENGINE_VCPKG = "b4bb281192ea8bb004542012ac804b988a4ff403"
-SDK_VCPKG = "bf68c0cf323ff98dcf5340dda5d92e80b7f1f681"
+SDK_VCPKG = "f693b42b65e6449310754b1dd2cacc402fea558f"
 UPSTREAM = "9e593bb18ea69cc5095e012465dcd675a822ed0d"
 CEF = "2aff22e09daaa5c28780c5766a70ee13e61c93b6"
 LOCKFREECORO = "24038aed3a0be642adb60e71bd994ae8f0d90140"
-LFC_UI = "34849ac3ad69471d811ea889060c6a602291db28"
+LFC_UI = "307afeab287b283514e036aa82ea1bd331dbac2a"
 TRIPLET = "x64-linux-static-release"
 
 
@@ -90,7 +90,7 @@ def verify_engine_registry_delta(engine: Path, sdk: Path) -> None:
         raise ValueError("Registry baseline changed outside lfc-ui/FreeRDP")
     if (old_lfc.get("baseline"), old_lfc.get("port-version")) != ("0.3.0", 8):
         raise ValueError("Unexpected engine-registry lfc-ui baseline")
-    if (new_lfc.get("baseline"), new_lfc.get("port-version")) != ("0.3.0", 10):
+    if (new_lfc.get("baseline"), new_lfc.get("port-version")) != ("0.3.0", 11):
         raise ValueError("Unexpected final-registry lfc-ui baseline")
     if (old_freerdp.get("baseline"), old_freerdp.get("port-version")) != ("3.31.1", 23):
         raise ValueError("Unexpected engine-registry FreeRDP baseline")
@@ -103,7 +103,7 @@ def verify_engine_registry_delta(engine: Path, sdk: Path) -> None:
     new_port_version = new_manifest.pop("port-version")
     old_feature = old_manifest["features"].pop("freerdp")
     new_feature = new_manifest["features"].pop("freerdp")
-    if old_port_version != 8 or new_port_version != 10 or old_manifest != new_manifest:
+    if old_port_version != 8 or new_port_version != 11 or old_manifest != new_manifest:
         raise ValueError("lfc-ui registry delta changed outside the reviewed FreeRDP dependency request")
     if old_feature.get("supports") != "linux" or new_feature.get("supports") != "linux":
         raise ValueError("lfc-ui FreeRDP platform contract changed")
@@ -122,7 +122,7 @@ def verify_engine_registry_delta(engine: Path, sdk: Path) -> None:
     new_portfile = (sdk / "ports/lfc-ui/portfile.cmake").read_text()
     if old_portfile.replace(
             "85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5",
-            "34849ac3ad69471d811ea889060c6a602291db28",
+            "307afeab287b283514e036aa82ea1bd331dbac2a",
             1) != new_portfile:
         raise ValueError("lfc-ui source pin changed outside the reviewed FFmpeg revision")
 
@@ -132,7 +132,7 @@ def verify_engine_registry_delta(engine: Path, sdk: Path) -> None:
     new_lfc_source = next(item for item in new_plan["ports"] if item["name"] == "lfc-ui")
     if old_lfc_source.get("sha") != "85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5":
         raise ValueError("Unexpected engine release-plan lfc-ui source")
-    if new_lfc_source.get("sha") != "34849ac3ad69471d811ea889060c6a602291db28":
+    if new_lfc_source.get("sha") != "307afeab287b283514e036aa82ea1bd331dbac2a":
         raise ValueError("Unexpected final release-plan lfc-ui source")
     old_lfc_source["sha"] = new_lfc_source["sha"]
     if old_plan != new_plan:
@@ -189,6 +189,22 @@ index 3a7f5aa..4bc04cf 100644
             or new_versions["versions"][:1] != [expected_new_entry]
             or new_versions["versions"][1:] != old_versions["versions"]):
         raise ValueError("Unexpected FreeRDP versions registry delta")
+
+    old_lfc_versions = json.loads((engine / "versions/l-/lfc-ui.json").read_text())
+    new_lfc_versions = json.loads((sdk / "versions/l-/lfc-ui.json").read_text())
+    expected_lfc_entries = [
+        {"git-tree": "32031e102f46733d5ff6fefc0954652e2eb17fcd",
+         "version": "0.3.0", "port-version": 11},
+        {"git-tree": "9cc7498e3dd005babec671f17cc7dcea26797c45",
+         "version": "0.3.0", "port-version": 10},
+        {"git-tree": "cf9f360b1433c1aec5c8eabb4a2fcd3b551627bf",
+         "version": "0.3.0", "port-version": 9},
+    ]
+    if (not isinstance(old_lfc_versions.get("versions"), list)
+            or not isinstance(new_lfc_versions.get("versions"), list)
+            or new_lfc_versions["versions"][:3] != expected_lfc_entries
+            or new_lfc_versions["versions"][3:] != old_lfc_versions["versions"]):
+        raise ValueError("Unexpected lfc-ui versions registry delta")
 
 
 def clean_environment() -> dict[str, str]:
@@ -393,6 +409,9 @@ def main() -> None:
         cef_strict_iteration.ensure_chromium_sysroot(
             engine_work / "download/chromium/src",
             root, clean_environment(), summary,
+        )
+        cef_strict_iteration.ensure_dawn_static_x11_headers(
+            engine_work / "download/chromium/src", summary
         )
         stage = "engine-runtime"
         run(

@@ -24,7 +24,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/vcpkg
-          ref: bf68c0cf323ff98dcf5340dda5d92e80b7f1f681
+          ref: f693b42b65e6449310754b1dd2cacc402fea558f
           path: private-vcpkg
           token: ${{ secrets.SOURCE_READ_TOKEN }}
           persist-credentials: false
@@ -37,7 +37,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/lfc-ui
-          ref: 34849ac3ad69471d811ea889060c6a602291db28
+          ref: 307afeab287b283514e036aa82ea1bd331dbac2a
           path: private-lfc-ui
           token: ${{ secrets.SOURCE_READ_TOKEN }}
           persist-credentials: false
@@ -63,11 +63,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C private-vcpkg rev-parse HEAD)" = "bf68c0cf323ff98dcf5340dda5d92e80b7f1f681"
+          test "$(git -C private-vcpkg rev-parse HEAD)" = "f693b42b65e6449310754b1dd2cacc402fea558f"
           test "$(git -C private-vcpkg/.freerdp-upstream rev-parse HEAD)" = "9e593bb18ea69cc5095e012465dcd675a822ed0d"
-          test "$(git -C private-lfc-ui rev-parse HEAD)" = "34849ac3ad69471d811ea889060c6a602291db28"
+          test "$(git -C private-lfc-ui rev-parse HEAD)" = "307afeab287b283514e036aa82ea1bd331dbac2a"
           mkdir -p private-vcpkg/.freerdp-upstream/downloads
-          git -C private-lfc-ui -c core.autocrlf=false archive --format=tar.gz             34849ac3ad69471d811ea889060c6a602291db28             -o "$GITHUB_WORKSPACE/private-vcpkg/.freerdp-upstream/downloads/lfc-ui-34849ac3ad69471d811ea889060c6a602291db28.tar.gz"
+          git -C private-lfc-ui -c core.autocrlf=false archive --format=tar.gz             307afeab287b283514e036aa82ea1bd331dbac2a             -o "$GITHUB_WORKSPACE/private-vcpkg/.freerdp-upstream/downloads/lfc-ui-307afeab287b283514e036aa82ea1bd331dbac2a.tar.gz"
       - name: Install and export lfc-ui freerdp feature
         shell: bash
         env:
@@ -370,12 +370,20 @@ jobs:
               message(FATAL_ERROR "missing target ${t}")
             endif()
           endforeach()
+          if(TARGET PkgConfig::LFC_UI_HARFBUZZ)
+            foreach(_property IN ITEMS INTERFACE_LINK_LIBRARIES INTERFACE_LINK_OPTIONS)
+              get_target_property(_items PkgConfig::LFC_UI_HARFBUZZ ${_property})
+              if(_items AND "${_items}" MATCHES "(^|;)(stdc\\+\\+|-lstdc\\+\\+|[^;]*libstdc\\+\\+\\.(a|so([^;]*)))(;|$)")
+                message(FATAL_ERROR "LFC_UI_FREERDP_HARFBUZZ_CXX_RUNTIME_LEAK property=${_property}")
+              endif()
+            endforeach()
+          endif()
           add_executable(lfc_ui_freerdp_probe main.cpp)
           target_link_libraries(lfc_ui_freerdp_probe PRIVATE lfc::ui)
           target_link_options(lfc_ui_freerdp_probe PRIVATE -static-libstdc++ -static-libgcc)
           CMAKE
           cmake -S "$src" -B "$build" -G Ninja             "-DCMAKE_TOOLCHAIN_FILE=$LFC_UI_FREERDP_SDK/scripts/buildsystems/vcpkg.cmake"             -DVCPKG_TARGET_TRIPLET=x64-linux-static-release             -DVCPKG_HOST_TRIPLET=x64-linux-static-release             -DVCPKG_MANIFEST_MODE=OFF
-          cmake --build "$build" --parallel 2
+          cmake --build "$build" --parallel 2 --verbose 2>&1 | tee "$RUNNER_TEMP/lfc-ui-freerdp-probe-build.log"
           "$build/lfc_ui_freerdp_probe"
           readelf_log="$RUNNER_TEMP/lfc-ui-freerdp-readelf.log"
           readelf -d "$build/lfc_ui_freerdp_probe" >"$readelf_log"

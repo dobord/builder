@@ -119,7 +119,7 @@ index 3a7f5aa..4bc04cf 100644
         "ports/lfc-ui/vcpkg.json": json.dumps(lfc_manifest, sort_keys=True) + "\n",
         "ports/lfc-ui/usage": ("ffmpeg-minimal\n" if minimal else "full\n"),
         "ports/lfc-ui/portfile.cmake": (
-            'REF "34849ac3ad69471d811ea889060c6a602291db28"\n'
+            'REF "307afeab287b283514e036aa82ea1bd331dbac2a"\n'
             if minimal else
             'REF "85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5"\n'
         ),
@@ -127,7 +127,7 @@ index 3a7f5aa..4bc04cf 100644
             "ports": [{
                 "name": "lfc-ui",
                 "sha": (
-                    "34849ac3ad69471d811ea889060c6a602291db28"
+                    "307afeab287b283514e036aa82ea1bd331dbac2a"
                     if minimal else
                     "85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5"
                 ),
@@ -159,7 +159,33 @@ index 3a7f5aa..4bc04cf 100644
                 }]
             )
         }, sort_keys=True) + "\n",
-        "versions/l-/lfc-ui.json": ("registry-minimal\n" if minimal else "registry-full\n"),
+        "versions/l-/lfc-ui.json": json.dumps({
+            "versions": (
+                [{
+                    "git-tree": "32031e102f46733d5ff6fefc0954652e2eb17fcd",
+                    "version": "0.3.0",
+                    "port-version": 11,
+                }, {
+                    "git-tree": "9cc7498e3dd005babec671f17cc7dcea26797c45",
+                    "version": "0.3.0",
+                    "port-version": 10,
+                }, {
+                    "git-tree": "cf9f360b1433c1aec5c8eabb4a2fcd3b551627bf",
+                    "version": "0.3.0",
+                    "port-version": 9,
+                }, {
+                    "git-tree": "old-lfc-tree",
+                    "version": "0.3.0",
+                    "port-version": 8,
+                }]
+                if minimal else
+                [{
+                    "git-tree": "old-lfc-tree",
+                    "version": "0.3.0",
+                    "port-version": 8,
+                }]
+            )
+        }, sort_keys=True) + "\n",
         "ports/cef-static/vcpkg.json": "unchanged-engine-port\n",
     }
     for relative, content in files.items():
@@ -181,7 +207,7 @@ class StrictPublicationContractTests(unittest.TestCase):
             root = Path(folder)
             engine, sdk = root / "engine", root / "sdk"
             write_registry_fixture(engine, 8, False)
-            write_registry_fixture(sdk, 10, True)
+            write_registry_fixture(sdk, 11, True)
             engine_sha, sdk_sha = "1" * 40, "2" * 40
 
             def fake_head(path):
@@ -197,7 +223,7 @@ class StrictPublicationContractTests(unittest.TestCase):
             root = Path(folder)
             engine, sdk = root / "engine", root / "sdk"
             write_registry_fixture(engine, 8, False)
-            write_registry_fixture(sdk, 10, True)
+            write_registry_fixture(sdk, 11, True)
             (sdk / "ports/cef-static/vcpkg.json").write_text(
                 "changed-engine-port\n", encoding="utf-8"
             )
