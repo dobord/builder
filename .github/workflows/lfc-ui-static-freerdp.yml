@@ -146,7 +146,7 @@ jobs:
           terminal_text = "\n".join(
               p.read_text(errors="replace")[-524288:] for p in terminal_files
           )
-          diagnostic_text = terminal_text or install_text[-1048576:]
+          diagnostic_text = terminal_text + "\n" + install_text[-1048576:]
 
           category = "unknown"
           details = []
@@ -167,6 +167,15 @@ jobs:
           )
           cmake_package = re.search(
               r'Could not find a package configuration file provided by\s+["\']?([A-Za-z0-9+_.-]+)',
+              diagnostic_text, re.I,
+          )
+          cmake_not_found = re.search(
+              r"Could NOT find\s+([A-Za-z0-9+_.-]+)(?:\s|$)",
+              diagnostic_text, re.I,
+          )
+          referenced_target = re.search(
+              r"(?:imported targets are referenced, but are missing:|links to:)\s*"
+              r"[\"']?([A-Za-z0-9_.:+-]+)",
               diagnostic_text, re.I,
           )
           missing_path = re.search(
@@ -197,6 +206,16 @@ jobs:
               token = cmake_package.group(1).lower()
               if re.fullmatch(r"[a-z0-9+_.-]+", token):
                   details.append("missing_package=" + token)
+          elif cmake_not_found:
+              category = "missing-cmake-package"
+              token = cmake_not_found.group(1).lower()
+              if re.fullmatch(r"[a-z0-9+_.-]+", token):
+                  details.append("missing_package=" + token)
+          elif referenced_target:
+              category = "missing-target"
+              target = referenced_target.group(1)
+              if re.fullmatch(r"[A-Za-z0-9_.:+-]{1,160}", target):
+                  details.append("missing_target=" + target)
           elif missing_path:
               category = "missing-path"
               name = pathlib.PurePosixPath(

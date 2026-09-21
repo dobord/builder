@@ -220,7 +220,8 @@ def main() -> None:
             or cfg["recipe_commit"] != CEF):
         raise ValueError("Unexpected strict combined SDK plan")
 
-    lock = cef_strict_iteration.qualification_lock(workspace)
+    lock = cef_strict_iteration.qualification_lock(
+        workspace, "cef-strict-combined-lock.json")
     selected = lock["checkpoint"]
     if selected is None:
         raise ValueError("Strict combined SDK requires an explicit reviewed CEF checkpoint")
@@ -264,6 +265,7 @@ def main() -> None:
         cef_strict_iteration.restore_checkpoint(
             selected, restored_package, build_key,
             os.environ["BUILDER_INPUT_PRIVATE_KEY"],
+            allow_resumable=False,
         )
         driver = recipe / "vcpkg/integration/driver.py"
         recipe_env = clean_environment()

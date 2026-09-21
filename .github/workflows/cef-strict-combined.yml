@@ -7,7 +7,7 @@ on:
     paths:
       - .github/workflows/cef-strict-combined.yml
       - secure_release/cef_strict_combined.py
-      - ci/cef-strict-engine-lock.json
+      - ci/cef-strict-combined-lock.json
 permissions:
   contents: read
   actions: read
@@ -29,7 +29,7 @@ jobs:
         shell: python
         run: |
           import json, os, pathlib
-          value = json.loads(pathlib.Path("ci/cef-strict-engine-lock.json").read_text())
+          value = json.loads(pathlib.Path("ci/cef-strict-combined-lock.json").read_text())
           ready = isinstance(value, dict) and value.get("checkpoint") is not None
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as stream:
               stream.write("ready=" + ("true" if ready else "false") + "\n")

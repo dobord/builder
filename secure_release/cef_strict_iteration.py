@@ -123,6 +123,15 @@ def classify_compile_slice(logs: Path) -> dict:
     )
     if source:
         result["compile_failure_source"] = source.group(1)
+    missing_header = re.search(
+        r"fatal error:\s*[<\"']?([A-Za-z0-9_+./\\-]+)[>\"']?(?::)?\s*"
+        r"(?:file not found|No such file(?: or directory)?)",
+        text, re.I,
+    )
+    if missing_header:
+        name = Path(missing_header.group(1).replace("\\", "/")).name
+        if re.fullmatch(r"[A-Za-z0-9_+.-]{1,160}", name):
+            result["compile_failure_missing_header"] = name
     return result
 
 
@@ -153,8 +162,11 @@ def reviewed_binary_caches(temp: Path) -> list[Path]:
     return result
 
 
-def qualification_lock(workspace: Path) -> dict:
-    path = workspace / "ci/cef-strict-engine-lock.json"
+def qualification_lock(
+        workspace: Path, lock_name: str = "cef-strict-engine-lock.json") -> dict:
+    if lock_name not in {"cef-strict-engine-lock.json", "cef-strict-combined-lock.json"}:
+        raise ValueError("Invalid strict CEF qualification lock name")
+    path = workspace / "ci" / lock_name
     value = json.loads(path.read_text())
     if (not isinstance(value, dict)
             or set(value) != {"schema", "platform", "vcpkg_commit", "upstream_commit",
@@ -184,7 +196,8 @@ def qualification_lock(workspace: Path) -> dict:
     return value
 
 
-def verify_producer_summary(api: Client, selected: dict) -> dict:
+def verify_producer_summary(
+        api: Client, selected: dict, *, allow_resumable: bool = True) -> dict:
     run, revision = selected["run"], selected["producer_sha"]
     expected = f"cef-strict-iteration-summary-{run}-{selected['attempt']}"
     matches = [
@@ -223,9 +236,18 @@ def verify_producer_summary(api: Client, selected: dict) -> dict:
         and value.get("ready") is False
         and value.get("runtime_verified") is False
     )
-    reusable_status = value.get("status") == "success" or resumable_compile_failure
+    reusable_status = (
+        value.get("status") == "success"
+        or (allow_resumable and resumable_compile_failure)
+    )
+    complete_engine = (
+        value.get("status") == "success"
+        and value.get("ready") is True
+        and value.get("runtime_verified") is True
+    )
     if (value.get("schema") != 1
             or not reusable_status
+            or (not allow_resumable and not complete_engine)
             or value.get("checkpoint_ready") is not True
             or value.get("platform_graph_qualified") is not True
             or value.get("gn_graph_qualified") is not True
@@ -238,12 +260,13 @@ def verify_producer_summary(api: Client, selected: dict) -> dict:
 
 
 def restore_checkpoint(selected: dict, destination: Path, build_key: str,
-                       private_key: str) -> dict:
+                       private_key: str, *, allow_resumable: bool = True) -> dict:
     token = os.environ.get("GITHUB_TOKEN")
     if not token:
         raise ValueError("GITHUB_TOKEN is required to restore reviewed strict checkpoint")
     api = Client(token)
-    producer_summary = verify_producer_summary(api, selected)
+    producer_summary = verify_producer_summary(
+        api, selected, allow_resumable=allow_resumable)
     if build_key != selected["build_key"]:
         raise ValueError("Strict CEF checkpoint build key differs from producer summary")
     run, attempt, revision = (
