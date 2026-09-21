@@ -19,7 +19,10 @@ runs:
     - name: Install pinned log-encryption runtime
       if: ${{ inputs.public_key_b64 != '' }}
       shell: bash
-      run: python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r "$GITHUB_WORKSPACE/requirements.lock"
+      run: |
+        set -euo pipefail
+        tool_root="$(cd "$GITHUB_ACTION_PATH/../../.." && pwd)"
+        python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r "$tool_root/requirements.lock"
     - name: Encrypt runner-local diagnostics
       if: ${{ inputs.public_key_b64 != '' }}
       shell: bash
@@ -30,7 +33,8 @@ runs:
         set -euo pipefail
         out="$RUNNER_TEMP/builder-encrypted-logs/${GITHUB_JOB}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.enc"
         mkdir -p "$(dirname "$out")"
-        python -m secure_release.encrypted_logs collect --output "$out"
+        tool_root="$(cd "$GITHUB_ACTION_PATH/../../.." && pwd)"
+        PYTHONPATH="$tool_root" python -m secure_release.encrypted_logs collect --output "$out"
         test -s "$out"
         if find "$RUNNER_TEMP/builder-encrypted-logs" -type f ! -name '*.enc' -print -quit | grep -q .; then
           echo "BUILDER_ENCRYPTED_LOGS_PLAINTEXT_LEAK" >&2

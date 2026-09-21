@@ -268,3 +268,19 @@ jobs:
           & ctest --test-dir $consumer -C Release --output-on-failure --timeout 60 *> (Join-Path $env:RUNNER_TEMP 'sdk-deps-consumer-test.log')
           if ($LASTEXITCODE -ne 0) { throw 'SDK_DEPS_WINDOWS_CONSUMER_TEST_FAILED' }
           Write-Host 'SDK_DEPS_WINDOWS_QUALIFIED'
+      - name: Checkout builder encrypted-log tooling
+        if: always()
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: dobord/builder
+          ref: ${{ github.sha }}
+          path: builder-log-tools
+          persist-credentials: false
+      - name: Build encrypted diagnostic artifact
+        if: always()
+        uses: ./builder-log-tools/.github/actions/encrypted-logs
+        with:
+          public_key_b64: ${{ secrets.BUILDER_ENCRYPTED_LOGS_PUBLIC_KEY_B64 }}
+          roots: |
+            ${{ runner.temp }}
+            ${{ github.workspace }}/private-vcpkg/.sdk-upstream/buildtrees

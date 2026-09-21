@@ -33,11 +33,14 @@ class EncryptedLogArtifactTests(unittest.TestCase):
             nested = logs / "nested"
             nested.mkdir()
             (nested / "CMakeConfigureLog.yaml").write_text("cmake: error\n", encoding="utf-8")
+            (nested / "LastTestsFailed.log").write_text("1:test_name\n", encoding="utf-8")
+            (nested / "compiler.rsp").write_text("-Iinclude source.cpp\n", encoding="utf-8")
+            (nested / "results.trx").write_text("<TestRun/>\n", encoding="utf-8")
 
             encrypted = root / "artifact.enc"
             manifest = encrypted_logs.collect([logs], encrypted, public, context)
             self.assertTrue(encrypted.is_file())
-            self.assertEqual(manifest["file_count"], 3)
+            self.assertEqual(manifest["file_count"], 6)
             self.assertFalse(any("private-key" in item["relative_path"] for item in manifest["files"]))
 
             decrypted = root / "decrypted"
@@ -46,6 +49,8 @@ class EncryptedLogArtifactTests(unittest.TestCase):
             self.assertEqual((decrypted / "logs/00-runner/install.log").read_text(), "failure detail\n")
             self.assertFalse(any(path.name == "private-key.txt" for path in decrypted.rglob("*")))
             self.assertFalse(any(path.suffix == ".o" for path in decrypted.rglob("*")))
+            self.assertTrue(any(path.name == "compiler.rsp" for path in decrypted.rglob("*")))
+            self.assertTrue(any(path.name == "results.trx" for path in decrypted.rglob("*")))
 
     def test_wrong_private_key_is_rejected(self):
         private, public = crypto.generate("encrypt")
@@ -85,6 +90,8 @@ class EncryptedLogArtifactTests(unittest.TestCase):
         self.assertIn("builder-encrypted-logs/*.enc", action)
         self.assertIn("compression-level: 0", action)
         self.assertIn("PLAINTEXT_LEAK", action)
+        self.assertIn("GITHUB_ACTION_PATH", action)
+        self.assertIn("PYTHONPATH=", action)
         self.assertNotIn("*.log\n", action)
 
 

@@ -43,7 +43,7 @@ jobs:
         env:
           REQUIRE_TINK_TESTS: '1'
           REQUIRE_NATIVE_ARCHIVE_AUDIT: '1'
-        run: python -m unittest discover -s tests -v
+        run: python -m secure_release.logged_run --output "${{ runner.temp }}/builder-contract-tests.log" -- python -m unittest discover -s tests -v
       - name: Fetch exact public CEF integration recipe
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -53,8 +53,20 @@ jobs:
           persist-credentials: false
       - name: Test pinned CEF contracts
         working-directory: cef-recipe
-        run: python -m unittest discover -s vcpkg/integration/tests -v
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python -m secure_release.logged_run --output "${{ runner.temp }}/cef-integration-tests.log" -- python -m unittest discover -s vcpkg/integration/tests -v
       - name: Test pinned CEF static platform contracts
         if: runner.os == 'Linux'
         working-directory: cef-recipe
-        run: python -m unittest discover -s vcpkg/static/tests -p 'test_platform_*.py' -v
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python -m secure_release.logged_run --output "${{ runner.temp }}/cef-static-platform-tests.log" -- python -m unittest discover -s vcpkg/static/tests -p "test_platform_*.py" -v
+      - name: Build encrypted diagnostic artifact
+        if: always()
+        uses: ./.github/actions/encrypted-logs
+        with:
+          public_key_b64: ${{ secrets.BUILDER_ENCRYPTED_LOGS_PUBLIC_KEY_B64 }}
+          roots: |
+            ${{ runner.temp }}
+            ${{ github.workspace }}/cef-recipe

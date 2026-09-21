@@ -35,9 +35,11 @@ _SKIP_SUFFIXES = {
 }
 _LOG_SUFFIXES = {
     ".log", ".out", ".err", ".txt", ".json", ".yaml", ".yml",
+    ".xml", ".trx", ".rsp", ".stdout", ".stderr", ".trace",
 }
 _LOG_NAMES = {
     "cmakecache.txt", "cmakeconfigurelog.yaml", ".ninja_log",
+    "compile_commands.json", "lasttest.log", "lasttestsfailed.log",
 }
 _FORBIDDEN_NAME = re.compile(
     r"(?:credential|secret|token|private[-_. ]?key)", re.I
