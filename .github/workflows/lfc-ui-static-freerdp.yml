@@ -314,6 +314,30 @@ jobs:
             echo "LFC_UI_FREERDP_SHARED_TARGET_PAYLOAD" >&2
             exit 1
           fi
+          python - "$sdk" "$installed" "$upstream/buildtrees" "$upstream/packages" <<'PY'
+          import pathlib, sys
+          sdk = pathlib.Path(sys.argv[1]).resolve()
+          needles = [str(pathlib.Path(value).resolve()) for value in sys.argv[2:]]
+          hits = []
+          for path in sdk.rglob("*"):
+              if (not path.is_file() or path.is_symlink()
+                      or path.suffix.lower() not in {".cmake", ".pc", ".la"}
+                      or path.stat().st_size > 16 * 1024**2):
+                  continue
+              text = path.read_text(encoding="utf-8", errors="replace")
+              if any(needle in text for needle in needles):
+                  hits.append(path.relative_to(sdk).as_posix())
+          if hits:
+              names = ",".join(pathlib.PurePosixPath(item).name for item in hits[:12])
+              raise SystemExit(
+                  f"LFC_UI_FREERDP_NONRELOCATABLE_METADATA count={len(hits)} files={names}"
+              )
+          PY
+          rm -rf "$installed"
+          if [ -e "$installed" ]; then
+            echo "LFC_UI_FREERDP_PRODUCER_INSTALL_ROOT_PRESENT" >&2
+            exit 1
+          fi
           echo "LFC_UI_FREERDP_SDK=$sdk" >> "$GITHUB_ENV"
       - name: Link relocated FreeRDP proxy and server probe
         shell: bash
@@ -353,10 +377,24 @@ jobs:
           cmake -S "$src" -B "$build" -G Ninja             "-DCMAKE_TOOLCHAIN_FILE=$LFC_UI_FREERDP_SDK/scripts/buildsystems/vcpkg.cmake"             -DVCPKG_TARGET_TRIPLET=x64-linux-static-release             -DVCPKG_HOST_TRIPLET=x64-linux-static-release             -DVCPKG_MANIFEST_MODE=OFF
           cmake --build "$build" --parallel 2
           "$build/lfc_ui_freerdp_probe"
-          if readelf -d "$build/lfc_ui_freerdp_probe" | grep -Eiq 'libfreerdp|libwinpr|libavcodec|libavformat|libavutil|libavfilter|libswscale|libswresample|libstdc\+\+|libgcc_s'; then
-            echo "LFC_UI_FREERDP_SHARED_RUNTIME_DEPENDENCY" >&2
-            exit 1
-          fi
+          readelf_log="$RUNNER_TEMP/lfc-ui-freerdp-readelf.log"
+          readelf -d "$build/lfc_ui_freerdp_probe" >"$readelf_log"
+          python - "$readelf_log" <<'PY'
+          import pathlib, re, sys
+          text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace")
+          needed = re.findall(r"\(NEEDED\).*?Shared library:\s*\[([^\]]+)\]", text)
+          forbidden = re.compile(
+              r"^(?:libfreerdp|libwinpr|libavcodec|libavformat|libavutil|libavfilter|"
+              r"libswscale|libswresample|libstdc\+\+|libgcc_s)",
+              re.I,
+          )
+          hits = sorted({name for name in needed if forbidden.search(name)})
+          if hits:
+              raise SystemExit(
+                  "LFC_UI_FREERDP_SHARED_RUNTIME_DEPENDENCY names=" + ",".join(hits)
+              )
+          print("LFC_UI_FREERDP_DT_NEEDED names=" + ",".join(needed))
+          PY
           echo "LFC_UI_STATIC_FREERDP_QUALIFIED"
       - name: Build encrypted diagnostic artifact
         if: always()

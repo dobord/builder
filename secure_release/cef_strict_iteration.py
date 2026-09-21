@@ -24,6 +24,13 @@ VCPKG = "b4bb281192ea8bb004542012ac804b988a4ff403"
 UPSTREAM = "9e593bb18ea69cc5095e012465dcd675a822ed0d"
 CEF = "2aff22e09daaa5c28780c5766a70ee13e61c93b6"
 TRIPLET = "x64-linux-static-release"
+CHROMIUM_SYSROOT_AMD64 = {
+    "Sha256Sum": "52d61d4446ffebfaa3dda2cd02da4ab4876ff237853f46d273e7f9b666652e1d",
+    "SysrootDir": "debian_bullseye_amd64-sysroot",
+    "Tarball": "debian_bullseye_amd64_sysroot.tar.xz",
+    "URL": "https://commondatastorage.googleapis.com/chrome-linux-sysroot",
+}
+CHROMIUM_SYSROOT_REQUIRED_HEADER = "usr/include/X11/Xlib-xcb.h"
 
 
 def git_head(path: Path) -> str:
@@ -46,6 +53,69 @@ def run(command, *, cwd: Path, env: dict, log: Path, timeout: int,
     if check and result.returncode:
         raise RuntimeError("strict CEF qualification subprocess failed")
     return result
+
+
+def ensure_chromium_sysroot(
+        source: Path, temp: Path, env: dict, summary: dict) -> None:
+    """Verify or restore Chromium's exact pinned amd64 sysroot.
+
+    Target compilation runs with use_sysroot=true, so a host /usr/include
+    package must never paper over a damaged checkpoint. The installer consumes
+    the pinned sysroots.json entry and verifies the tarball SHA-256 itself.
+    """
+    scripts = source / "build/linux/sysroot_scripts"
+    spec_path = scripts / "sysroots.json"
+    if not spec_path.is_file() or spec_path.is_symlink():
+        raise ValueError("Pinned Chromium sysroots.json is missing or redirected")
+    spec = json.loads(spec_path.read_text(encoding="utf-8"))
+    entry = spec.get("bullseye_amd64") if isinstance(spec, dict) else None
+    if entry != CHROMIUM_SYSROOT_AMD64:
+        raise ValueError("Pinned Chromium amd64 sysroot definition changed")
+
+    linux_root = source / "build/linux"
+    sysroot = linux_root / CHROMIUM_SYSROOT_AMD64["SysrootDir"]
+    header = sysroot / CHROMIUM_SYSROOT_REQUIRED_HEADER
+    stamp = sysroot / ".stamp"
+    expected_stamp = (
+        CHROMIUM_SYSROOT_AMD64["URL"].rstrip("/")
+        + "/" + CHROMIUM_SYSROOT_AMD64["Sha256Sum"]
+    )
+
+    def valid() -> bool:
+        return (
+            sysroot.is_dir()
+            and not sysroot.is_symlink()
+            and header.is_file()
+            and not header.is_symlink()
+            and header.stat().st_size > 0
+            and stamp.is_file()
+            and not stamp.is_symlink()
+            and stamp.read_text(encoding="utf-8").strip() == expected_stamp
+        )
+
+    repaired = False
+    if not valid():
+        if sysroot.exists() or sysroot.is_symlink():
+            if sysroot.is_symlink() or not sysroot.is_dir():
+                raise ValueError("Chromium sysroot path is redirected or not a directory")
+            if not sysroot.resolve().is_relative_to(linux_root.resolve()):
+                raise ValueError("Chromium sysroot escaped the source workspace")
+            shutil.rmtree(sysroot)
+        installer = scripts / "install-sysroot.py"
+        if not installer.is_file() or installer.is_symlink():
+            raise ValueError("Pinned Chromium sysroot installer is missing or redirected")
+        run(
+            [sys.executable, installer, "--arch=amd64"],
+            cwd=source, env=env,
+            log=temp / "cef-chromium-sysroot-install.log", timeout=1800,
+        )
+        repaired = True
+
+    if not valid():
+        raise RuntimeError("Pinned Chromium amd64 sysroot is incomplete after verification")
+    summary["sysroot_repaired"] = repaired
+    summary["sysroot_header_verified"] = True
+    summary["sysroot_name"] = CHROMIUM_SYSROOT_AMD64["SysrootDir"]
 
 
 def classify_private_log(path: Path) -> tuple[str, str]:
@@ -109,13 +179,19 @@ def classify_compile_slice(logs: Path) -> dict:
         category = "compiler-error"
     else:
         category = "unknown"
+    sysroot_flags = re.findall(r"(?:^|\\s)--sysroot=([^\\s\"']+)", text)
     result = {
         "compile_failure_category": category,
         "compile_failure_timed_out": status.get("timed_out") is True,
         "compile_failure_unsafe_stop": status.get("unsafe_stop") is True,
         "compile_failure_failed_output_count": len(failed),
         "compile_failure_failed_outputs": [Path(name).name for name in failed[-4:]],
+        "compile_failure_uses_sysroot": bool(sysroot_flags),
     }
+    if sysroot_flags:
+        sysroot_name = Path(sysroot_flags[-1].replace("\\\\", "/")).name
+        if re.fullmatch(r"debian_[A-Za-z0-9_-]+-sysroot", sysroot_name):
+            result["compile_failure_sysroot_name"] = sysroot_name
     source = re.search(
         r"(?:^|\n)(?:[^\r\n ]*[/\\])?([A-Za-z0-9_.+-]+\.(?:c|cc|cpp|cxx|m|mm))"
         r":\d+(?::\d+)?:\s+(?:fatal\s+)?error:",
@@ -494,6 +570,11 @@ def main() -> None:
              "--no-prompt", "--no-arm", "--no-chromeos-fonts"],
             cwd=recipe, env=clean_env,
             log=temp / "cef-install-build-deps.log", timeout=1800
+        )
+
+        stage = "sysroot-preflight"
+        ensure_chromium_sysroot(
+            engine_work / "download/chromium/src", temp, clean_env, summary
         )
 
         stage = "gn-check"
