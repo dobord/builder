@@ -78,6 +78,7 @@ jobs:
       - name: Run exact strict platform and Chromium iteration
         id: strict
         env:
+          GITHUB_TOKEN: ${{ github.token }}
           BUILDER_INPUT_PRIVATE_KEY: ${{ secrets.BUILDER_INPUT_PRIVATE_KEY }}
           CEF_STRICT_BINARY_CACHE_CORE: ${{ runner.temp }}/cef-strict-cache/core
           CEF_STRICT_BINARY_CACHE_CUPS: ${{ runner.temp }}/cef-strict-cache/cups

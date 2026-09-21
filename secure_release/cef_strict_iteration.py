@@ -239,7 +239,10 @@ def verify_producer_summary(api: Client, selected: dict) -> dict:
 
 def restore_checkpoint(selected: dict, destination: Path, build_key: str,
                        private_key: str) -> dict:
-    api = Client(os.environ["GITHUB_TOKEN"])
+    token = os.environ.get("GITHUB_TOKEN")
+    if not token:
+        raise ValueError("GITHUB_TOKEN is required to restore reviewed strict checkpoint")
+    api = Client(token)
     producer_summary = verify_producer_summary(api, selected)
     if build_key != selected["build_key"]:
         raise ValueError("Strict CEF checkpoint build key differs from producer summary")
