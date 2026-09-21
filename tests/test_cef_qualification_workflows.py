@@ -296,10 +296,13 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn("replay_text[failed[-1]:]", text)
         self.assertNotIn("upload-artifact", text)
 
-    def test_lfc_ui_static_freerdp_workflow_is_relocated_and_static(self):
+    def test_lfc_ui_freerdp_regression_workflow_is_relocated_and_static(self):
         text = (ROOT / ".github/workflows/lfc-ui-static-freerdp.yml").read_text()
         self.assertIn("ref: b4bb281192ea8bb004542012ac804b988a4ff403", text)
         self.assertIn("'lfc-ui[freerdp]'", text)
+        self.assertIn("name: lfc-ui FreeRDP regression qualification", text)
+        self.assertIn("Final product integration is qualified by Strict CEF combined SDK qualification", text)
+        self.assertIn("lfc-ui[cef,freerdp,lockfreecoro]", text)
         self.assertIn("freerdp-server-proxy", text)
         self.assertIn("freerdp-shadow", text)
         self.assertIn("LFC_UI_FREERDP_SHARED_TARGET_PAYLOAD", text)

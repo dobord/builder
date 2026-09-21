@@ -1,4 +1,7 @@
-name: lfc-ui static FreeRDP feature qualification
+name: lfc-ui FreeRDP regression qualification
+# Narrow packaging/link regression gate for the FreeRDP feature only.
+# Final product integration is qualified by Strict CEF combined SDK qualification,
+# whose release plan installs lfc-ui[cef,freerdp,lockfreecoro].
 on:
   push:
     branches:
