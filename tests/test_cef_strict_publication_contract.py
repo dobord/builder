@@ -89,6 +89,33 @@ def write_registry_fixture(root: Path, lfc_port_version: int, minimal: bool) -> 
         },
     }
     files = {
+        "ports/freerdp/vcpkg.json": json.dumps({
+            "name": "freerdp",
+            "version": "3.31.1",
+            "port-version": 24 if minimal else 23,
+            "features": {"proxy": {"description": "unchanged"}},
+        }, sort_keys=True) + "\n",
+        "ports/freerdp/portfile.cmake": (
+            "PATCHES\n        static-libusb-client.patch\n"
+            + ("        static-shadow-winpr-tools-dependency.patch\n" if minimal else "")
+            + "        install-layout.patch\n"
+        ),
+        "ports/freerdp/static-shadow-winpr-tools-dependency.patch": (
+            """diff --git a/server/shadow/FreeRDP-ShadowConfig.cmake.in b/server/shadow/FreeRDP-ShadowConfig.cmake.in
+index 3a7f5aa..4bc04cf 100644
+--- a/server/shadow/FreeRDP-ShadowConfig.cmake.in
++++ b/server/shadow/FreeRDP-ShadowConfig.cmake.in
+@@ -1,5 +1,8 @@
+ include(CMakeFindDependencyMacro)
+ find_dependency(WinPR @FREERDP_VERSION@)
++if("@WITH_WINPR_TOOLS@" AND NOT "@BUILD_SHARED_LIBS@")
++  find_dependency(WinPR-tools @FREERDP_VERSION@)
++endif()
+ find_dependency(FreeRDP @FREERDP_VERSION@)
+ find_dependency(FreeRDP-Server @FREERDP_VERSION@)
+ 
+""" if minimal else None
+        ),
         "ports/lfc-ui/vcpkg.json": json.dumps(lfc_manifest, sort_keys=True) + "\n",
         "ports/lfc-ui/usage": ("ffmpeg-minimal\n" if minimal else "full\n"),
         "ports/lfc-ui/portfile.cmake": (
@@ -109,14 +136,35 @@ def write_registry_fixture(root: Path, lfc_port_version: int, minimal: bool) -> 
         "versions/baseline.json": json.dumps({
             "default": {
                 "lfc-ui": {"baseline": "0.3.0", "port-version": lfc_port_version},
-                "freerdp": {"baseline": "3.31.1", "port-version": 23},
+                "freerdp": {"baseline": "3.31.1", "port-version": 24 if minimal else 23},
                 "cef-static": {"baseline": "152.0.6", "port-version": 15},
             }
+        }, sort_keys=True) + "\n",
+        "versions/f-/freerdp.json": json.dumps({
+            "versions": (
+                [{
+                    "git-tree": "aceadca1288983390522864e4d6c42b38ae84a6a",
+                    "version": "3.31.1",
+                    "port-version": 24,
+                }, {
+                    "git-tree": "old-tree",
+                    "version": "3.31.1",
+                    "port-version": 23,
+                }]
+                if minimal else
+                [{
+                    "git-tree": "old-tree",
+                    "version": "3.31.1",
+                    "port-version": 23,
+                }]
+            )
         }, sort_keys=True) + "\n",
         "versions/l-/lfc-ui.json": ("registry-minimal\n" if minimal else "registry-full\n"),
         "ports/cef-static/vcpkg.json": "unchanged-engine-port\n",
     }
     for relative, content in files.items():
+        if content is None:
+            continue
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
@@ -128,7 +176,7 @@ class StrictPublicationContractTests(unittest.TestCase):
         cfg["profile"] = "static-third-party"
         return cfg
 
-    def test_reviewed_lfc_ui_v8_to_v10_registry_delta_is_accepted(self):
+    def test_reviewed_lfc_ui_and_freerdp_registry_delta_is_accepted(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             engine, sdk = root / "engine", root / "sdk"
@@ -161,7 +209,7 @@ class StrictPublicationContractTests(unittest.TestCase):
             with patch.object(cef_strict_combined, "ENGINE_VCPKG", engine_sha), \
                  patch.object(cef_strict_combined, "SDK_VCPKG", sdk_sha), \
                  patch.object(cef_strict_combined, "git_head", side_effect=fake_head):
-                with self.assertRaisesRegex(ValueError, "outside the reviewed lfc-ui dependency delta"):
+                with self.assertRaisesRegex(ValueError, "outside the reviewed lfc-ui/FreeRDP dependency delta"):
                     cef_strict_combined.verify_engine_registry_delta(engine, sdk)
 
     def test_strict_linux_capture_requires_complete_signed_preflight(self):
