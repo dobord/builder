@@ -73,7 +73,7 @@ def write_registry_fixture(root: Path, lfc_port_version: int, minimal: bool) -> 
     freerdp_dependency = {
         "name": "freerdp",
         "default-features": False,
-        "features": ["proxy", "x11"] if minimal else ["full"],
+        "features": ["ffmpeg", "proxy", "x11"] if minimal else ["full"],
     }
     lfc_manifest = {
         "name": "lfc-ui",
@@ -90,7 +90,22 @@ def write_registry_fixture(root: Path, lfc_port_version: int, minimal: bool) -> 
     }
     files = {
         "ports/lfc-ui/vcpkg.json": json.dumps(lfc_manifest, sort_keys=True) + "\n",
-        "ports/lfc-ui/usage": ("minimal\n" if minimal else "full\n"),
+        "ports/lfc-ui/usage": ("ffmpeg-minimal\n" if minimal else "full\n"),
+        "ports/lfc-ui/portfile.cmake": (
+            'REF "34849ac3ad69471d811ea889060c6a602291db28"\n'
+            if minimal else
+            'REF "85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5"\n'
+        ),
+        "ci/release-plan.json": json.dumps({
+            "ports": [{
+                "name": "lfc-ui",
+                "sha": (
+                    "34849ac3ad69471d811ea889060c6a602291db28"
+                    if minimal else
+                    "85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5"
+                ),
+            }]
+        }, sort_keys=True) + "\n",
         "versions/baseline.json": json.dumps({
             "default": {
                 "lfc-ui": {"baseline": "0.3.0", "port-version": lfc_port_version},
@@ -113,12 +128,12 @@ class StrictPublicationContractTests(unittest.TestCase):
         cfg["profile"] = "static-third-party"
         return cfg
 
-    def test_reviewed_lfc_ui_v8_to_v9_registry_delta_is_accepted(self):
+    def test_reviewed_lfc_ui_v8_to_v10_registry_delta_is_accepted(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             engine, sdk = root / "engine", root / "sdk"
             write_registry_fixture(engine, 8, False)
-            write_registry_fixture(sdk, 9, True)
+            write_registry_fixture(sdk, 10, True)
             engine_sha, sdk_sha = "1" * 40, "2" * 40
 
             def fake_head(path):
@@ -134,7 +149,7 @@ class StrictPublicationContractTests(unittest.TestCase):
             root = Path(folder)
             engine, sdk = root / "engine", root / "sdk"
             write_registry_fixture(engine, 8, False)
-            write_registry_fixture(sdk, 9, True)
+            write_registry_fixture(sdk, 10, True)
             (sdk / "ports/cef-static/vcpkg.json").write_text(
                 "changed-engine-port\n", encoding="utf-8"
             )
