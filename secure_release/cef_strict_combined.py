@@ -22,7 +22,7 @@ from . import build_support, cef_build, cef_contract, crypto, safeio
 from . import cef_strict_iteration
 
 ENGINE_VCPKG = "b4bb281192ea8bb004542012ac804b988a4ff403"
-SDK_VCPKG = "665244504c5ac3f5f87371e59d6d382e4a68ac83"
+SDK_VCPKG = "bf68c0cf323ff98dcf5340dda5d92e80b7f1f681"
 UPSTREAM = "9e593bb18ea69cc5095e012465dcd675a822ed0d"
 CEF = "2aff22e09daaa5c28780c5766a70ee13e61c93b6"
 LOCKFREECORO = "24038aed3a0be642adb60e71bd994ae8f0d90140"
@@ -65,25 +65,37 @@ def verify_engine_registry_delta(engine: Path, sdk: Path) -> None:
     }
     required = {
         "ci/release-plan.json",
+        "ports/freerdp/portfile.cmake",
+        "ports/freerdp/static-shadow-winpr-tools-dependency.patch",
+        "ports/freerdp/vcpkg.json",
         "ports/lfc-ui/portfile.cmake",
         "ports/lfc-ui/usage",
         "ports/lfc-ui/vcpkg.json",
         "versions/baseline.json",
+        "versions/f-/freerdp.json",
         "versions/l-/lfc-ui.json",
     }
     if changed != required:
-        raise ValueError("Final SDK registry changed outside the reviewed lfc-ui dependency delta")
+        raise ValueError(
+            "Final SDK registry changed outside the reviewed lfc-ui/FreeRDP dependency delta"
+        )
 
     old_baseline = json.loads((engine / "versions/baseline.json").read_text())
     new_baseline = json.loads((sdk / "versions/baseline.json").read_text())
     old_lfc = old_baseline["default"].pop("lfc-ui")
     new_lfc = new_baseline["default"].pop("lfc-ui")
+    old_freerdp = old_baseline["default"].pop("freerdp")
+    new_freerdp = new_baseline["default"].pop("freerdp")
     if old_baseline != new_baseline:
-        raise ValueError("Registry baseline changed outside lfc-ui")
+        raise ValueError("Registry baseline changed outside lfc-ui/FreeRDP")
     if (old_lfc.get("baseline"), old_lfc.get("port-version")) != ("0.3.0", 8):
         raise ValueError("Unexpected engine-registry lfc-ui baseline")
     if (new_lfc.get("baseline"), new_lfc.get("port-version")) != ("0.3.0", 10):
         raise ValueError("Unexpected final-registry lfc-ui baseline")
+    if (old_freerdp.get("baseline"), old_freerdp.get("port-version")) != ("3.31.1", 23):
+        raise ValueError("Unexpected engine-registry FreeRDP baseline")
+    if (new_freerdp.get("baseline"), new_freerdp.get("port-version")) != ("3.31.1", 24):
+        raise ValueError("Unexpected final-registry FreeRDP baseline")
 
     old_manifest = json.loads((engine / "ports/lfc-ui/vcpkg.json").read_text())
     new_manifest = json.loads((sdk / "ports/lfc-ui/vcpkg.json").read_text())
@@ -125,6 +137,58 @@ def verify_engine_registry_delta(engine: Path, sdk: Path) -> None:
     old_lfc_source["sha"] = new_lfc_source["sha"]
     if old_plan != new_plan:
         raise ValueError("Release plan changed outside the reviewed lfc-ui source revision")
+
+    old_freerdp_manifest = json.loads((engine / "ports/freerdp/vcpkg.json").read_text())
+    new_freerdp_manifest = json.loads((sdk / "ports/freerdp/vcpkg.json").read_text())
+    old_freerdp_port_version = old_freerdp_manifest.pop("port-version")
+    new_freerdp_port_version = new_freerdp_manifest.pop("port-version")
+    if (old_freerdp_port_version != 23 or new_freerdp_port_version != 24
+            or old_freerdp_manifest != new_freerdp_manifest):
+        raise ValueError("FreeRDP registry delta changed outside port-version")
+
+    old_freerdp_portfile = (engine / "ports/freerdp/portfile.cmake").read_text()
+    new_freerdp_portfile = (sdk / "ports/freerdp/portfile.cmake").read_text()
+    patch_anchor = "        static-libusb-client.patch\n        install-layout.patch\n"
+    expected_portfile = old_freerdp_portfile.replace(
+        patch_anchor,
+        "        static-libusb-client.patch\n"
+        "        static-shadow-winpr-tools-dependency.patch\n"
+        "        install-layout.patch\n",
+        1,
+    )
+    if (patch_anchor not in old_freerdp_portfile
+            or expected_portfile != new_freerdp_portfile):
+        raise ValueError("Unexpected FreeRDP portfile delta")
+
+    expected_patch = """diff --git a/server/shadow/FreeRDP-ShadowConfig.cmake.in b/server/shadow/FreeRDP-ShadowConfig.cmake.in
+index 3a7f5aa..4bc04cf 100644
+--- a/server/shadow/FreeRDP-ShadowConfig.cmake.in
++++ b/server/shadow/FreeRDP-ShadowConfig.cmake.in
+@@ -1,5 +1,8 @@
+ include(CMakeFindDependencyMacro)
+ find_dependency(WinPR @FREERDP_VERSION@)
++if("@WITH_WINPR_TOOLS@" AND NOT "@BUILD_SHARED_LIBS@")
++  find_dependency(WinPR-tools @FREERDP_VERSION@)
++endif()
+ find_dependency(FreeRDP @FREERDP_VERSION@)
+ find_dependency(FreeRDP-Server @FREERDP_VERSION@)
+ 
+"""
+    if (sdk / "ports/freerdp/static-shadow-winpr-tools-dependency.patch").read_text() != expected_patch:
+        raise ValueError("Unexpected FreeRDP static Shadow dependency patch")
+
+    old_versions = json.loads((engine / "versions/f-/freerdp.json").read_text())
+    new_versions = json.loads((sdk / "versions/f-/freerdp.json").read_text())
+    expected_new_entry = {
+        "git-tree": "aceadca1288983390522864e4d6c42b38ae84a6a",
+        "version": "3.31.1",
+        "port-version": 24,
+    }
+    if (not isinstance(old_versions.get("versions"), list)
+            or not isinstance(new_versions.get("versions"), list)
+            or new_versions["versions"][:1] != [expected_new_entry]
+            or new_versions["versions"][1:] != old_versions["versions"]):
+        raise ValueError("Unexpected FreeRDP versions registry delta")
 
 
 def clean_environment() -> dict[str, str]:
