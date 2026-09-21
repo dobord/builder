@@ -87,6 +87,7 @@ class EncryptedLogArtifactTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("ШИФРОВАНЫЕ ЛОГИ-", action)
         self.assertIn("BUILDER_ENCRYPTED_LOGS_PUBLIC_KEY_B64", action)
+        self.assertIn("ci/builder-logs-public-key.b64", action)
         self.assertIn("builder-encrypted-logs/*.enc", action)
         self.assertIn("compression-level: 0", action)
         self.assertIn("PLAINTEXT_LEAK", action)
