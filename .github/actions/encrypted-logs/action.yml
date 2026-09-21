@@ -43,7 +43,7 @@ runs:
       if: ${{ always() }}
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       with:
-        name: ШИФРОВАНЫЕ ЛОГИ-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
+        name: ШИФРОВАНЫЕ ЛОГИ-${{ github.job }}-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
         path: ${{ runner.temp }}/builder-encrypted-logs/*.enc
         compression-level: 0
         retention-days: 14
