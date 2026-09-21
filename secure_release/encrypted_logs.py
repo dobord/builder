@@ -18,7 +18,7 @@ from . import crypto
 MAX_SINGLE_FILE = 128 * 1024**2
 MAX_TOTAL_BYTES = 2 * 1024**3
 MAX_FILES = 20000
-MAX_DEPTH = 12
+MAX_DEPTH = 20
 
 _SKIP_DIRS = {
     ".git", ".svn", "__pycache__", "node_modules",
