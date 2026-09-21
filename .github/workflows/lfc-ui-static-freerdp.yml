@@ -24,7 +24,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/vcpkg
-          ref: 60c9e0c043702334036d1b7b8b8cd67c97318da2
+          ref: 665244504c5ac3f5f87371e59d6d382e4a68ac83
           path: private-vcpkg
           token: ${{ secrets.SOURCE_READ_TOKEN }}
           persist-credentials: false
@@ -37,7 +37,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/lfc-ui
-          ref: 85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5
+          ref: 34849ac3ad69471d811ea889060c6a602291db28
           path: private-lfc-ui
           token: ${{ secrets.SOURCE_READ_TOKEN }}
           persist-credentials: false
@@ -63,11 +63,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C private-vcpkg rev-parse HEAD)" = "60c9e0c043702334036d1b7b8b8cd67c97318da2"
+          test "$(git -C private-vcpkg rev-parse HEAD)" = "665244504c5ac3f5f87371e59d6d382e4a68ac83"
           test "$(git -C private-vcpkg/.freerdp-upstream rev-parse HEAD)" = "9e593bb18ea69cc5095e012465dcd675a822ed0d"
-          test "$(git -C private-lfc-ui rev-parse HEAD)" = "85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5"
+          test "$(git -C private-lfc-ui rev-parse HEAD)" = "34849ac3ad69471d811ea889060c6a602291db28"
           mkdir -p private-vcpkg/.freerdp-upstream/downloads
-          git -C private-lfc-ui -c core.autocrlf=false archive --format=tar.gz             85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5             -o "$GITHUB_WORKSPACE/private-vcpkg/.freerdp-upstream/downloads/lfc-ui-85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5.tar.gz"
+          git -C private-lfc-ui -c core.autocrlf=false archive --format=tar.gz             34849ac3ad69471d811ea889060c6a602291db28             -o "$GITHUB_WORKSPACE/private-vcpkg/.freerdp-upstream/downloads/lfc-ui-34849ac3ad69471d811ea889060c6a602291db28.tar.gz"
       - name: Install and export lfc-ui freerdp feature
         shell: bash
         env:
@@ -242,8 +242,204 @@ jobs:
             echo "LFC_UI_FREERDP_STATUS_MISSING" >&2
             exit 1
           fi
-          if grep -Eq '^Package: (ffmpeg|libdvdcss)$' "$status_file"; then
-            echo "LFC_UI_FREERDP_UNEXPECTED_MEDIA_GRAPH" >&2
+          if ! grep -Eq '^Package: ffmpeg          export_root="$RUNNER_TEMP/lfc-ui-freerdp-export"
+          mkdir -p "$export_root"
+          set +e
+          "$upstream/vcpkg" export lfc-ui freerdp ffmpeg "${common[@]}"             --raw --output=sdk "--output-dir=$export_root" >"$RUNNER_TEMP/lfc-ui-freerdp-export.log" 2>&1
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ]; then
+            echo "LFC_UI_FREERDP_EXPORT_FAILURE" >&2
+            exit "$rc"
+          fi
+          sdk="$export_root/sdk"
+          mkdir -p "$sdk/triplets"
+          cp "$GITHUB_WORKSPACE/private-vcpkg/triplets/x64-linux-static-release.cmake" "$sdk/triplets/"
+          prefix="$sdk/installed/x64-linux-static-release"
+          if find "$prefix" -type f \( -name '*.so' -o -name '*.so.*' -o -name '*.dll' -o -name '*.dylib' \) -print -quit | grep -q .; then
+            echo "LFC_UI_FREERDP_SHARED_TARGET_PAYLOAD" >&2
+            exit 1
+          fi
+          echo "LFC_UI_FREERDP_SDK=$sdk" >> "$GITHUB_ENV"
+      - name: Link relocated FreeRDP proxy and server probe
+        shell: bash
+        env:
+          CC: gcc-14
+          CXX: g++-14
+        run: |
+          set -euo pipefail
+          src="$RUNNER_TEMP/lfc-ui-freerdp-probe"
+          build="$RUNNER_TEMP/lfc-ui-freerdp-probe-build"
+          mkdir -p "$src"
+          cat >"$src/main.cpp" <<'CPP'
+          #include <lfc/ui/platform/freerdp_proxy/freerdp_proxy_platform.hpp>
+          #include <lfc/ui/platform/freerdp_server/freerdp_server_platform.hpp>
+          #include <freerdp/server/proxy/proxy_server.h>
+          #include <freerdp/server/shadow.h>
+          int main() {
+            lfc::ui::FreeRdpProxyConfig proxy{};
+            lfc::ui::FreeRdpServerConfig server{};
+            return (proxy.desktopWidth > 0 && server.desktopWidth > 0) ? 0 : 1;
+          }
+          CPP
+          cat >"$src/CMakeLists.txt" <<'CMAKE'
+          cmake_minimum_required(VERSION 3.31)
+          project(lfc_ui_freerdp_probe LANGUAGES C CXX)
+          set(CMAKE_CXX_STANDARD 23)
+          find_package(lfc-ui CONFIG REQUIRED)
+          foreach(t IN ITEMS freerdp freerdp-client freerdp-server freerdp-server-proxy freerdp-shadow lfc::ui)
+            if(NOT TARGET ${t})
+              message(FATAL_ERROR "missing target ${t}")
+            endif()
+          endforeach()
+          add_executable(lfc_ui_freerdp_probe main.cpp)
+          target_link_libraries(lfc_ui_freerdp_probe PRIVATE lfc::ui)
+          target_link_options(lfc_ui_freerdp_probe PRIVATE -static-libstdc++ -static-libgcc)
+          CMAKE
+          cmake -S "$src" -B "$build" -G Ninja             "-DCMAKE_TOOLCHAIN_FILE=$LFC_UI_FREERDP_SDK/scripts/buildsystems/vcpkg.cmake"             -DVCPKG_TARGET_TRIPLET=x64-linux-static-release             -DVCPKG_HOST_TRIPLET=x64-linux-static-release             -DVCPKG_MANIFEST_MODE=OFF
+          cmake --build "$build" --parallel 2
+          "$build/lfc_ui_freerdp_probe"
+          if readelf -d "$build/lfc_ui_freerdp_probe" | grep -Eiq 'libfreerdp|libwinpr|libavcodec|libavformat|libavutil|libavfilter|libswscale|libswresample|libstdc\+\+|libgcc_s'; then
+            echo "LFC_UI_FREERDP_SHARED_RUNTIME_DEPENDENCY" >&2
+            exit 1
+          fi
+          echo "LFC_UI_STATIC_FREERDP_QUALIFIED"
+ "$status_file"; then
+            echo "LFC_UI_FREERDP_FFMPEG_PACKAGE_MISSING" >&2
+            exit 1
+          fi
+          if grep -Eq '^Package: libdvdcss          export_root="$RUNNER_TEMP/lfc-ui-freerdp-export"
+          mkdir -p "$export_root"
+          set +e
+          "$upstream/vcpkg" export lfc-ui freerdp "${common[@]}"             --raw --output=sdk "--output-dir=$export_root" >"$RUNNER_TEMP/lfc-ui-freerdp-export.log" 2>&1
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ]; then
+            echo "LFC_UI_FREERDP_EXPORT_FAILURE" >&2
+            exit "$rc"
+          fi
+          sdk="$export_root/sdk"
+          mkdir -p "$sdk/triplets"
+          cp "$GITHUB_WORKSPACE/private-vcpkg/triplets/x64-linux-static-release.cmake" "$sdk/triplets/"
+          prefix="$sdk/installed/x64-linux-static-release"
+          if find "$prefix" -type f \( -name '*.so' -o -name '*.so.*' -o -name '*.dll' -o -name '*.dylib' \) -print -quit | grep -q .; then
+            echo "LFC_UI_FREERDP_SHARED_TARGET_PAYLOAD" >&2
+            exit 1
+          fi
+          echo "LFC_UI_FREERDP_SDK=$sdk" >> "$GITHUB_ENV"
+      - name: Link relocated FreeRDP proxy and server probe
+        shell: bash
+        env:
+          CC: gcc-14
+          CXX: g++-14
+        run: |
+          set -euo pipefail
+          src="$RUNNER_TEMP/lfc-ui-freerdp-probe"
+          build="$RUNNER_TEMP/lfc-ui-freerdp-probe-build"
+          mkdir -p "$src"
+          cat >"$src/main.cpp" <<'CPP'
+          #include <lfc/ui/platform/freerdp_proxy/freerdp_proxy_platform.hpp>
+          #include <lfc/ui/platform/freerdp_server/freerdp_server_platform.hpp>
+          #include <freerdp/server/proxy/proxy_server.h>
+          #include <freerdp/server/shadow.h>
+          int main() {
+            lfc::ui::FreeRdpProxyConfig proxy{};
+            lfc::ui::FreeRdpServerConfig server{};
+            return (proxy.desktopWidth > 0 && server.desktopWidth > 0) ? 0 : 1;
+          }
+          CPP
+          cat >"$src/CMakeLists.txt" <<'CMAKE'
+          cmake_minimum_required(VERSION 3.31)
+          project(lfc_ui_freerdp_probe LANGUAGES C CXX)
+          set(CMAKE_CXX_STANDARD 23)
+          find_package(lfc-ui CONFIG REQUIRED)
+          foreach(t IN ITEMS freerdp freerdp-client freerdp-server freerdp-server-proxy freerdp-shadow lfc::ui)
+            if(NOT TARGET ${t})
+              message(FATAL_ERROR "missing target ${t}")
+            endif()
+          endforeach()
+          add_executable(lfc_ui_freerdp_probe main.cpp)
+          target_link_libraries(lfc_ui_freerdp_probe PRIVATE lfc::ui)
+          target_link_options(lfc_ui_freerdp_probe PRIVATE -static-libstdc++ -static-libgcc)
+          CMAKE
+          cmake -S "$src" -B "$build" -G Ninja             "-DCMAKE_TOOLCHAIN_FILE=$LFC_UI_FREERDP_SDK/scripts/buildsystems/vcpkg.cmake"             -DVCPKG_TARGET_TRIPLET=x64-linux-static-release             -DVCPKG_HOST_TRIPLET=x64-linux-static-release             -DVCPKG_MANIFEST_MODE=OFF
+          cmake --build "$build" --parallel 2
+          "$build/lfc_ui_freerdp_probe"
+          if readelf -d "$build/lfc_ui_freerdp_probe" | grep -Eiq 'libfreerdp|libwinpr|libavcodec|libavformat|libavutil|libstdc\+\+|libgcc_s'; then
+            echo "LFC_UI_FREERDP_SHARED_RUNTIME_DEPENDENCY" >&2
+            exit 1
+          fi
+          echo "LFC_UI_STATIC_FREERDP_QUALIFIED"
+ "$status_file"; then
+            echo "LFC_UI_FREERDP_UNEXPECTED_DVD_GRAPH" >&2
+            exit 1
+          fi
+          freerdp_cache="$(find "$GITHUB_WORKSPACE/private-vcpkg/.freerdp-upstream/buildtrees/freerdp" \
+            -type f -name 'config-*-CMakeCache.txt.log' -print -quit)"
+          if [ -z "$freerdp_cache" ] || ! grep -Eq '^WITH_FFMPEG:BOOL=ON          export_root="$RUNNER_TEMP/lfc-ui-freerdp-export"
+          mkdir -p "$export_root"
+          set +e
+          "$upstream/vcpkg" export lfc-ui freerdp "${common[@]}"             --raw --output=sdk "--output-dir=$export_root" >"$RUNNER_TEMP/lfc-ui-freerdp-export.log" 2>&1
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ]; then
+            echo "LFC_UI_FREERDP_EXPORT_FAILURE" >&2
+            exit "$rc"
+          fi
+          sdk="$export_root/sdk"
+          mkdir -p "$sdk/triplets"
+          cp "$GITHUB_WORKSPACE/private-vcpkg/triplets/x64-linux-static-release.cmake" "$sdk/triplets/"
+          prefix="$sdk/installed/x64-linux-static-release"
+          if find "$prefix" -type f \( -name '*.so' -o -name '*.so.*' -o -name '*.dll' -o -name '*.dylib' \) -print -quit | grep -q .; then
+            echo "LFC_UI_FREERDP_SHARED_TARGET_PAYLOAD" >&2
+            exit 1
+          fi
+          echo "LFC_UI_FREERDP_SDK=$sdk" >> "$GITHUB_ENV"
+      - name: Link relocated FreeRDP proxy and server probe
+        shell: bash
+        env:
+          CC: gcc-14
+          CXX: g++-14
+        run: |
+          set -euo pipefail
+          src="$RUNNER_TEMP/lfc-ui-freerdp-probe"
+          build="$RUNNER_TEMP/lfc-ui-freerdp-probe-build"
+          mkdir -p "$src"
+          cat >"$src/main.cpp" <<'CPP'
+          #include <lfc/ui/platform/freerdp_proxy/freerdp_proxy_platform.hpp>
+          #include <lfc/ui/platform/freerdp_server/freerdp_server_platform.hpp>
+          #include <freerdp/server/proxy/proxy_server.h>
+          #include <freerdp/server/shadow.h>
+          int main() {
+            lfc::ui::FreeRdpProxyConfig proxy{};
+            lfc::ui::FreeRdpServerConfig server{};
+            return (proxy.desktopWidth > 0 && server.desktopWidth > 0) ? 0 : 1;
+          }
+          CPP
+          cat >"$src/CMakeLists.txt" <<'CMAKE'
+          cmake_minimum_required(VERSION 3.31)
+          project(lfc_ui_freerdp_probe LANGUAGES C CXX)
+          set(CMAKE_CXX_STANDARD 23)
+          find_package(lfc-ui CONFIG REQUIRED)
+          foreach(t IN ITEMS freerdp freerdp-client freerdp-server freerdp-server-proxy freerdp-shadow lfc::ui)
+            if(NOT TARGET ${t})
+              message(FATAL_ERROR "missing target ${t}")
+            endif()
+          endforeach()
+          add_executable(lfc_ui_freerdp_probe main.cpp)
+          target_link_libraries(lfc_ui_freerdp_probe PRIVATE lfc::ui)
+          target_link_options(lfc_ui_freerdp_probe PRIVATE -static-libstdc++ -static-libgcc)
+          CMAKE
+          cmake -S "$src" -B "$build" -G Ninja             "-DCMAKE_TOOLCHAIN_FILE=$LFC_UI_FREERDP_SDK/scripts/buildsystems/vcpkg.cmake"             -DVCPKG_TARGET_TRIPLET=x64-linux-static-release             -DVCPKG_HOST_TRIPLET=x64-linux-static-release             -DVCPKG_MANIFEST_MODE=OFF
+          cmake --build "$build" --parallel 2
+          "$build/lfc_ui_freerdp_probe"
+          if readelf -d "$build/lfc_ui_freerdp_probe" | grep -Eiq 'libfreerdp|libwinpr|libavcodec|libavformat|libavutil|libstdc\+\+|libgcc_s'; then
+            echo "LFC_UI_FREERDP_SHARED_RUNTIME_DEPENDENCY" >&2
+            exit 1
+          fi
+          echo "LFC_UI_STATIC_FREERDP_QUALIFIED"
+ "$freerdp_cache"; then
+            echo "LFC_UI_FREERDP_FFMPEG_OPTION_DISABLED" >&2
             exit 1
           fi
           export_root="$RUNNER_TEMP/lfc-ui-freerdp-export"
