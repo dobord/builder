@@ -41,6 +41,20 @@ jobs:
           path: private-lfc-ui
           token: ${{ secrets.SOURCE_READ_TOKEN }}
           persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.12'
+      - name: Install hash-pinned CMake required by lfc-ui
+        run: |
+          python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r build-tools.lock
+          python - <<'PY'
+          import re, subprocess
+          out = subprocess.check_output(["cmake", "--version"], text=True)
+          match = re.search(r"cmake version ([0-9]+(?:\.[0-9]+){1,2})", out)
+          if not match or tuple(map(int, match.group(1).split("."))) < (3, 32):
+              raise SystemExit("LFC_UI_CMAKE_VERSION_TOO_OLD")
+          print("LFC_UI_CMAKE_TOOL_QUALIFIED version=" + match.group(1))
+          PY
       - name: Install native static build prerequisites
         run: |
           sudo apt-get update
@@ -136,6 +150,12 @@ jobs:
 
           category = "unknown"
           details = []
+          cmake_version = re.search(
+              r"CMake\s+([0-9]+(?:\.[0-9]+){1,2})\s+or higher is required"
+              r"[\s\S]{0,240}?running version\s+([0-9]+(?:\.[0-9]+){1,2})",
+              diagnostic_text,
+              re.I,
+          )
           target_missing = re.search(
               r'(?:link interface of target|Target)\s+"([^"]+)"[\s\S]{0,320}?'
               r'([A-Za-z0-9_.+-]+::[A-Za-z0-9_.+-]+)[\s\S]{0,220}?target was not found',
@@ -153,7 +173,11 @@ jobs:
               r'(?:includes non-existent path|references the file)\s*["\']([^"\'\r\n]+)',
               diagnostic_text, re.I,
           )
-          if re.search(r"(patch failed|does not apply|corrupt patch)", install_text, re.I):
+          if cmake_version:
+              category = "cmake-version"
+              details.append("cmake_required=" + cmake_version.group(1))
+              details.append("cmake_running=" + cmake_version.group(2))
+          elif re.search(r"(patch failed|does not apply|corrupt patch)", install_text, re.I):
               category = "patch"
           elif target_missing:
               category = "missing-target"
