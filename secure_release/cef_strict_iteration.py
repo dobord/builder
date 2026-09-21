@@ -81,6 +81,51 @@ def classify_private_log(path: Path) -> tuple[str, str]:
     return category, package
 
 
+def classify_compile_slice(logs: Path) -> dict:
+    """Expose only bounded compiler-failure identity, never raw build logs."""
+    status_path = logs / "ninja-slice.json"
+    log_path = logs / "ninja-slice.log"
+    if (not status_path.is_file() or not log_path.is_file()
+            or status_path.stat().st_size > 1024**2
+            or log_path.stat().st_size > 64 * 1024**2):
+        return {"compile_failure_category": "missing-log"}
+    try:
+        status = json.loads(status_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {"compile_failure_category": "invalid-status"}
+    text = log_path.read_text(encoding="utf-8", errors="replace")[-8 * 1024**2:]
+    failed = []
+    for raw in re.findall(r"^FAILED:\s+(.+)$", text, re.M):
+        name = re.sub(r"^\[code=[12]\]\s+", "", raw.strip())
+        if re.fullmatch(r"obj/[A-Za-z0-9_./+-]+\.o", name):
+            failed.append(name)
+    if re.search(r"(?:out of memory|cannot allocate memory|\bkilled\b|LLVM ERROR:.*memory)", text, re.I):
+        category = "resource"
+    elif re.search(r"(?:internal compiler error|please submit a bug report|clang frontend command failed)", text, re.I):
+        category = "compiler-crash"
+    elif re.search(r"fatal error:.*(?:file not found|No such file)", text, re.I):
+        category = "missing-header"
+    elif re.search(r"(?:^|\n)[^\n]*\berror:", text, re.I):
+        category = "compiler-error"
+    else:
+        category = "unknown"
+    result = {
+        "compile_failure_category": category,
+        "compile_failure_timed_out": status.get("timed_out") is True,
+        "compile_failure_unsafe_stop": status.get("unsafe_stop") is True,
+        "compile_failure_failed_output_count": len(failed),
+        "compile_failure_failed_outputs": [Path(name).name for name in failed[-4:]],
+    }
+    source = re.search(
+        r"(?:^|\n)(?:[^\r\n ]*[/\\])?([A-Za-z0-9_.+-]+\.(?:c|cc|cpp|cxx|m|mm))"
+        r":\d+(?::\d+)?:\s+(?:fatal\s+)?error:",
+        text, re.I,
+    )
+    if source:
+        result["compile_failure_source"] = source.group(1)
+    return result
+
+
 def output(name: str, value: bool) -> None:
     target = os.environ.get("GITHUB_OUTPUT")
     if target:
@@ -167,10 +212,21 @@ def verify_producer_summary(api: Client, selected: dict) -> dict:
         if len(files) != 1 or files[0].name != "cef-strict-iteration-summary.json":
             raise ValueError("Unexpected strict CEF summary artifact members")
         value = crypto.parse(files[0].read_bytes())
+    resumable_compile_failure = (
+        value.get("status") == "failed"
+        and value.get("failure_stage") == "compile-slice"
+        and value.get("failure_type") == "RuntimeError"
+        and value.get("slice_state_present") is True
+        and value.get("slice_exit_code") in (1, 2)
+        and value.get("ready") is False
+        and value.get("runtime_verified") is False
+    )
+    reusable_status = value.get("status") == "success" or resumable_compile_failure
     if (not isinstance(value, dict) or value.get("schema") != 1
-            or value.get("status") != "success"
+            or not reusable_status
             or value.get("checkpoint_ready") is not True
             or value.get("platform_graph_qualified") is not True
+            or value.get("gn_graph_qualified") is not True
             or value.get("build_key") != selected["build_key"]
             or value.get("platform_sha256") != selected["platform_sha256"]
             or value.get("vcpkg_commit") != VCPKG
@@ -394,7 +450,7 @@ def main() -> None:
         recipe_env["GITHUB_SHA"] = CEF
         recipe_env["CEF_STATIC_STRICT_THIRD_PARTY"] = "1"
         recipe_env["CEF_STATIC_BUILD_TIMEOUT_SECONDS"] = "18000"
-        recipe_env["CEF_STATIC_JOBS"] = "4"
+        recipe_env["CEF_STATIC_JOBS"] = "2"
         run(
             [sys.executable, recipe / "vcpkg/ports/cef-static/source_build.py",
              "prepare", "--work", engine_work, "--logs", engine_logs],
@@ -436,7 +492,7 @@ def main() -> None:
             [sys.executable, recipe / "vcpkg/integration/driver.py", "slice",
              "--work", engine_work, "--logs", engine_logs, "--contract", build_key,
              "--state", state, "--checkpoint", checkpoint,
-             "--seconds", "9000", "--jobs", "4",
+             "--seconds", "9000", "--jobs", "2",
              "--platform-manifest", engine_work / "platform-inputs.json",
              "--platform-prefix", engine_work / "target-prefix",
              "--platform-sha256", platform_sha],
@@ -446,6 +502,14 @@ def main() -> None:
         summary["slice_exit_code"] = slice_result.returncode
         summary["slice_state_present"] = state.is_file()
         state_value = json.loads(state.read_text()) if state.is_file() else {}
+        progress = state_value.get("progress")
+        if isinstance(progress, dict):
+            summary["progress"] = {
+                key: progress[key] for key in (
+                    "status", "changed_outputs", "new_outputs", "removed_outputs",
+                    "before_outputs", "after_outputs", "engine_compilation_complete"
+                ) if key in progress
+            }
         if state_value.get("checkpoint_ready") is True and checkpoint.is_dir():
             base = cef_cache.context(
                 "cef-checkpoint", "linux", build_key,
@@ -459,6 +523,7 @@ def main() -> None:
             summary["checkpoint_ready"] = True
             output("checkpoint_ready", True)
         if slice_result.returncode:
+            summary.update(classify_compile_slice(engine_logs))
             raise RuntimeError("Strict CEF compilation slice failed")
         if state_value.get("ready") is True:
             stage = "engine-runtime"

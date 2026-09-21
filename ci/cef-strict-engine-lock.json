@@ -4,5 +4,15 @@
   "vcpkg_commit": "b4bb281192ea8bb004542012ac804b988a4ff403",
   "upstream_commit": "9e593bb18ea69cc5095e012465dcd675a822ed0d",
   "cef_recipe_commit": "2aff22e09daaa5c28780c5766a70ee13e61c93b6",
-  "checkpoint": null
+  "checkpoint": {
+    "run": 35572729928,
+    "attempt": 1,
+    "producer_sha": "ec7347d0d37bcccc6bd1a4fd742576a464037869",
+    "artifact_id": 10632776256,
+    "artifact_sha256": "711d920a1c718a19ca0c9761525b12ab62567bf64aca0926f0a83f36da9d8c32",
+    "summary_artifact_id": 10633120214,
+    "summary_artifact_sha256": "7a2d8a34cc4e375b196c20521e452d8f63cf342c55975660b8da1e579c674fc8",
+    "build_key": "a60c3359bb8fa8df9207f5895729d7bda7c7b1f72ae2ecf0f767a1a1cf719f53",
+    "platform_sha256": "351272996be93d25308681ca051e34827b4f07375eff2d0f25de40164cdd206e"
+  }
 }

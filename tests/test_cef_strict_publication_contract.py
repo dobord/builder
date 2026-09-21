@@ -69,21 +69,36 @@ def proof(platform: str) -> dict:
     return value
 
 
-def write_registry_fixture(root: Path, port_version: int, suffix: str) -> None:
+def write_registry_fixture(root: Path, lfc_port_version: int, minimal: bool) -> None:
+    freerdp_dependency = {
+        "name": "freerdp",
+        "default-features": False,
+        "features": ["proxy", "x11"] if minimal else ["full"],
+    }
+    lfc_manifest = {
+        "name": "lfc-ui",
+        "version": "0.3.0",
+        "port-version": lfc_port_version,
+        "features": {
+            "freerdp": {
+                "description": "minimal" if minimal else "full",
+                "supports": "linux",
+                "dependencies": [freerdp_dependency],
+            },
+            "cef": {"description": "unchanged"},
+        },
+    }
     files = {
-        "ports/freerdp/portfile.cmake": "same-portfile\n",
-        "ports/freerdp/static-libusb-client.patch": f"closure-{suffix}\n",
-        "ports/freerdp/vcpkg.json": json.dumps({
-            "name": "freerdp", "version": "3.31.1", "port-version": port_version
-        }, sort_keys=True) + "\n",
+        "ports/lfc-ui/vcpkg.json": json.dumps(lfc_manifest, sort_keys=True) + "\n",
+        "ports/lfc-ui/usage": ("minimal\n" if minimal else "full\n"),
         "versions/baseline.json": json.dumps({
             "default": {
-                "freerdp": {"baseline": "3.31.1", "port-version": port_version},
+                "lfc-ui": {"baseline": "0.3.0", "port-version": lfc_port_version},
+                "freerdp": {"baseline": "3.31.1", "port-version": 23},
                 "cef-static": {"baseline": "152.0.6", "port-version": 15},
             }
         }, sort_keys=True) + "\n",
-        "versions/f-/freerdp.json": f"registry-{suffix}\n",
-        "ci/cef/tests/test_contracts.py": f"contracts-{suffix}\n",
+        "versions/l-/lfc-ui.json": ("registry-minimal\n" if minimal else "registry-full\n"),
         "ports/cef-static/vcpkg.json": "unchanged-engine-port\n",
     }
     for relative, content in files.items():
@@ -91,18 +106,19 @@ def write_registry_fixture(root: Path, port_version: int, suffix: str) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
 
+
 class StrictPublicationContractTests(unittest.TestCase):
     def strict(self):
         cfg = config()
         cfg["profile"] = "static-third-party"
         return cfg
 
-    def test_reviewed_freerdp_v21_to_v22_registry_delta_is_accepted(self):
+    def test_reviewed_lfc_ui_v8_to_v9_registry_delta_is_accepted(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             engine, sdk = root / "engine", root / "sdk"
-            write_registry_fixture(engine, 21, "v21")
-            write_registry_fixture(sdk, 22, "v22")
+            write_registry_fixture(engine, 8, False)
+            write_registry_fixture(sdk, 9, True)
             engine_sha, sdk_sha = "1" * 40, "2" * 40
 
             def fake_head(path):
@@ -113,12 +129,12 @@ class StrictPublicationContractTests(unittest.TestCase):
                  patch.object(cef_strict_combined, "git_head", side_effect=fake_head):
                 cef_strict_combined.verify_engine_registry_delta(engine, sdk)
 
-    def test_registry_delta_rejects_non_freerdp_change(self):
+    def test_registry_delta_rejects_non_lfc_ui_change(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             engine, sdk = root / "engine", root / "sdk"
-            write_registry_fixture(engine, 21, "v21")
-            write_registry_fixture(sdk, 22, "v22")
+            write_registry_fixture(engine, 8, False)
+            write_registry_fixture(sdk, 9, True)
             (sdk / "ports/cef-static/vcpkg.json").write_text(
                 "changed-engine-port\n", encoding="utf-8"
             )
@@ -130,7 +146,7 @@ class StrictPublicationContractTests(unittest.TestCase):
             with patch.object(cef_strict_combined, "ENGINE_VCPKG", engine_sha), \
                  patch.object(cef_strict_combined, "SDK_VCPKG", sdk_sha), \
                  patch.object(cef_strict_combined, "git_head", side_effect=fake_head):
-                with self.assertRaisesRegex(ValueError, "outside the reviewed FreeRDP delta"):
+                with self.assertRaisesRegex(ValueError, "outside the reviewed lfc-ui dependency delta"):
                     cef_strict_combined.verify_engine_registry_delta(engine, sdk)
 
     def test_strict_linux_capture_requires_complete_signed_preflight(self):

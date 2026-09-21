@@ -22,7 +22,7 @@ from . import build_support, cef_build, cef_contract, crypto, safeio
 from . import cef_strict_iteration
 
 ENGINE_VCPKG = "b4bb281192ea8bb004542012ac804b988a4ff403"
-SDK_VCPKG = "b4bb281192ea8bb004542012ac804b988a4ff403"
+SDK_VCPKG = "60c9e0c043702334036d1b7b8b8cd67c97318da2"
 UPSTREAM = "9e593bb18ea69cc5095e012465dcd675a822ed0d"
 CEF = "2aff22e09daaa5c28780c5766a70ee13e61c93b6"
 LOCKFREECORO = "24038aed3a0be642adb60e71bd994ae8f0d90140"
@@ -64,34 +64,44 @@ def verify_engine_registry_delta(engine: Path, sdk: Path) -> None:
         if before.get(name) != after.get(name)
     }
     required = {
-        "ports/freerdp/static-libusb-client.patch",
-        "ports/freerdp/vcpkg.json",
+        "ports/lfc-ui/usage",
+        "ports/lfc-ui/vcpkg.json",
         "versions/baseline.json",
-        "versions/f-/freerdp.json",
-        "ci/cef/tests/test_contracts.py",
+        "versions/l-/lfc-ui.json",
     }
-    allowed = {
-        name for name in changed
-        if name.startswith("ports/freerdp/")
-        or name in {
-            "versions/baseline.json",
-            "versions/f-/freerdp.json",
-            "ci/cef/tests/test_contracts.py",
-        }
-    }
-    if changed != allowed or not required.issubset(changed):
-        raise ValueError("Final SDK registry changed outside the reviewed FreeRDP delta")
+    if changed != required:
+        raise ValueError("Final SDK registry changed outside the reviewed lfc-ui dependency delta")
 
     old_baseline = json.loads((engine / "versions/baseline.json").read_text())
     new_baseline = json.loads((sdk / "versions/baseline.json").read_text())
-    old_freerdp = old_baseline["default"].pop("freerdp")
-    new_freerdp = new_baseline["default"].pop("freerdp")
+    old_lfc = old_baseline["default"].pop("lfc-ui")
+    new_lfc = new_baseline["default"].pop("lfc-ui")
     if old_baseline != new_baseline:
-        raise ValueError("Registry baseline changed outside FreeRDP")
-    if (old_freerdp.get("baseline"), old_freerdp.get("port-version")) != ("3.31.1", 21):
-        raise ValueError("Unexpected engine-registry FreeRDP baseline")
-    if (new_freerdp.get("baseline"), new_freerdp.get("port-version")) != ("3.31.1", 22):
-        raise ValueError("Unexpected final-registry FreeRDP baseline")
+        raise ValueError("Registry baseline changed outside lfc-ui")
+    if (old_lfc.get("baseline"), old_lfc.get("port-version")) != ("0.3.0", 8):
+        raise ValueError("Unexpected engine-registry lfc-ui baseline")
+    if (new_lfc.get("baseline"), new_lfc.get("port-version")) != ("0.3.0", 9):
+        raise ValueError("Unexpected final-registry lfc-ui baseline")
+
+    old_manifest = json.loads((engine / "ports/lfc-ui/vcpkg.json").read_text())
+    new_manifest = json.loads((sdk / "ports/lfc-ui/vcpkg.json").read_text())
+    old_port_version = old_manifest.pop("port-version")
+    new_port_version = new_manifest.pop("port-version")
+    old_feature = old_manifest["features"].pop("freerdp")
+    new_feature = new_manifest["features"].pop("freerdp")
+    if old_port_version != 8 or new_port_version != 9 or old_manifest != new_manifest:
+        raise ValueError("lfc-ui registry delta changed outside the reviewed FreeRDP dependency request")
+    if old_feature.get("supports") != "linux" or new_feature.get("supports") != "linux":
+        raise ValueError("lfc-ui FreeRDP platform contract changed")
+    expected_old = [{
+        "name": "freerdp", "default-features": False, "features": ["full"]
+    }]
+    expected_new = [{
+        "name": "freerdp", "default-features": False, "features": ["proxy", "x11"]
+    }]
+    if (old_feature.get("dependencies") != expected_old
+            or new_feature.get("dependencies") != expected_new):
+        raise ValueError("Unexpected lfc-ui FreeRDP dependency transition")
 
 
 def clean_environment() -> dict[str, str]:
@@ -238,7 +248,7 @@ def main() -> None:
             "GITHUB_SHA": CEF,
             "CEF_STATIC_STRICT_THIRD_PARTY": "1",
             "CEF_STATIC_BUILD_TIMEOUT_SECONDS": "18000",
-            "CEF_STATIC_JOBS": "4",
+            "CEF_STATIC_JOBS": "2",
         })
         restore_state = root / "restore.json"
         run(
@@ -258,7 +268,7 @@ def main() -> None:
         source_build = recipe / "vcpkg/ports/cef-static/source_build.py"
         run(
             [sys.executable, source_build, "prepare",
-             "--work", engine_work, "--logs", engine_logs, "--jobs", "4"],
+             "--work", engine_work, "--logs", engine_logs, "--jobs", "2"],
             cwd=recipe, env=recipe_env,
             log=root / "source-prepare.log", timeout=10800,
         )
@@ -270,7 +280,7 @@ def main() -> None:
         )
         run(
             [sys.executable, source_build, "build",
-             "--work", engine_work, "--logs", engine_logs, "--jobs", "4",
+             "--work", engine_work, "--logs", engine_logs, "--jobs", "2",
              "--platform-manifest", engine_work / "platform-inputs.json",
              "--platform-prefix", engine_work / "target-prefix",
              "--platform-sha256", platform_sha],

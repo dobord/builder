@@ -24,7 +24,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/vcpkg
-          ref: b4bb281192ea8bb004542012ac804b988a4ff403
+          ref: 60c9e0c043702334036d1b7b8b8cd67c97318da2
           path: private-vcpkg
           token: ${{ secrets.SOURCE_READ_TOKEN }}
           persist-credentials: false
@@ -63,7 +63,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C private-vcpkg rev-parse HEAD)" = "b4bb281192ea8bb004542012ac804b988a4ff403"
+          test "$(git -C private-vcpkg rev-parse HEAD)" = "60c9e0c043702334036d1b7b8b8cd67c97318da2"
           test "$(git -C private-vcpkg/.freerdp-upstream rev-parse HEAD)" = "9e593bb18ea69cc5095e012465dcd675a822ed0d"
           test "$(git -C private-lfc-ui rev-parse HEAD)" = "85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5"
           mkdir -p private-vcpkg/.freerdp-upstream/downloads
@@ -101,8 +101,6 @@ jobs:
           workspace = pathlib.Path(os.environ["GITHUB_WORKSPACE"])
           install_text = (runner / "lfc-ui-freerdp-install.log").read_text(errors="replace")
           buildtrees = workspace / "private-vcpkg/.freerdp-upstream/buildtrees"
-          root = buildtrees / "lfc-ui"
-
           package = "unknown"
           for pattern in (
               r"error: building ([a-z0-9][a-z0-9+_.-]*):x64-linux-static-release",
@@ -113,6 +111,7 @@ jobs:
               if match:
                   package = match.group(1).lower()
                   break
+          root = buildtrees / (package if package != "unknown" else "lfc-ui")
 
           reported_names = []
           for name in re.findall(r"([A-Za-z0-9_.+~-]+\.log)", install_text):
@@ -229,27 +228,6 @@ jobs:
               if re.fullmatch(r"[A-Za-z0-9_.+~-]{1,120}", name):
                   details.append("lfcui_terminal_log=" + name)
 
-          ffmpeg_root = buildtrees / "ffmpeg"
-          if ffmpeg_root.is_dir():
-              candidates = sorted(
-                  [p for p in ffmpeg_root.rglob("*.log") if p.is_file()],
-                  key=lambda p: p.stat().st_mtime,
-                  reverse=True,
-              )[:12]
-              merged = "\n".join(p.read_text(errors="replace")[-262144:] for p in candidates)
-              token = None
-              for pattern in (
-                  r"ERROR:\s*([A-Za-z0-9+_.-]+)\s+not found",
-                  r"ERROR:\s*([A-Za-z0-9+_.-]+)\s+requested",
-                  r"Package\s+([A-Za-z0-9+_.-]+)\s+was not found",
-                  r"Dependency\s+([A-Za-z0-9+_.-]+)\s+not found",
-              ):
-                  match = re.search(pattern, merged, re.I)
-                  if match and re.fullmatch(r"[A-Za-z0-9+_.-]+", match.group(1)):
-                      token = match.group(1).lower()
-                      break
-              if token:
-                  details.append("ffmpeg_dependency=" + token)
           if not re.fullmatch(r"[a-z0-9][a-z0-9+_.-]*|unknown", package):
               package = "unknown"
           print(
@@ -259,10 +237,19 @@ jobs:
           PY
             exit "$rc"
           fi
+          status_file="$installed/vcpkg/status"
+          if [ ! -f "$status_file" ]; then
+            echo "LFC_UI_FREERDP_STATUS_MISSING" >&2
+            exit 1
+          fi
+          if grep -Eq '^Package: (ffmpeg|libdvdcss)$' "$status_file"; then
+            echo "LFC_UI_FREERDP_UNEXPECTED_MEDIA_GRAPH" >&2
+            exit 1
+          fi
           export_root="$RUNNER_TEMP/lfc-ui-freerdp-export"
           mkdir -p "$export_root"
           set +e
-          "$upstream/vcpkg" export lfc-ui freerdp ffmpeg "${common[@]}"             --raw --output=sdk "--output-dir=$export_root" >"$RUNNER_TEMP/lfc-ui-freerdp-export.log" 2>&1
+          "$upstream/vcpkg" export lfc-ui freerdp "${common[@]}"             --raw --output=sdk "--output-dir=$export_root" >"$RUNNER_TEMP/lfc-ui-freerdp-export.log" 2>&1
           rc=$?
           set -e
           if [ "$rc" -ne 0 ]; then
