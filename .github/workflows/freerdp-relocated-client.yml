@@ -163,7 +163,7 @@ jobs:
           build="$RUNNER_TEMP/freerdp-v22-consumer-build"
           mkdir -p "$src"
           cat >"$src/CMakeLists.txt" <<'CMAKE'
-          cmake_minimum_required(VERSION 3.32)
+          cmake_minimum_required(VERSION 3.31)
           project(freerdp_v22_relocated LANGUAGES C)
           find_package(FreeRDP-Client 3.31.1 EXACT CONFIG REQUIRED)
           foreach(target IN ITEMS freerdp-client FreeRDP::libusb-static)
@@ -191,8 +191,28 @@ jobs:
           if(NOT _names STREQUAL "libudev.a;libusb-1.0.a")
             message(FATAL_ERROR "unexpected Linux libusb static closure")
           endif()
+          add_executable(static_usb_probe main.c)
+          target_link_libraries(static_usb_probe PRIVATE FreeRDP::libusb-static)
           CMAKE
+          cat >"$src/main.c" <<'C'
+          struct libusb_context;
+          int libusb_init(struct libusb_context**);
+          void libusb_exit(struct libusb_context*);
+          struct udev;
+          struct udev* udev_new(void);
+          struct udev* udev_unref(struct udev*);
+          int main(void) {
+            struct libusb_context* usb = 0;
+            struct udev* udev = udev_new();
+            if (!udev || libusb_init(&usb) != 0) return 1;
+            libusb_exit(usb);
+            udev_unref(udev);
+            return 0;
+          }
+          C
           cmake -S "$src" -B "$build" -G Ninja \
             "-DCMAKE_PREFIX_PATH=$prefix" \
             -DCMAKE_DISABLE_FIND_PACKAGE_PkgConfig=TRUE
-          echo "FREERDP_V23_RELOCATED_CLIENT_QUALIFIED"
+          cmake --build "$build" --target static_usb_probe --verbose
+          "$build/static_usb_probe"
+          echo "FREERDP_V23_RELOCATED_CLIENT_LINK_QUALIFIED"
