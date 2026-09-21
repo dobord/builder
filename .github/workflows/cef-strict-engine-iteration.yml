@@ -101,3 +101,11 @@ jobs:
           path: ${{ runner.temp }}/cef-strict-iteration-summary.json
           retention-days: 7
           if-no-files-found: ignore
+      - name: Build encrypted diagnostic artifact
+        if: always()
+        uses: ./.github/actions/encrypted-logs
+        with:
+          public-key-b64: ${{ secrets.BUILDER_ENCRYPTED_LOGS_PUBLIC_KEY_B64 }}
+          roots: |
+            ${{ runner.temp }}
+            ${{ github.workspace }}/private-vcpkg/.full-cef/static-diagnostics
