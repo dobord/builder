@@ -242,7 +242,20 @@ jobs:
             echo "LFC_UI_FREERDP_STATUS_MISSING" >&2
             exit 1
           fi
-          if ! grep -Eq '^Package: ffmpeg          export_root="$RUNNER_TEMP/lfc-ui-freerdp-export"
+          if ! grep -Eq '^Package: ffmpeg$' "$status_file"; then
+            echo "LFC_UI_FREERDP_FFMPEG_PACKAGE_MISSING" >&2
+            exit 1
+          fi
+          if grep -Eq '^Package: libdvdcss$' "$status_file"; then
+            echo "LFC_UI_FREERDP_UNEXPECTED_DVD_GRAPH" >&2
+            exit 1
+          fi
+          freerdp_cache="$(find "$GITHUB_WORKSPACE/private-vcpkg/.freerdp-upstream/buildtrees/freerdp" -type f -name 'config-*-CMakeCache.txt.log' -print -quit)"
+          if [ -z "$freerdp_cache" ] || ! grep -Eq '^WITH_FFMPEG:BOOL=ON$' "$freerdp_cache"; then
+            echo "LFC_UI_FREERDP_FFMPEG_OPTION_DISABLED" >&2
+            exit 1
+          fi
+          export_root="$RUNNER_TEMP/lfc-ui-freerdp-export"
           mkdir -p "$export_root"
           set +e
           "$upstream/vcpkg" export lfc-ui freerdp ffmpeg "${common[@]}"             --raw --output=sdk "--output-dir=$export_root" >"$RUNNER_TEMP/lfc-ui-freerdp-export.log" 2>&1
