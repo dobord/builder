@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/vcpkg
-          ref: fdeb98947b5f9aac49b140a81d82607fde933732
+          ref: 9f1fdcf9294e8c125739ed425fa75dfb2c5ef459
           path: private-vcpkg
           token: ${{ secrets.SOURCE_READ_TOKEN }}
           persist-credentials: false
@@ -34,7 +34,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/cef
-          ref: 7e79d179fc704222097e77d653c755031f956b00
+          ref: 3b480cfbb460d2b761b84cecdc862aaaf8a38571
           path: private-vcpkg/.full-cef
           persist-credentials: false
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
@@ -44,9 +44,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C private-vcpkg rev-parse HEAD)" = "fdeb98947b5f9aac49b140a81d82607fde933732"
+          test "$(git -C private-vcpkg rev-parse HEAD)" = "9f1fdcf9294e8c125739ed425fa75dfb2c5ef459"
           test "$(git -C private-vcpkg/.full-upstream rev-parse HEAD)" = "9e593bb18ea69cc5095e012465dcd675a822ed0d"
-          test "$(git -C private-vcpkg/.full-cef rev-parse HEAD)" = "7e79d179fc704222097e77d653c755031f956b00"
+          test "$(git -C private-vcpkg/.full-cef rev-parse HEAD)" = "3b480cfbb460d2b761b84cecdc862aaaf8a38571"
       - name: Recover hosted-runner capacity and install native tools
         run: |
           sudo rm -rf /usr/local/lib/android /usr/share/dotnet /usr/local/.ghcup /opt/ghc
