@@ -236,6 +236,9 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn("FREERDP_V22_INSTALL_FAILURE package=", text)
         self.assertIn(" category=", text)
         self.assertIn("terminal_log=", text)
+        self.assertIn("patch_name=", text)
+        self.assertIn("patch_file=", text)
+        self.assertIn("patch_reason=", text)
         self.assertNotIn("upload-artifact", text)
 
     def test_freerdp_static_diagnostic_uses_deterministic_audio_revision(self):

@@ -104,6 +104,25 @@ jobs:
               patch_text="\n".join(p.read_text(errors="replace")[-131072:] for p in patch_logs[-12:])
           if re.search(r"(patch failed:|patch does not apply|corrupt patch at line|Applying patch failed:)", install+"\n"+patch_text, re.I):
               category="patch"
+              patch_names = re.findall(r"Applying patch\s+([^\s\r\n]+)", install)
+              if patch_names:
+                  name = pathlib.PurePosixPath(patch_names[-1].replace("\\", "/")).name
+                  if re.fullmatch(r"[A-Za-z0-9_.+-]{1,120}", name):
+                      details.append("patch_name=" + name)
+              match = re.search(
+                  r"(?:patch failed:\s*|error:\s*)([^:\r\n]+?)(?::\d+|:\s*patch does not apply)",
+                  patch_text, re.I,
+              )
+              if match:
+                  name = pathlib.PurePosixPath(match.group(1).strip().replace("\\", "/")).name
+                  if re.fullmatch(r"[A-Za-z0-9_.+-]{1,120}", name):
+                      details.append("patch_file=" + name)
+              if re.search(r"corrupt patch at line", patch_text, re.I):
+                  details.append("patch_reason=corrupt")
+              elif re.search(r"(?:patch failed:|patch does not apply)", patch_text, re.I):
+                  details.append("patch_reason=context")
+              else:
+                  details.append("patch_reason=unknown")
           elif re.search(r"(undefined reference|collect2: error|ld(?:\.lld)?: error)", text, re.I):
               category="link-error"
           elif re.search(r"(?:fatal\s+)?error\s*:", text, re.I):
