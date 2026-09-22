@@ -18,7 +18,7 @@ import subprocess
 import sys
 import time
 
-from . import build_support, cef_build, cef_contract, crypto, safeio
+from . import build_support, cef_build, cef_contract, cef_nss_isolation, crypto, safeio
 from . import cef_strict_iteration
 
 ENGINE_VCPKG = "b4bb281192ea8bb004542012ac804b988a4ff403"
@@ -448,6 +448,13 @@ def main() -> None:
         cef_strict_iteration.ensure_dawn_static_x11_headers(
             engine_work / "download/chromium/src", summary
         )
+        cef_nss_isolation.install(
+            engine_work / "download/chromium/src",
+            engine_work / "platform-inputs.json",
+            engine_work / "target-prefix",
+            platform_sha,
+            summary,
+        )
         stage = "engine-runtime"
         run(
             [sys.executable, source_build, "build",
@@ -457,6 +464,9 @@ def main() -> None:
              "--platform-sha256", platform_sha],
             cwd=recipe, env=recipe_env,
             log=root / "engine-runtime.log", timeout=21600,
+        )
+        cef_nss_isolation.record_receipt(
+            engine_work / "download/chromium/src", summary, required=True
         )
         receipt = json.loads((engine_logs / "engine-build-receipt.json").read_text())
         if (receipt.get("source_build_verified") is not True

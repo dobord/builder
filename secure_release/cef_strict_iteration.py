@@ -16,7 +16,7 @@ import sys
 import tempfile
 import zipfile
 
-from . import cef_cache, cef_contract, crypto, safeio
+from . import cef_cache, cef_contract, cef_nss_isolation, crypto, safeio
 from .github import Client
 from .protocol import BUILDER, check_run
 
@@ -270,6 +270,8 @@ def classify_compile_slice(logs: Path) -> dict:
         category = "compiler-crash"
     elif re.search(r"fatal error:.*(?:file not found|No such file)", text, re.I):
         category = "missing-header"
+    elif re.search(r"(?:mold|ld(?:\.lld)?): error: duplicate symbol:", text, re.I):
+        category = "linker-duplicate-symbol"
     elif re.search(r"(?:^|\n)[^\n]*\berror:", text, re.I):
         category = "compiler-error"
     else:
@@ -303,6 +305,16 @@ def classify_compile_slice(logs: Path) -> dict:
         name = Path(missing_header.group(1).replace("\\", "/")).name
         if re.fullmatch(r"[A-Za-z0-9_+.-]{1,160}", name):
             result["compile_failure_missing_header"] = name
+    if category == "linker-duplicate-symbol":
+        symbols = sorted(set(re.findall(
+            r"duplicate symbol:[^\r\n]*?:\s*([A-Za-z_][A-Za-z0-9_]{0,127})\s*$",
+            text, re.I | re.M,
+        )))
+        if symbols:
+            result["compile_failure_duplicate_symbols"] = symbols[:32]
+        target = re.search(r"^FAILED:\s+([A-Za-z0-9_./+-]+)\s*$", text, re.M)
+        if target:
+            result["compile_failure_link_target"] = Path(target.group(1)).name
     return result
 
 
@@ -677,6 +689,15 @@ def main() -> None:
             engine_work / "download/chromium/src", summary
         )
 
+        stage = "nss-boringssl-symbol-isolation"
+        cef_nss_isolation.install(
+            engine_work / "download/chromium/src",
+            engine_work / "platform-inputs.json",
+            engine_work / "target-prefix",
+            platform_sha,
+            summary,
+        )
+
         stage = "gn-check"
         run(
             [sys.executable, recipe / "vcpkg/ports/cef-static/source_build.py",
@@ -711,6 +732,9 @@ def main() -> None:
              "--platform-sha256", platform_sha],
             cwd=recipe, env=recipe_env,
             log=temp / "cef-engine-slice.log", timeout=14400, check=False
+        )
+        cef_nss_isolation.record_receipt(
+            engine_work / "download/chromium/src", summary, required=False
         )
         summary["slice_exit_code"] = slice_result.returncode
         summary["slice_state_present"] = state.is_file()
