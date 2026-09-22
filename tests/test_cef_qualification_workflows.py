@@ -1,4 +1,5 @@
 """Source-level guards for public-builder strict CEF qualification workflows."""
+import json
 from pathlib import Path
 import unittest
 
@@ -117,12 +118,24 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn('value.get("gn_graph_qualified") is not True',worker)
         self.assertIn('"--seconds", "9000", "--jobs", "2"',worker)
         self.assertNotIn('print(text',worker)
-        lock=(ROOT/'ci/cef-strict-engine-lock.json').read_text()
-        self.assertIn('"run": 35728098077',lock)
-        self.assertIn('"artifact_id": 10704871886',lock)
-        self.assertIn('"summary_artifact_id": 10705585929',lock)
-        self.assertIn('"vcpkg_commit": "b4bb281192ea8bb004542012ac804b988a4ff403"',lock)
-        self.assertIn('"cef_recipe_commit": "2aff22e09daaa5c28780c5766a70ee13e61c93b6"',lock)
+        lock=json.loads((ROOT/'ci/cef-strict-engine-lock.json').read_text())
+        self.assertEqual(lock['schema'], 1)
+        self.assertEqual(lock['platform'], 'linux')
+        self.assertEqual(lock['vcpkg_commit'], 'b4bb281192ea8bb004542012ac804b988a4ff403')
+        self.assertEqual(lock['cef_recipe_commit'], '2aff22e09daaa5c28780c5766a70ee13e61c93b6')
+        checkpoint=lock['checkpoint']
+        self.assertIsInstance(checkpoint, dict)
+        self.assertEqual(set(checkpoint), {
+            'run', 'attempt', 'producer_sha', 'artifact_id', 'artifact_sha256',
+            'summary_artifact_id', 'summary_artifact_sha256', 'build_key', 'platform_sha256'
+        })
+        self.assertGreater(checkpoint['run'], 0)
+        self.assertEqual(checkpoint['attempt'], 1)
+        self.assertGreater(checkpoint['artifact_id'], 0)
+        self.assertGreater(checkpoint['summary_artifact_id'], 0)
+        self.assertRegex(checkpoint['producer_sha'], r'^[0-9a-f]{40}$')
+        for name in ('artifact_sha256', 'summary_artifact_sha256', 'build_key', 'platform_sha256'):
+            self.assertRegex(checkpoint[name], r'^[0-9a-f]{64}$')
 
     def test_sdk_dependency_qualification_keeps_private_build_logs_runner_local(self):
         text = (ROOT / ".github/workflows/cef-strict-sdk-deps.yml").read_text()
