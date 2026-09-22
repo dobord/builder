@@ -9,8 +9,15 @@ import re
 import stat
 
 ARCHIVE_RELATIVE = "lib/cef-nss/libcef_nss.a"
-MARKER = b"# cef-nss-boringssl-isolation-wrapper-v1"
+MARKER = b"# cef-nss-boringssl-isolation-wrapper-v2"
 OUT_NAME = "CEF_Static_Platform_Release_x64"
+FAILURE_STAGES = frozenset({
+    "source-validate",
+    "symbol-inventory",
+    "objcopy",
+    "symbol-verify",
+    "ninja-rewrite",
+})
 SYMBOL_RENAMES = {
     "SHA256_Update": "CEF_NSS_SHA256_Update",
     "SHA224_Update": "CEF_NSS_SHA224_Update",
@@ -32,8 +39,9 @@ def _digest(path: Path) -> str:
 
 def _wrapper_text(archive: Path, expected: str, objcopy: Path, nm: Path) -> str:
     renames = json.dumps(SYMBOL_RENAMES, sort_keys=True)
+    stages = json.dumps(sorted(FAILURE_STAGES))
     return f'''#!/usr/bin/env python3
-# cef-nss-boringssl-isolation-wrapper-v1
+# cef-nss-boringssl-isolation-wrapper-v2
 from __future__ import annotations
 import hashlib
 import json
@@ -48,6 +56,7 @@ EXPECTED_SHA256 = {json.dumps(expected)}
 OBJCOPY = Path({json.dumps(str(objcopy))})
 NM = Path({json.dumps(str(nm))})
 RENAMES = {renames}
+FAILURE_STAGES = frozenset({stages})
 REAL_NINJA = Path(__file__).with_name("ninja.cef-real")
 
 
@@ -60,58 +69,112 @@ def has_symbol(text, name):
     return re.search(r"(?:^|[ \\t])" + re.escape(name) + r"$", text, re.M) is not None
 
 
+def write_status(root, status, stage, error_type=None):
+    if stage not in FAILURE_STAGES and stage != "complete":
+        raise RuntimeError("Invalid NSS isolation status stage")
+    value = {{
+        "schema": 1,
+        "kind": "cef-nss-boringssl-symbol-isolation-status",
+        "status": status,
+        "stage": stage,
+    }}
+    if error_type is not None:
+        value["error_type"] = error_type
+    path = root / "status.json"
+    temporary = root / ".status.json.new"
+    temporary.write_text(json.dumps(value, sort_keys=True) + "\\n", encoding="utf-8")
+    os.replace(temporary, path)
+
+
+def graph_path_pairs(out, target):
+    pairs = [
+        (str(SOURCE_ARCHIVE), str(target)),
+        (os.path.relpath(SOURCE_ARCHIVE, out), os.path.relpath(target, out)),
+    ]
+    return list(dict.fromkeys(pairs))
+
+
 def repair(out):
-    if (not SOURCE_ARCHIVE.is_file() or SOURCE_ARCHIVE.is_symlink()
-            or digest(SOURCE_ARCHIVE) != EXPECTED_SHA256):
-        raise RuntimeError("Frozen cef-nss archive changed before symbol isolation")
     root = out / ".cef-nss-isolation"
     root.mkdir(parents=True, exist_ok=True)
-    mapping = root / "redefine-syms.txt"
-    mapping.write_text("".join(f"{{old}} {{new}}\\n" for old, new in sorted(RENAMES.items())),
-                       encoding="ascii")
-    before = subprocess.check_output([str(NM), "-g", str(SOURCE_ARCHIVE)],
-                                     text=True, timeout=120)
-    for old, new in RENAMES.items():
-        if not has_symbol(before, old) or has_symbol(before, new):
-            raise RuntimeError("Unexpected cef-nss symbol inventory: " + old)
-    target = root / "libcef_nss_isolated.a"
-    temporary = root / ".libcef_nss_isolated.a.new"
-    temporary.unlink(missing_ok=True)
-    subprocess.run([str(OBJCOPY), "--redefine-syms=" + str(mapping),
-                    str(SOURCE_ARCHIVE), str(temporary)],
-                   check=True, timeout=300)
-    after = subprocess.check_output([str(NM), "-g", str(temporary)],
-                                    text=True, timeout=120)
-    for old, new in RENAMES.items():
-        if has_symbol(after, old) or not has_symbol(after, new):
-            raise RuntimeError("cef-nss symbol isolation incomplete: " + old)
-    os.replace(temporary, target)
+    stage = "source-validate"
+    write_status(root, "running", stage)
+    try:
+        if (not SOURCE_ARCHIVE.is_file() or SOURCE_ARCHIVE.is_symlink()
+                or digest(SOURCE_ARCHIVE) != EXPECTED_SHA256):
+            raise RuntimeError("Frozen cef-nss archive changed before symbol isolation")
+        mapping = root / "redefine-syms.txt"
+        mapping.write_text("".join(f"{{old}} {{new}}\\n" for old, new in sorted(RENAMES.items())),
+                           encoding="ascii")
 
-    old_path = str(SOURCE_ARCHIVE)
-    new_path = str(target)
-    replacements = 0
-    for ninja in sorted(out.rglob("*.ninja")):
-        data = ninja.read_text(encoding="utf-8")
-        count = data.count(old_path)
-        if not count:
-            continue
-        updated = data.replace(old_path, new_path)
-        temporary_ninja = ninja.with_name(ninja.name + ".cef-nss-new")
-        temporary_ninja.write_text(updated, encoding="utf-8")
-        os.replace(temporary_ninja, ninja)
-        replacements += count
-    if replacements <= 0:
-        raise RuntimeError("Generated Ninja graph contains no frozen cef-nss archive")
-    receipt = {{
-        "schema": 1,
-        "kind": "cef-nss-boringssl-symbol-isolation",
-        "source_sha256": EXPECTED_SHA256,
-        "derived_sha256": digest(target),
-        "redefined_symbols": sorted(RENAMES),
-        "ninja_replacements": replacements,
-    }}
-    (root / "receipt.json").write_text(json.dumps(receipt, sort_keys=True) + "\\n",
-                                       encoding="utf-8")
+        stage = "symbol-inventory"
+        write_status(root, "running", stage)
+        before = subprocess.check_output([str(NM), "-g", str(SOURCE_ARCHIVE)],
+                                         text=True, timeout=120)
+        for old, new in RENAMES.items():
+            if not has_symbol(before, old) or has_symbol(before, new):
+                raise RuntimeError("Unexpected cef-nss symbol inventory: " + old)
+
+        stage = "objcopy"
+        write_status(root, "running", stage)
+        target = root / "libcef_nss_isolated.a"
+        temporary = root / ".libcef_nss_isolated.a.new"
+        temporary.unlink(missing_ok=True)
+        subprocess.run([str(OBJCOPY), "--redefine-syms=" + str(mapping),
+                        str(SOURCE_ARCHIVE), str(temporary)],
+                       check=True, timeout=300)
+
+        stage = "symbol-verify"
+        write_status(root, "running", stage)
+        after = subprocess.check_output([str(NM), "-g", str(temporary)],
+                                        text=True, timeout=120)
+        for old, new in RENAMES.items():
+            if has_symbol(after, old) or not has_symbol(after, new):
+                raise RuntimeError("cef-nss symbol isolation incomplete: " + old)
+        os.replace(temporary, target)
+
+        stage = "ninja-rewrite"
+        write_status(root, "running", stage)
+        replacements = 0
+        graphs = 0
+        pairs = graph_path_pairs(out, target)
+        for ninja in sorted(out.rglob("*.ninja")):
+            graphs += 1
+            data = ninja.read_text(encoding="utf-8")
+            updated = data
+            file_replacements = 0
+            for old_path, new_path in pairs:
+                count = updated.count(old_path)
+                if count:
+                    updated = updated.replace(old_path, new_path)
+                    file_replacements += count
+            if not file_replacements:
+                continue
+            temporary_ninja = ninja.with_name(ninja.name + ".cef-nss-new")
+            temporary_ninja.write_text(updated, encoding="utf-8")
+            os.replace(temporary_ninja, ninja)
+            replacements += file_replacements
+        if graphs <= 0:
+            raise RuntimeError("Generated Ninja graph is missing")
+        if replacements <= 0:
+            raise RuntimeError("Generated Ninja graph contains no frozen cef-nss archive")
+        receipt = {{
+            "schema": 1,
+            "kind": "cef-nss-boringssl-symbol-isolation",
+            "source_sha256": EXPECTED_SHA256,
+            "derived_sha256": digest(target),
+            "redefined_symbols": sorted(RENAMES),
+            "ninja_replacements": replacements,
+        }}
+        (root / "receipt.json").write_text(json.dumps(receipt, sort_keys=True) + "\\n",
+                                           encoding="utf-8")
+        write_status(root, "success", "complete")
+    except Exception as error:
+        error_type = type(error).__name__
+        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{{0,63}}", error_type):
+            error_type = "Exception"
+        write_status(root, "failed", stage, error_type)
+        raise
 
 
 def selected_out(argv):
@@ -180,22 +243,57 @@ def install(source: Path, manifest: Path, prefix: Path, expected_manifest: str,
         ninja.rename(real)
 
     wrapper = _wrapper_text(archive, record["sha256"], objcopy, nm)
+    compile(wrapper, "<cef-nss-isolation-wrapper>", "exec")
     temporary = ninja.with_name("ninja.cef-nss-new")
     temporary.write_text(wrapper, encoding="utf-8", newline="\n")
     mode = stat.S_IMODE(real.stat().st_mode)
     temporary.chmod(mode | stat.S_IXUSR)
     os.replace(temporary, ninja)
     summary["nss_boringssl_isolation_installed"] = True
+    summary["nss_boringssl_wrapper_validated"] = True
     summary["nss_boringssl_source_sha256"] = record["sha256"]
     summary["nss_boringssl_symbol_count"] = len(SYMBOL_RENAMES)
 
 
+def _read_status(root: Path) -> dict | None:
+    path = root / "status.json"
+    if not path.is_file() or path.is_symlink() or path.stat().st_size > 4096:
+        return None
+    value = json.loads(path.read_text(encoding="utf-8"))
+    keys = set(value)
+    if (value.get("schema") != 1
+            or value.get("kind") != "cef-nss-boringssl-symbol-isolation-status"
+            or value.get("status") not in {"running", "failed", "success"}
+            or not isinstance(value.get("stage"), str)
+            or value["stage"] not in FAILURE_STAGES | {"complete"}):
+        raise RuntimeError("NSS/BoringSSL isolation status is invalid")
+    if value["status"] == "failed":
+        if (keys != {"schema", "kind", "status", "stage", "error_type"}
+                or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,63}",
+                                    str(value.get("error_type")))):
+            raise RuntimeError("NSS/BoringSSL isolation failure status is invalid")
+    elif keys != {"schema", "kind", "status", "stage"}:
+        raise RuntimeError("NSS/BoringSSL isolation status fields are invalid")
+    return value
+
+
 def record_receipt(source: Path, summary: dict, *, required: bool = False) -> bool:
-    receipt_path = source / "out" / OUT_NAME / ".cef-nss-isolation" / "receipt.json"
+    root = source / "out" / OUT_NAME / ".cef-nss-isolation"
+    receipt_path = root / "receipt.json"
+    status = _read_status(root)
     if not receipt_path.is_file():
+        if status is not None:
+            summary["nss_boringssl_isolation_failure_stage"] = status["stage"]
+            if status["status"] == "failed":
+                summary["nss_boringssl_isolation_failure_type"] = status["error_type"]
+            else:
+                summary["nss_boringssl_isolation_failure_type"] = "Interrupted"
         if required:
             raise RuntimeError("NSS/BoringSSL isolation receipt is missing")
         return False
+    if (status is None or status.get("status") != "success"
+            or status.get("stage") != "complete"):
+        raise RuntimeError("NSS/BoringSSL isolation did not reach a successful status")
     value = json.loads(receipt_path.read_text(encoding="utf-8"))
     expected_symbols = sorted(SYMBOL_RENAMES)
     if (value.get("schema") != 1

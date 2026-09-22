@@ -7,6 +7,7 @@ on:
     paths:
       - .github/workflows/cef-strict-engine-iteration.yml
       - secure_release/cef_strict_iteration.py
+      - secure_release/cef_nss_isolation.py
       - ci/cef-strict-engine-lock.json
 permissions:
   contents: read
@@ -74,7 +75,7 @@ jobs:
           fetch_cache 10513582038 13070e63a1a5ccdaef82d483f4296ba31fa7ef1f237cd17729cf81fddf3d118f cups
           fetch_cache 10512319512 c837f50873e149ac8c1d823ab906fbb36217616c3198e029bc6ee647e0222b8e gbm
       - name: Validate strict iteration worker syntax
-        run: python -m py_compile secure_release/cef_strict_iteration.py
+        run: python -m py_compile secure_release/cef_strict_iteration.py secure_release/cef_nss_isolation.py
       - name: Run exact strict platform and Chromium iteration
         id: strict
         env:
