@@ -135,36 +135,40 @@ def repair(out):
 
         stage = "ninja-rewrite"
         write_status(root, "running", stage)
-        replacements = 0
+        references = 0
         graphs = 0
-        pairs = graph_path_pairs(out, target)
+        pairs = [
+            (old_path.encode("utf-8"), new_path.encode("utf-8"))
+            for old_path, new_path in graph_path_pairs(out, target)
+        ]
         for ninja in sorted(out.rglob("*.ninja")):
             graphs += 1
-            data = ninja.read_text(encoding="utf-8")
+            data = ninja.read_bytes()
             updated = data
-            file_replacements = 0
+            file_changes = 0
             for old_path, new_path in pairs:
                 count = updated.count(old_path)
                 if count:
                     updated = updated.replace(old_path, new_path)
-                    file_replacements += count
-            if not file_replacements:
+                    file_changes += count
+            file_references = sum(updated.count(new_path) for _, new_path in pairs)
+            references += file_references
+            if not file_changes:
                 continue
             temporary_ninja = ninja.with_name(ninja.name + ".cef-nss-new")
-            temporary_ninja.write_text(updated, encoding="utf-8")
+            temporary_ninja.write_bytes(updated)
             os.replace(temporary_ninja, ninja)
-            replacements += file_replacements
         if graphs <= 0:
             raise RuntimeError("Generated Ninja graph is missing")
-        if replacements <= 0:
-            raise RuntimeError("Generated Ninja graph contains no frozen cef-nss archive")
+        if references <= 0:
+            raise RuntimeError("Generated Ninja graph contains no frozen or isolated cef-nss archive")
         receipt = {{
             "schema": 1,
             "kind": "cef-nss-boringssl-symbol-isolation",
             "source_sha256": EXPECTED_SHA256,
             "derived_sha256": digest(target),
             "redefined_symbols": sorted(RENAMES),
-            "ninja_replacements": replacements,
+            "ninja_replacements": references,
         }}
         (root / "receipt.json").write_text(json.dumps(receipt, sort_keys=True) + "\\n",
                                            encoding="utf-8")

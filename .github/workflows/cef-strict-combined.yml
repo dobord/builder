@@ -7,6 +7,7 @@ on:
     paths:
       - .github/workflows/cef-strict-combined.yml
       - secure_release/cef_strict_combined.py
+      - secure_release/cef_nss_isolation.py
       - ci/cef-strict-combined-lock.json
 permissions:
   contents: read
@@ -118,7 +119,7 @@ jobs:
           fetch_cache 10513582038 13070e63a1a5ccdaef82d483f4296ba31fa7ef1f237cd17729cf81fddf3d118f cups
           fetch_cache 10512319512 c837f50873e149ac8c1d823ab906fbb36217616c3198e029bc6ee647e0222b8e gbm
       - name: Validate final combined helper syntax
-        run: python -m py_compile secure_release/cef_strict_combined.py
+        run: python -m py_compile secure_release/cef_strict_combined.py secure_release/cef_nss_isolation.py
       - name: Run checkpoint-resumed final combined SDK qualification
         env:
           BUILDER_INPUT_PRIVATE_KEY: ${{ secrets.BUILDER_INPUT_PRIVATE_KEY }}
