@@ -214,7 +214,6 @@ def ensure_chromium_sysroot(
     summary["sysroot_name"] = CHROMIUM_SYSROOT_AMD64["SysrootDir"]
 
 
-
 DAWN_X11_PATCH_MARKER_V1 = "# CEF_STATIC_DAWN_X11_HEADERS_V1"
 DAWN_X11_PATCH_MARKER = "# CEF_STATIC_DAWN_X11_HEADERS_V2"
 
@@ -371,7 +370,7 @@ def classify_compile_slice(logs: Path) -> dict:
         category = "compiler-error"
     else:
         category = "unknown"
-    sysroot_flags = re.findall(r"(?:^|\\s)--sysroot=([^\\s\"']+)", text)
+    sysroot_flags = re.findall(r"(?:^|\s)--sysroot=([^\s\"']+)", text)
     result = {
         "compile_failure_category": category,
         "compile_failure_timed_out": status.get("timed_out") is True,
@@ -381,7 +380,7 @@ def classify_compile_slice(logs: Path) -> dict:
         "compile_failure_uses_sysroot": bool(sysroot_flags),
     }
     if sysroot_flags:
-        sysroot_name = Path(sysroot_flags[-1].replace("\\\\", "/")).name
+        sysroot_name = Path(sysroot_flags[-1].replace("\\", "/")).name
         if re.fullmatch(r"debian_[A-Za-z0-9_-]+-sysroot", sysroot_name):
             result["compile_failure_sysroot_name"] = sysroot_name
     source = re.search(
@@ -411,6 +410,68 @@ def classify_compile_slice(logs: Path) -> dict:
         if target:
             result["compile_failure_link_target"] = Path(target.group(1)).name
     return result
+
+
+def _bounded_status(path: Path) -> dict | None:
+    if not path.is_file() or path.is_symlink() or path.stat().st_size > 1024**2:
+        return None
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def classify_engine_runtime(logs: Path) -> dict:
+    """Expose a bounded runtime/link stage, never private output or arguments."""
+    for name, category in (
+        ("validate-static-platform-status.json", "platform-validation"),
+        ("gn-gen-status.json", "gn-generation"),
+        ("viz-x11-graph-status.json", "viz-graph"),
+        ("viz-x11-graph-check-status.json", "viz-graph-check"),
+        ("gn-graph-status.json", "gn-graph"),
+        ("audit-static-platform-status.json", "platform-audit"),
+        ("native-link-edge-status.json", "link-edge-audit"),
+        ("engine-build-status.json", "engine-link"),
+        ("binary-imports-status.json", "binary-import-audit"),
+        ("runtime-libraries-status.json", "runtime-library-audit"),
+    ):
+        status = _bounded_status(logs / name)
+        if status is None or status.get("status") in (None, "success"):
+            continue
+        result = {
+            "runtime_failure_category": category,
+            "runtime_failure_timed_out": status.get("status") == "timed_out",
+        }
+        code = status.get("exit_code")
+        if type(code) is int and -255 <= code <= 255:
+            result["runtime_failure_exit_code"] = code
+        return result
+    smoke = _bounded_status(logs / "static-smoke-status.json")
+    if smoke is not None and smoke.get("status") != "success":
+        status = smoke.get("status")
+        category = {
+            "timed_out": "smoke-timeout",
+            "spawn_failed": "smoke-spawn",
+            "failed": "smoke-exit",
+            "interrupted": "smoke-interrupted",
+        }.get(status, "smoke-runtime")
+        result = {
+            "runtime_failure_category": category,
+            "runtime_failure_timed_out": status == "timed_out",
+        }
+        code = smoke.get("exit_code")
+        if type(code) is int and -255 <= code <= 255:
+            result["runtime_failure_exit_code"] = code
+        return result
+    smoke_runs = _bounded_status(logs / "smoke-runs.json")
+    if smoke_runs is not None and smoke_runs.get("status") == "failed":
+        return {"runtime_failure_category": "smoke-proof"}
+    if not (logs / "runtime-data.json").is_file():
+        return {"runtime_failure_category": "runtime-data"}
+    if (logs / "engine-build-receipt.json").is_file():
+        return {"runtime_failure_category": "receipt-validation"}
+    return {"runtime_failure_category": "unknown"}
 
 
 def output(name: str, value: bool) -> None:
@@ -514,9 +575,21 @@ def verify_producer_summary(
         and value.get("ready") is False
         and value.get("runtime_verified") is False
     )
+    progress = value.get("progress")
+    resumable_runtime_failure = (
+        value.get("status") == "failed"
+        and value.get("failure_stage") == "engine-runtime"
+        and value.get("failure_type") == "RuntimeError"
+        and value.get("slice_state_present") is True
+        and value.get("slice_exit_code") == 0
+        and value.get("ready") is True
+        and value.get("runtime_verified") is False
+        and isinstance(progress, dict)
+        and progress.get("engine_compilation_complete") is True
+    )
     reusable_status = (
         value.get("status") == "success"
-        or (allow_resumable and resumable_compile_failure)
+        or (allow_resumable and (resumable_compile_failure or resumable_runtime_failure))
     )
     complete_engine = (
         value.get("status") == "success"
@@ -907,6 +980,8 @@ def main() -> None:
             category, package = classify_private_log(temp / "cef-platform-native.log")
             summary["failure_category"] = category
             summary["failure_package"] = package
+        elif summary["failure_stage"] == "engine-runtime":
+            summary.update(classify_engine_runtime(engine_logs))
         raise
     finally:
         summary_path.write_text(
