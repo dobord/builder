@@ -12,7 +12,7 @@ from contextlib import contextmanager
 import os
 from pathlib import Path
 
-from . import cef_smoke_progress, cef_x11_static
+from . import cef_elf_evidence, cef_smoke_progress, cef_x11_static
 from . import cef_strict_iteration as worker
 
 
@@ -49,11 +49,24 @@ def observed_runtime(module, workspace: Path, temp: Path):
         if is_build:
             elf_identity.update(cef_x11_static.audit_native(source))
             if not elf_identity["runtime_native_elf_verified"]:
+                # DT_NEEDED basenames are deterministic executable metadata, not
+                # log text. Publish only a bounded/sanitized list and fixed family
+                # counts so the next repair can target the exact dependency.
+                elf_identity.update(cef_elf_evidence.inspect(
+                    source,
+                    expected_needed=elf_identity["runtime_native_elf_needed_count"],
+                    expected_unexpected=elf_identity["runtime_native_elf_unexpected_count"],
+                ))
                 raise RuntimeError("Strict engine ELF imports non-OS shared libraries")
         result = original_run(command, **kwargs)
         if is_build and result.returncode == 0:
             elf_identity.update(cef_x11_static.audit_native(source))
             if not elf_identity["runtime_native_elf_verified"]:
+                elf_identity.update(cef_elf_evidence.inspect(
+                    source,
+                    expected_needed=elf_identity["runtime_native_elf_needed_count"],
+                    expected_unexpected=elf_identity["runtime_native_elf_unexpected_count"],
+                ))
                 raise RuntimeError("Strict engine ELF changed during runtime verification")
         if is_check and result.returncode == 0:
             if (logs.is_symlink() or progress.is_symlink()
