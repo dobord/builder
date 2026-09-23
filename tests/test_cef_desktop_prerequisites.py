@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 import tempfile
@@ -51,7 +52,11 @@ def replay_vendor_patch(original: bytes, vendor_patch: bytes) -> bytes:
         source = root / desktop.GTK_FILE
         source.parent.mkdir(parents=True)
         source.write_bytes(original)
-        command = ["git", "apply", "-p0", "--include=" + desktop.GTK_FILE, "-"]
+        # Git for Windows defaults can convert a successful patch result to
+        # CRLF. Pin the public oracle's output policy, not the production hashes.
+        # Do not normalize bytes after replay: unknown content must still fail.
+        command = ["git", "-c", "core.autocrlf=false", "-c", "core.eol=lf",
+                   "apply", "-p0", "--include=" + desktop.GTK_FILE, "-"]
         result = subprocess.run(command, cwd=root, input=vendor_patch,
                                 capture_output=True, timeout=30)
         if result.returncode:
@@ -66,6 +71,24 @@ class DesktopPrerequisiteTests(unittest.TestCase):
         cls.original = cls.inputs[desktop.GTK_FILE]
         cls.baseline = replay_vendor_patch(
             cls.original, cls.inputs["linux_gtk_theme_3610.gtk.patch"])
+
+    def test_vendor_replay_is_independent_of_global_crlf_configuration(self):
+        with tempfile.TemporaryDirectory() as folder:
+            config = Path(folder) / "gitconfig"
+            data = b"[core]\n    autocrlf = true\n    eol = crlf\n"
+            config.write_bytes(data)
+            # Exercise the actual Git subprocess under the setting that caused
+            # the Windows-only failure. Never change a user's Git configuration.
+            with patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": str(config),
+                                         "GIT_CONFIG_NOSYSTEM": "1"}):
+                actual = replay_vendor_patch(
+                    self.original, self.inputs["linux_gtk_theme_3610.gtk.patch"])
+            self.assertEqual(config.read_bytes(), data)
+            self.assertNotIn(b"\r\n", actual)
+            self.assertEqual(hashlib.sha256(actual).hexdigest(),
+                             desktop.CEF_GTK_THEME_SHA256)
+            self.assertEqual(desktop.transform(desktop.GTK_FILE, actual, self.original),
+                             desktop.transform(desktop.GTK_FILE, self.baseline, self.original))
 
     def test_real_cef_patch_explains_old_complete_source_rejection(self):
         data = self.baseline
