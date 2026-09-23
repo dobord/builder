@@ -17,7 +17,7 @@ import sys
 import tempfile
 import zipfile
 
-from . import cef_cache, cef_contract, cef_nss_isolation, crypto, safeio
+from . import cef_cache, cef_contract, cef_gtk_loader, cef_nss_isolation, crypto, safeio
 from .github import Client
 from .protocol import BUILDER, check_run
 
@@ -763,6 +763,13 @@ group("gtk_config") {
         compat_text = compat_text.replace(get_original, get_patched, 1)
         compat_text = compat_text.replace(load_original, load_patched, 1)
         compat.write_text(compat_text, encoding="utf-8", newline="\n")
+
+    # V1's runtime-only branch still compiled undeclared ui_gtk initializers.
+    # Preserve V1 bytes for checkpoint validation, then guard their full closure.
+    guarded_compat = cef_gtk_loader.guarded_source(compat_text)
+    if guarded_compat != compat_text:
+        compat.write_text(guarded_compat, encoding="utf-8", newline="\n")
+    summary["runtime_gtk_loader_guards_verified"] = True
 
     summary["runtime_gtk_backend"] = "static-gtk3"
     summary["runtime_gtk_backend_preserved"] = True
