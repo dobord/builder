@@ -33,6 +33,101 @@ CHROMIUM_SYSROOT_AMD64 = {
 }
 CHROMIUM_SYSROOT_REQUIRED_HEADER = "usr/include/X11/Xlib-xcb.h"
 
+# GitHub's hosted-image version is intentionally not a semantic build input.
+# Keep a historical checkpoint identity stable only after the actual host
+# proves a reviewed ABI/toolchain fingerprint. New checkpoints record that
+# fingerprint so later image rolls can be accepted by content, not image label.
+LEGACY_CHECKPOINT_IMAGE_BY_RUN = {
+    35779924527: "20260907.300.1",
+}
+REVIEWED_LEGACY_IMAGE_MIGRATIONS = {
+    ("20260907.300.1", "20260920.314.1"): {
+        "schema": 1,
+        "os_id": "ubuntu",
+        "os_version_id": "24.04",
+        "machine": "x86_64",
+        "glibc": "2.39",
+        "gcc14": "14.2.0",
+        "gxx14": "14.2.0",
+        "binutils": "2.42",
+        "pkg_config": "1.8.1",
+        "bison": "3.8.2",
+        "ninja": "1.11.1",
+        "ccache": "4.9.1",
+    },
+}
+
+
+def _tool_version(command: list[str], pattern: str) -> str:
+    output = subprocess.check_output(
+        command, text=True, stderr=subprocess.STDOUT, timeout=30
+    ).splitlines()
+    if not output:
+        raise ValueError("Critical host tool returned no version")
+    match = re.search(pattern, output[0])
+    if not match:
+        raise ValueError("Critical host tool version is unrecognized")
+    return match.group(1)
+
+
+def critical_host_fingerprint() -> dict:
+    release = {}
+    for raw in Path("/etc/os-release").read_text(encoding="utf-8").splitlines():
+        if "=" not in raw:
+            continue
+        key, value = raw.split("=", 1)
+        release[key] = value.strip().strip('"')
+    return {
+        "schema": 1,
+        "os_id": release.get("ID"),
+        "os_version_id": release.get("VERSION_ID"),
+        "machine": os.uname().machine.lower(),
+        "glibc": _tool_version(["ldd", "--version"], r"([0-9]+\.[0-9]+)$"),
+        "gcc14": _tool_version(["gcc-14", "-dumpfullversion"], r"([0-9]+\.[0-9]+\.[0-9]+)"),
+        "gxx14": _tool_version(["g++-14", "-dumpfullversion"], r"([0-9]+\.[0-9]+\.[0-9]+)"),
+        "binutils": _tool_version(["ld", "--version"], r"([0-9]+\.[0-9]+(?:\.[0-9]+)?)$"),
+        "pkg_config": _tool_version(["pkg-config", "--version"], r"([0-9]+\.[0-9]+\.[0-9]+)"),
+        "bison": _tool_version(["bison", "--version"], r"([0-9]+\.[0-9]+\.[0-9]+)$"),
+        "ninja": _tool_version(["ninja", "--version"], r"([0-9]+\.[0-9]+\.[0-9]+)"),
+        "ccache": _tool_version(["ccache", "--version"], r"([0-9]+\.[0-9]+\.[0-9]+)$"),
+    }
+
+
+def checkpoint_image_identity(selected: dict | None, producer_summary: dict | None,
+                              summary: dict) -> str:
+    actual = os.environ.get("ImageVersion")
+    if not actual:
+        raise ValueError("ImageVersion is required for strict CEF qualification")
+    current_fingerprint = critical_host_fingerprint()
+    if selected is None:
+        checkpoint_image = actual
+    else:
+        checkpoint_image = (
+            producer_summary.get("checkpoint_image_identity")
+            if isinstance(producer_summary, dict) else None
+        )
+        producer_fingerprint = (
+            producer_summary.get("critical_host_fingerprint")
+            if isinstance(producer_summary, dict) else None
+        )
+        if checkpoint_image is None:
+            checkpoint_image = LEGACY_CHECKPOINT_IMAGE_BY_RUN.get(selected["run"])
+        if not isinstance(checkpoint_image, str) or not re.fullmatch(r"[0-9.]+", checkpoint_image):
+            raise ValueError("Checkpoint producer image identity is unavailable")
+        if actual != checkpoint_image:
+            if producer_fingerprint is not None:
+                if producer_fingerprint != current_fingerprint:
+                    raise ValueError("Critical host fingerprint changed; refusing checkpoint reuse")
+            else:
+                reviewed = REVIEWED_LEGACY_IMAGE_MIGRATIONS.get((checkpoint_image, actual))
+                if reviewed != current_fingerprint:
+                    raise ValueError("Runner image migration is not reviewed for this host fingerprint")
+    summary["runner_image_actual"] = actual
+    summary["checkpoint_image_identity"] = checkpoint_image
+    summary["critical_host_fingerprint"] = current_fingerprint
+    summary["runner_image_migrated"] = actual != checkpoint_image
+    return checkpoint_image
+
 
 def git_head(path: Path) -> str:
     return subprocess.check_output(
@@ -585,6 +680,13 @@ def main() -> None:
         cfg = plan["cef"]
         lock = qualification_lock(workspace)
         selected = lock["checkpoint"]
+        producer_summary = None
+        if selected is not None:
+            token = os.environ.get("GITHUB_TOKEN")
+            if not token:
+                raise ValueError("GITHUB_TOKEN is required to review checkpoint host compatibility")
+            producer_summary = verify_producer_summary(Client(token), selected)
+        checkpoint_image = checkpoint_image_identity(selected, producer_summary, summary)
         if selected is None:
             cache_args = []
             for cache in reviewed_binary_caches(temp):
@@ -635,6 +737,7 @@ def main() -> None:
             restore_state = temp / "cef-strict-restore.json"
             recipe_env_restore = dict(clean_env)
             recipe_env_restore["GITHUB_SHA"] = CEF
+            recipe_env_restore["ImageVersion"] = checkpoint_image
             run(
                 [sys.executable, recipe / "vcpkg/integration/driver.py", "restore",
                  "--work", engine_work, "--logs", engine_logs,
@@ -663,6 +766,7 @@ def main() -> None:
         # The CEF integration receipt records the reviewed recipe revision, while
         # GitHub artifact provenance continues to use the real builder head.
         recipe_env["GITHUB_SHA"] = CEF
+        recipe_env["ImageVersion"] = checkpoint_image
         recipe_env["CEF_STATIC_STRICT_THIRD_PARTY"] = "1"
         recipe_env["CEF_STATIC_BUILD_TIMEOUT_SECONDS"] = "18000"
         recipe_env["CEF_STATIC_JOBS"] = "2"
