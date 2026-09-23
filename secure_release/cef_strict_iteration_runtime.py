@@ -26,6 +26,7 @@ def observed_runtime(module, workspace: Path, temp: Path):
     previous = os.environ.get("CEF_STATIC_SMOKE_PROGRESS_DIR")
     smoke_identity = {}
     x11_identity = {}
+    elf_identity = {}
 
     def run(command, **kwargs):
         args = list(map(str, command))
@@ -43,7 +44,17 @@ def observed_runtime(module, workspace: Path, temp: Path):
                 temp / "cef-strict-engine-work/target-prefix",
                 expected,
             ))
+        is_build = (len(args) >= 3 and args[1] == str(recipe / "source_build.py")
+                    and args[2] == "build")
+        if is_build:
+            elf_identity.update(cef_x11_static.audit_native(source))
+            if not elf_identity["runtime_native_elf_verified"]:
+                raise RuntimeError("Strict engine ELF imports non-OS shared libraries")
         result = original_run(command, **kwargs)
+        if is_build and result.returncode == 0:
+            elf_identity.update(cef_x11_static.audit_native(source))
+            if not elf_identity["runtime_native_elf_verified"]:
+                raise RuntimeError("Strict engine ELF changed during runtime verification")
         if is_check and result.returncode == 0:
             if (logs.is_symlink() or progress.is_symlink()
                     or not logs.is_dir()):
@@ -55,6 +66,9 @@ def observed_runtime(module, workspace: Path, temp: Path):
 
     def classify(actual_logs):
         value = original_classify(actual_logs)
+        value.update(elf_identity)
+        if elf_identity and not elf_identity["runtime_native_elf_verified"]:
+            value["runtime_failure_category"] = "non-os-elf-dependencies"
         if Path(actual_logs) != logs:
             raise ValueError("Unexpected smoke diagnostic log directory")
         try:
@@ -63,6 +77,8 @@ def observed_runtime(module, workspace: Path, temp: Path):
                 value["runtime_smoke_fixture_sha256"] = smoke_identity["patched_sha256"]
             if x11_identity:
                 value["runtime_x11_backend"] = "static-x11"
+                value["runtime_webrtc_x11_static"] = True
+                value["runtime_gtk_rendering"] = "cairo-software"
                 value["runtime_x11_direct_loader_verified"] = True
                 value["runtime_x11_platform_archive_count"] = x11_identity["platform_archives"]
                 value["runtime_x11_source_files_verified"] = x11_identity["verified_files"]

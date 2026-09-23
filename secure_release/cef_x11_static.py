@@ -5,34 +5,39 @@ manifest, but pinned Chromium still generates an Xlib loader with dlopen() and
 keeps a bare ``-lxcb`` edge.  That admits host shared libraries at runtime even
 though GN's graph audit can map the same names to captured archives.
 
-This repair is deliberately narrow: only the two pinned Xlib loader targets are
-changed.  Xlib uses the generator's supported direct-link mode and the target
+This repair covers both Xlib loaders and WebRTC desktop capture. It also selects
+GTK Cairo rendering before GDK can load host GL/Mesa. Xlib uses the generator's
+supported direct-link mode and the target
 links the captured ``x11``/``xcb`` pkg-config closure.  The Xlib/XCB bridge is
 not loaded in this profile; it is only used by Chromium's Vulkan X11 path while
 the static CEF profile keeps Vulkan disabled.  Ordinary Chromium builds are
-byte-for-byte behaviorally unchanged.
+kept on their original dynamic-loading path.
 """
 from __future__ import annotations
 
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import tempfile
 
 CHROMIUM = "79460ebecaa5625e57a5fb679a735659e73dc687"
 MARKER = "CEF_STATIC_X11_DIRECT_V1"
-FILES = {
-    "ui/gfx/x/BUILD.gn": "b8e0c438f1dab1b88fd5c43572d80acbe18ca681e8f60b5ef57563bed25585dc",
-    "ui/gfx/x/xlib_support.cc": "0d6d01398fd226f0d263912a133f77eef4506f601648c949f4f7087bcccbf81a",
-    "tools/generate_library_loader/generate_library_loader.gni": "784f63ef334097754ce6304ea218db36c2fe17eb5011c5d52501ee865de95dc3",
-}
-PATCHED = {
-    "ui/gfx/x/BUILD.gn": "52c8654c2363e060c642161e562d1625fd1902e1c3208d3e986017ebc2bde01f",
-    "ui/gfx/x/xlib_support.cc": "69a6855cf294257a7db2d869b061ef4e5e8ccc199ece68d5f0f9d6818af4561b",
-    "tools/generate_library_loader/generate_library_loader.gni": "f062ab576e4c2502c9aac84afab2a54f6fd68de9307baa8764036d0948d74c70",
-}
+FILES = {'ui/gfx/x/BUILD.gn': 'b8e0c438f1dab1b88fd5c43572d80acbe18ca681e8f60b5ef57563bed25585dc',
+ 'ui/gfx/x/xlib_support.cc': '0d6d01398fd226f0d263912a133f77eef4506f601648c949f4f7087bcccbf81a',
+ 'tools/generate_library_loader/generate_library_loader.gni': '784f63ef334097754ce6304ea218db36c2fe17eb5011c5d52501ee865de95dc3',
+ 'third_party/webrtc/modules/desktop_capture/BUILD.gn': '2051a9069681f25a27eba1e788b4406df205e4979ca3864343aabbacea9393d6',
+ 'ui/gtk/gtk_ui.cc': '004ab865ad14b5ba7779aa00f6af335d57e55729438399fcfc383f3213ad206b'}
+PATCHED = {'ui/gfx/x/BUILD.gn': 'f8599a765c0f0d13d58dd6664d0c4a88d704899c713cb6f30eca9445d542a59d',
+ 'ui/gfx/x/xlib_support.cc': '3640598ee9f7aada1150092347b86f8be5d6193b47278b523df44f5012663bcc',
+ 'tools/generate_library_loader/generate_library_loader.gni': 'f062ab576e4c2502c9aac84afab2a54f6fd68de9307baa8764036d0948d74c70',
+ 'third_party/webrtc/modules/desktop_capture/BUILD.gn': '2104e63381732dda404a7c0e0e76c4a42f7344ce626cd2dbdf1f6924bda4870b',
+ 'ui/gtk/gtk_ui.cc': '72c8e8c4b65e3b2aac4a0078ab1f1fd2e18aba34b45b0156877f2d237070ac40'}
+LEGACY_PATCHED = {'ui/gfx/x/BUILD.gn': '52c8654c2363e060c642161e562d1625fd1902e1c3208d3e986017ebc2bde01f',
+ 'ui/gfx/x/xlib_support.cc': '69a6855cf294257a7db2d869b061ef4e5e8ccc199ece68d5f0f9d6818af4561b',
+ 'tools/generate_library_loader/generate_library_loader.gni': 'f062ab576e4c2502c9aac84afab2a54f6fd68de9307baa8764036d0948d74c70'}
 
 
 def _digest(data: bytes) -> str:
@@ -136,7 +141,13 @@ if (cef_static_platform_manifest != "") {
   }
 }
 '''
-    return _one(text, tail, tail_static, "X11 target libraries")
+    text = _one(text, tail, tail_static, "X11 target libraries")
+    text = _one(text, 'import("//build/config/ui.gni")\n',
+                'import("//build/config/ui.gni")\nimport("//gpu/vulkan/features.gni")\n', "Vulkan feature")
+    return _one(text, '    defines = [ "CEF_STATIC_X11_DIRECT=1" ]\n',
+                '    defines = [ "CEF_STATIC_X11_DIRECT=1" ]\n'
+                '    assert(!enable_vulkan, "Static X11 bridge requires a reviewed Vulkan profile")\n'
+                '    deps -= [ ":xlib_xcb_loader" ]\n', "bridge dependency")
 
 
 def patch_xlib_support(text: str) -> str:
@@ -168,7 +179,20 @@ def patch_xlib_support(text: str) -> str:
 #endif
 }
 '''
-    return _one(text, get, get_static, "Xlib/XCB accessor")
+    text = _one(text, get, get_static, "Xlib/XCB accessor")
+    include = '#include "library_loaders/xlib_xcb_loader.h"\n'
+    text = _one(text, include,
+                '#if !defined(CEF_STATIC_X11_DIRECT)\n' + include + '#endif\n',
+                "bridge header")
+    getter = """XlibXcbLoader* GetXlibXcbLoader() {
+  static base::NoDestructor<XlibXcbLoader> xlib_xcb_loader;
+  return xlib_xcb_loader.get();
+}
+"""
+    # The entire getter must disappear, not just its callers (-Wunused-function).
+    return _one(text, getter,
+                '#if !defined(CEF_STATIC_X11_DIRECT)\n' + getter + '#endif\n',
+                "bridge getter")
 
 
 PATCHERS = {
@@ -178,78 +202,174 @@ PATCHERS = {
 }
 
 
+
+WEBRTC = "6f37672d358475cd17544121a12494da454d85fb"
+DESKTOP_FILE = "third_party/webrtc/modules/desktop_capture/BUILD.gn"
+GTK_FILE = "ui/gtk/gtk_ui.cc"
+X_MODULES = ("x11", "xcomposite", "xdamage", "xext", "xfixes", "xrandr", "xrender", "xtst", "xcb")
+OS_NEEDED = frozenset({"libc.so.6", "libm.so.6", "libdl.so.2", "libpthread.so.0",
+                       "librt.so.1", "libresolv.so.2", "ld-linux-x86-64.so.2"})
+
+
+def patch_desktop_capture(text: str) -> str:
+    text = _one(text, 'import("//build/config/ui.gni")\n',
+                'import("//build/config/ui.gni")\nimport("//build/config/linux/pkg_config.gni")\n',
+                "WebRTC platform import")
+    original = '''    libs = [
+      "X11",
+      "Xcomposite",
+      "Xdamage",
+      "Xext",
+      "Xfixes",
+
+      # Xrandr depends on Xrender and needs to be listed before its dependency.
+      "Xrandr",
+
+      "Xrender",
+      "Xtst",
+    ]
+'''
+    replacement = ('    # CEF_STATIC_DESKTOP_V2: no host -l lookup in the strict target.\n'
+                   '    if (cef_static_platform_manifest != "" &&\n'
+                   '        current_toolchain == default_toolchain) {\n'
+                   '      configs += [ ":cef_static_capture_x11" ]\n'
+                   '    } else {\n' +
+                   ''.join('  ' + line if line.strip() else line for line in original.splitlines(True)) +
+                   '    }\n')
+    text = _one(text, original, replacement, "WebRTC X11 libraries")
+    return text + '''
+# CEF_STATIC_DESKTOP_V2: retain X11 screen/window capture and all extensions.
+if (cef_static_platform_manifest != "" &&
+    current_toolchain == default_toolchain) {
+  pkg_config("cef_static_capture_x11") {
+    packages = [ "x11", "xcomposite", "xdamage", "xext", "xfixes",
+                 "xrandr", "xrender", "xtst" ]
+  }
+}
+'''
+
+
+def patch_gtk_software(text: str) -> str:
+    # GTK3 initializes GLX while choosing visuals, even in a CPU-only CEF
+    # reference run. Use GTK's supported Cairo path before its initialization;
+    # this keeps GtkUi, themes, dialogs, fonts and input integration enabled.
+    anchor = '  env->SetVar("NO_AT_BRIDGE", "1");\n'
+    return _one(text, anchor, anchor + '''#if defined(CEF_STATIC_GTK3)  // CEF_STATIC_DESKTOP_V2
+  // Do not load host GL/Mesa through GDK/epoxy in the strict static profile.
+  // This governs GTK's own drawing only, not Chromium's ANGLE/Skia features.
+  if (!env->SetVar("GDK_GL", "disable")) {
+    return false;
+  }
+#endif
+''', "GDK software rendering")
+
+
+PATCHERS[DESKTOP_FILE] = patch_desktop_capture
+PATCHERS[GTK_FILE] = patch_gtk_software
+
+
+def _regular(root: Path, relative: str) -> Path:
+    if (not isinstance(relative, str) or relative.startswith("/")
+            or any(part in ("", ".", "..") for part in relative.split("/"))):
+        raise ValueError("Noncanonical static desktop input")
+    path = root
+    if path.is_symlink():
+        raise ValueError("Redirected static desktop root")
+    for part in relative.split("/"):
+        path = path / part
+        if path.is_symlink():
+            raise ValueError("Redirected static desktop input")
+    if not path.is_file() or not path.resolve().is_relative_to(root.resolve()):
+        raise ValueError("Missing static desktop input")
+    return path
+
+
 def _validated_platform(manifest: Path, prefix: Path, expected: str) -> dict:
-    if (not manifest.is_file() or manifest.is_symlink() or _digest(manifest.read_bytes()) != expected):
-        raise ValueError("Static X11 platform manifest mismatch")
-    value = json.loads(manifest.read_text(encoding="utf-8"))
-    if (value.get("schema") != 1
+    if (not re.fullmatch(r"[0-9a-f]{64}", expected)
+            or manifest.is_symlink() or not manifest.is_file()
+            or _digest(manifest.read_bytes()) != expected):
+        raise ValueError("Static desktop platform manifest mismatch")
+    value = json.loads(manifest.read_bytes())
+    if (not isinstance(value, dict) or value.get("schema") != 1
             or value.get("kind") != "linux-x64-static-platform-build-inputs"
             or value.get("runtime_verified") is not False):
-        raise ValueError("Invalid static X11 platform identity")
-    modules = value.get("modules")
-    files = value.get("files")
-    archives = value.get("archive_objects")
-    if not all(isinstance(x, dict) for x in (modules, files, archives)):
-        raise ValueError("Static X11 platform inventory is incomplete")
-    selected: set[str] = set()
-    for module in ("x11", "xcb"):
+        raise ValueError("Invalid static desktop platform identity")
+    modules, files, archives = (value.get(k) for k in ("modules", "files", "archive_objects"))
+    if not all(isinstance(v, dict) for v in (modules, files, archives)):
+        raise ValueError("Incomplete static desktop inventory")
+    selected = set()
+    for module in X_MODULES:
         entry = modules.get(module)
         if not isinstance(entry, dict) or not isinstance(entry.get("libraries"), list):
-            raise ValueError("Static X11 platform module is missing: " + module)
+            raise ValueError("Missing frozen desktop module")
         for relative in entry["libraries"]:
+            if not isinstance(relative, str):
+                raise ValueError("Invalid static desktop library name")
             if relative in {"c", "m", "dl", "pthread", "rt", "resolv"}:
                 continue
             if (not isinstance(relative, str) or not relative.startswith("lib/")
-                    or not relative.endswith(".a") or relative not in files
-                    or type(archives.get(relative)) is not int or archives[relative] <= 0):
-                raise ValueError("Static X11 module references an uncaptured archive")
-            path = prefix / relative
-            if (not path.is_file() or path.is_symlink()
-                    or not path.resolve().is_relative_to(prefix.resolve())):
-                raise ValueError("Static X11 archive is missing or redirected")
-            record = files[relative]
-            if path.stat().st_size != record.get("size") or _digest(path.read_bytes()) != record.get("sha256"):
-                raise ValueError("Static X11 archive bytes changed")
+                    or not relative.endswith(".a") or type(archives.get(relative)) is not int
+                    or archives[relative] <= 0):
+                raise ValueError("Uncaptured static desktop library")
+            if relative in selected:
+                continue
+            record = files.get(relative)
+            if not isinstance(record, dict):
+                raise ValueError("Missing static desktop archive identity")
+            path = _regular(prefix, relative)
+            with path.open("rb") as stream:
+                magic = stream.read(8)
+                stream.seek(0)
+                sha = hashlib.file_digest(stream, "sha256").hexdigest()
+            if (magic != b"!<arch>\n" or path.stat().st_size != record.get("size")
+                    or sha != record.get("sha256")):
+                raise ValueError("Frozen desktop archive changed")
             selected.add(relative)
-    if "lib/libX11.a" not in selected or "lib/libxcb.a" not in selected:
-        raise ValueError("Frozen X11/XCB closure lacks required direct archives")
-    return {"archives": sorted(selected), "module_count": 2}
+    required = {"lib/libX11.a", "lib/libxcb.a", "lib/libXcomposite.a", "lib/libXdamage.a",
+                "lib/libXext.a", "lib/libXfixes.a", "lib/libXrandr.a", "lib/libXrender.a", "lib/libXtst.a"}
+    if not required <= selected:
+        raise ValueError("Frozen desktop closure lacks required archives")
+    return {"archives": sorted(selected), "module_count": len(X_MODULES)}
+
+
+def transform(relative: str, raw: bytes, original: bytes) -> bytes:
+    if relative not in PATCHERS or _digest(original) != FILES[relative]:
+        raise ValueError("Unreviewed static desktop original")
+    output = PATCHERS[relative](original.decode("utf-8")).encode("utf-8")
+    if _digest(output) != PATCHED[relative]:
+        raise ValueError("Static desktop transform differs from reviewed output")
+    known = {FILES[relative], PATCHED[relative]}
+    if relative in LEGACY_PATCHED:
+        known.add(LEGACY_PATCHED[relative])
+    if _digest(raw) not in known:
+        raise ValueError("Unreviewed or partially patched desktop source")
+    return output
 
 
 def install(source: Path, manifest: Path, prefix: Path, expected: str) -> dict:
-    source = source.resolve(strict=True)
-    manifest = manifest.resolve(strict=True)
-    prefix = prefix.resolve(strict=True)
-    head = subprocess.check_output(
-        ["git", "-C", str(source), "rev-parse", "HEAD"], text=True, timeout=30
-    ).strip()
-    if head != CHROMIUM:
-        raise ValueError("Pinned Chromium source revision mismatch before X11 repair")
+    if source.is_symlink() or prefix.is_symlink() or manifest.is_symlink():
+        raise ValueError("Redirected static desktop selection")
+    source, prefix = source.resolve(strict=True), prefix.resolve(strict=True)
     platform = _validated_platform(manifest, prefix, expected)
-
-    staged: dict[Path, bytes] = {}
-    changed = 0
-    for relative, patcher in PATCHERS.items():
-        path = source / relative
-        if (not path.is_file() or path.is_symlink()
-                or not path.resolve().is_relative_to(source)):
-            raise ValueError("Pinned Chromium X11 source is missing or redirected")
+    for repository, revision in ((source, CHROMIUM), (source / "third_party/webrtc", WEBRTC)):
+        head = subprocess.check_output(["git", "-C", str(repository), "rev-parse", "HEAD"],
+                                       text=True, timeout=30).strip()
+        if head != revision:
+            raise ValueError("Static desktop source revision changed")
+    staged = {}
+    for relative in PATCHERS:
+        path = _regular(source, relative)
+        repo, revision, name = source, CHROMIUM, relative
+        if relative == DESKTOP_FILE:
+            repo, revision, name = source / "third_party/webrtc", WEBRTC, "modules/desktop_capture/BUILD.gn"
+        original = subprocess.check_output(["git", "-C", str(repo), "show", revision + ":" + name], timeout=30)
         raw = path.read_bytes()
-        text = raw.decode("utf-8")
-        if MARKER in text:
-            if _digest(raw) != PATCHED[relative]:
-                raise ValueError("Existing static X11 repair differs from reviewed bytes: " + relative)
-            continue
-        if _digest(raw) != FILES[relative]:
-            raise ValueError("Pinned Chromium X11 source differs from reviewed bytes: " + relative)
-        output = patcher(text).encode("utf-8")
-        if MARKER not in output.decode("utf-8"):
-            raise AssertionError("Static X11 repair marker missing")
-        staged[path] = output
-        changed += 1
-
+        output = transform(relative, raw, original)
+        if raw != output:
+            staged[path] = output
+    # Validate every complete file before writing. Idempotent files keep mtimes.
     for path, data in staged.items():
-        fd, name = tempfile.mkstemp(prefix=".cef-x11-", dir=path.parent)
+        fd, name = tempfile.mkstemp(prefix=".cef-desktop-", dir=path.parent)
         temporary = Path(name)
         try:
             with os.fdopen(fd, "wb") as stream:
@@ -260,16 +380,21 @@ def install(source: Path, manifest: Path, prefix: Path, expected: str) -> dict:
             os.replace(temporary, path)
         finally:
             temporary.unlink(missing_ok=True)
+    return {"schema": 2, "status": "success", "kind": "cef-static-desktop",
+            "changed_files": len(staged), "verified_files": len(PATCHERS),
+            "platform_sha256": expected, "platform_modules": platform["module_count"],
+            "platform_archives": len(platform["archives"]), "gtk_rendering": "cairo-software",
+            "webrtc_x11_static": True, "runtime_verified": False}
 
-    return {
-        "schema": 1,
-        "status": "success",
-        "kind": "cef-static-x11-direct",
-        "chromium": CHROMIUM,
-        "changed_files": changed,
-        "verified_files": len(PATCHERS),
-        "platform_sha256": expected,
-        "platform_modules": platform["module_count"],
-        "platform_archives": len(platform["archives"]),
-        "runtime_verified": False,
-    }
+
+def audit_native(source: Path) -> dict:
+    """Check the real ELF, not GN's interpretation of a bare -l name."""
+    exe = _regular(source, "out/CEF_Static_Platform_Release_x64/cef_static_smoke")
+    result = subprocess.run(["readelf", "-d", str(exe)], capture_output=True, text=True, timeout=60)
+    if result.returncode or len(result.stdout) > 256 * 1024:
+        raise RuntimeError("Cannot inspect static engine ELF")
+    needed = re.findall(r"\(NEEDED\).*Shared library: \[([^\]]+)\]", result.stdout)
+    unexpected = set(needed) - OS_NEEDED
+    return {"runtime_native_elf_verified": not unexpected,
+            "runtime_native_elf_needed_count": len(needed),
+            "runtime_native_elf_unexpected_count": len(unexpected)}
