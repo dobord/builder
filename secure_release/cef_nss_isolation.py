@@ -8,6 +8,8 @@ from pathlib import Path
 import re
 import stat
 
+from . import cef_gtk_codecs
+
 ARCHIVE_RELATIVE = "lib/cef-nss/libcef_nss.a"
 MARKER = b"# cef-nss-boringssl-isolation-wrapper-v2"
 OUT_NAME = "CEF_Static_Platform_Release_x64"
@@ -247,6 +249,9 @@ def install(source: Path, manifest: Path, prefix: Path, expected_manifest: str,
         ninja.rename(real)
 
     wrapper = _wrapper_text(archive, record["sha256"], objcopy, nm)
+    wrapper = cef_gtk_codecs.attach(
+        wrapper, source, manifest, prefix, expected_manifest, summary
+    )
     compile(wrapper, "<cef-nss-isolation-wrapper>", "exec")
     temporary = ninja.with_name("ninja.cef-nss-new")
     temporary.write_text(wrapper, encoding="utf-8", newline="\n")
@@ -308,6 +313,7 @@ def record_receipt(source: Path, summary: dict, *, required: bool = False) -> bo
             or value["ninja_replacements"] <= 0
             or not re.fullmatch(r"[0-9a-f]{64}", str(value.get("derived_sha256")))):
         raise RuntimeError("NSS/BoringSSL isolation receipt is invalid")
+    cef_gtk_codecs.record_receipt(source, summary, required=required)
     summary["nss_boringssl_isolation_verified"] = True
     summary["nss_boringssl_derived_sha256"] = value["derived_sha256"]
     summary["nss_boringssl_ninja_replacements"] = value["ninja_replacements"]
