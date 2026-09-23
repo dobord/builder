@@ -1,6 +1,5 @@
 name: Offline local diagnostic tools
-# No private inputs or decryption in Actions. This supplies the existing local
-# decryptor to offline engineering environments using verified public wheels.
+# No private inputs or decryption in Actions. Public source fixtures only.
 on:
   push:
     branches: [feature/cef-static-integration]
@@ -23,12 +22,17 @@ jobs:
         run: |
           set -euo pipefail
           kit="$RUNNER_TEMP/local-diagnostic-tools"
-          mkdir -p "$kit/wheels"
+          mkdir -p "$kit/wheels" "$kit/upstream"
           python -m pip download --disable-pip-version-check --require-hashes --only-binary=:all: -r requirements.lock -d "$kit/wheels"
           git archive --format=tar HEAD > "$kit/builder-source.tar"
           cp requirements.lock "$kit/requirements.lock"
           git rev-parse HEAD > "$kit/source-commit.txt"
-          (cd "$kit" && sha256sum builder-source.tar requirements.lock source-commit.txt wheels/*.whl > SHA256SUMS)
+          curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o "$kit/upstream/cef-source.tar.gz" https://github.com/dobord/cef/archive/2aff22e09daaa5c28780c5766a70ee13e61c93b6.tar.gz
+          for path in ui/gfx/x/BUILD.gn ui/gfx/x/xlib_support.cc tools/generate_library_loader/generate_library_loader.gni tools/generate_library_loader/generate_library_loader.py; do
+            mkdir -p "$kit/upstream/$(dirname "$path")"
+            curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o "$kit/upstream/$path" "https://raw.githubusercontent.com/chromium/chromium/79460ebecaa5625e57a5fb679a735659e73dc687/$path"
+          done
+          (cd "$kit" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
           python -m pip install --disable-pip-version-check --no-index --find-links="$kit/wheels" --require-hashes --only-binary=:all: -r requirements.lock
           python -m unittest discover -s tests -p test_encrypted_logs.py -v
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
