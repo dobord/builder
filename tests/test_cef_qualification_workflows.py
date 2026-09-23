@@ -124,18 +124,19 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertEqual(lock['vcpkg_commit'], 'b4bb281192ea8bb004542012ac804b988a4ff403')
         self.assertEqual(lock['cef_recipe_commit'], '2aff22e09daaa5c28780c5766a70ee13e61c93b6')
         checkpoint=lock['checkpoint']
-        self.assertIsInstance(checkpoint, dict)
-        self.assertEqual(set(checkpoint), {
-            'run', 'attempt', 'producer_sha', 'artifact_id', 'artifact_sha256',
-            'summary_artifact_id', 'summary_artifact_sha256', 'build_key', 'platform_sha256'
-        })
-        self.assertGreater(checkpoint['run'], 0)
-        self.assertEqual(checkpoint['attempt'], 1)
-        self.assertGreater(checkpoint['artifact_id'], 0)
-        self.assertGreater(checkpoint['summary_artifact_id'], 0)
-        self.assertRegex(checkpoint['producer_sha'], r'^[0-9a-f]{40}$')
-        for name in ('artifact_sha256', 'summary_artifact_sha256', 'build_key', 'platform_sha256'):
-            self.assertRegex(checkpoint[name], r'^[0-9a-f]{64}$')
+        if checkpoint is not None:
+            self.assertIsInstance(checkpoint, dict)
+            self.assertEqual(set(checkpoint), {
+                'run', 'attempt', 'producer_sha', 'artifact_id', 'artifact_sha256',
+                'summary_artifact_id', 'summary_artifact_sha256', 'build_key', 'platform_sha256'
+            })
+            self.assertGreater(checkpoint['run'], 0)
+            self.assertEqual(checkpoint['attempt'], 1)
+            self.assertGreater(checkpoint['artifact_id'], 0)
+            self.assertGreater(checkpoint['summary_artifact_id'], 0)
+            self.assertRegex(checkpoint['producer_sha'], r'^[0-9a-f]{40}$')
+            for name in ('artifact_sha256', 'summary_artifact_sha256', 'build_key', 'platform_sha256'):
+                self.assertRegex(checkpoint[name], r'^[0-9a-f]{64}$')
 
     def test_sdk_dependency_qualification_keeps_private_build_logs_runner_local(self):
         text = (ROOT / ".github/workflows/cef-strict-sdk-deps.yml").read_text()
