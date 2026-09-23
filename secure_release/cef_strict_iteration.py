@@ -5,6 +5,7 @@ artifact is encrypted with the builder input recipient. A completed slice is
 additionally subjected to the pinned CEF browser/renderer runtime verification.
 """
 from __future__ import annotations
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -412,32 +413,369 @@ def classify_compile_slice(logs: Path) -> dict:
     return result
 
 
-STATIC_LINUX_UI_MARKER = "# CEF_STATIC_NO_RUNTIME_GTK_V1"
+LEGACY_STATIC_LINUX_UI_MARKER = "# CEF_STATIC_NO_RUNTIME_GTK_V1"
+STATIC_GTK_BUILD_MARKER = "# CEF_STATIC_DIRECT_GTK3_V1"
+STATIC_GTK_COMPAT_MARKER = "// CEF_STATIC_DIRECT_GTK3_V1"
+STATIC_GTK_SIG_DIR = "cef-static-sigs"
+STATIC_GTK_DLSYM_SYMBOLS = (
+    "gtk_init_check",
+    "gtk_style_context_get_padding",
+    "gtk_style_context_get_border",
+    "gtk_style_context_get_margin",
+    "gtk_style_context_get_color",
+    "gtk_style_context_get_background_color",
+    "gtk_style_context_lookup_color",
+    "gtk_im_context_filter_keypress",
+    "gtk_file_chooser_set_current_folder",
+    "gtk_render_icon",
+    "gtk_window_new",
+    "gtk_css_provider_load_from_data",
+    "gtk_file_chooser_get_files",
+    "gtk_icon_theme_lookup_by_gicon_for_scale",
+    "gtk_icon_theme_lookup_icon",
+    "gtk_icon_theme_lookup_by_gicon",
+    "gtk_file_chooser_dialog_new",
+    "gtk_tree_store_new",
+    "gdk_event_get_event_type",
+    "gdk_event_get_time",
+)
 
 
-def ensure_static_linux_ui_fallback(source: Path, summary: dict) -> None:
-    """Keep a fully static GLib/GObject registry out of Chromium's dlopen GTK path."""
+def _filter_static_gtk_signatures(text: str, provided: set[str]) -> tuple[str, list[str]]:
+    missing = []
+    names = []
+    for raw in text.splitlines():
+        stripped = raw.strip()
+        if not stripped or stripped.startswith(("#", "//")):
+            continue
+        match = re.search(r"([A-Za-z_][A-Za-z0-9_]*)\s*\(", stripped)
+        if not match:
+            raise ValueError("Unrecognized Chromium GTK signature line")
+        name = match.group(1)
+        names.append(name)
+        if name not in provided:
+            missing.append(raw)
+    if len(names) != len(set(names)):
+        raise ValueError("Duplicate Chromium GTK signature")
+    return ("\n".join(missing) + ("\n" if missing else "")), names
+
+
+def _frozen_static_gtk_symbols(
+        manifest: Path, prefix: Path, platform_sha: str) -> tuple[set[str], dict]:
+    if (not manifest.is_file() or manifest.is_symlink()
+            or hashlib.sha256(manifest.read_bytes()).hexdigest() != platform_sha):
+        raise ValueError("Frozen GTK manifest does not match the platform lock")
+    value = json.loads(manifest.read_text(encoding="utf-8"))
+    modules = value.get("modules") if isinstance(value, dict) else None
+    entry = modules.get("gtk+-3.0") if isinstance(modules, dict) else None
+    files = value.get("files") if isinstance(value, dict) else None
+    archives = value.get("archive_objects") if isinstance(value, dict) else None
+    if (not isinstance(entry, dict) or not isinstance(files, dict)
+            or not isinstance(archives, dict)):
+        raise ValueError("Frozen platform contract lacks static GTK3")
+    libraries = entry.get("libraries")
+    link_options = entry.get("link_options")
+    if not isinstance(libraries, list) or not isinstance(link_options, list):
+        raise ValueError("Frozen GTK3 module contract is malformed")
+    if "-Wl,--export-dynamic" not in link_options:
+        raise ValueError("Static GTK compatibility dlsym requires exported process symbols")
+
+    required = {
+        "lib/libgtk-3.a", "lib/libgdk-3.a", "lib/libgdk_pixbuf-2.0.a",
+        "lib/libgio-2.0.a", "lib/libgobject-2.0.a", "lib/libglib-2.0.a",
+    }
+    selected = []
+    for relative in libraries:
+        if not isinstance(relative, str) or not relative.startswith("lib/"):
+            continue
+        if not relative.endswith(".a"):
+            continue
+        if relative not in files or type(archives.get(relative)) is not int:
+            raise ValueError("GTK3 links an archive outside the frozen platform contract")
+        path = prefix / relative
+        if (not path.is_file() or path.is_symlink()
+                or not path.resolve().is_relative_to(prefix.resolve())):
+            raise ValueError("Frozen GTK3 archive is missing or redirected")
+        selected.append((relative, path))
+    present = {name for name, _ in selected}
+    if not required.issubset(present):
+        raise ValueError("Frozen GTK3 closure is missing required static archives")
+
+    nm = shutil.which("nm")
+    if not nm:
+        raise ValueError("nm is required to bind the static GTK3 ABI")
+    symbols: set[str] = set()
+    for _, path in selected:
+        result = subprocess.run(
+            [nm, "-g", "--defined-only", path],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, timeout=120,
+        )
+        if result.returncode:
+            raise RuntimeError("Failed to inspect a frozen GTK3 archive")
+        for raw in result.stdout.splitlines():
+            match = re.search(r"([A-Za-z_][A-Za-z0-9_$.@]*)$", raw.strip())
+            if match:
+                symbols.add(match.group(1))
+    essentials = {
+        "gtk_settings_get_default", "gtk_get_major_version",
+        "gdk_display_get_default", "gdk_pixbuf_new", "g_list_model_get_item",
+    }
+    if not essentials.issubset(symbols):
+        raise ValueError("Frozen GTK3 closure does not export the required desktop ABI")
+    return symbols, entry
+
+
+def ensure_static_linux_gtk(
+        source: Path, manifest: Path, prefix: Path,
+        platform_sha: str, summary: dict) -> None:
+    """Preserve GtkUi while binding it to the frozen static GTK3/GLib closure."""
     if git_head(source) != CHROMIUM:
-        raise ValueError("Pinned Chromium source revision mismatch before Linux UI repair")
-    path = source / "build/config/linux/gtk/gtk.gni"
-    if not path.is_file() or path.is_symlink():
-        raise ValueError("Pinned Chromium gtk.gni is missing or redirected")
-    text = path.read_text(encoding="utf-8")
-    original = "  use_gtk = is_linux && !is_castos\n"
-    patched = "  " + STATIC_LINUX_UI_MARKER + "\n  use_gtk = false\n"
-    repaired = False
-    if STATIC_LINUX_UI_MARKER in text:
-        if (text.count(STATIC_LINUX_UI_MARKER) != 1
-                or patched not in text or original in text):
-            raise ValueError("Existing static Linux UI fallback repair is malformed")
+        raise ValueError("Pinned Chromium source revision mismatch before GTK repair")
+    manifest = manifest.resolve(strict=True)
+    prefix = prefix.resolve(strict=True)
+    symbols, gtk_entry = _frozen_static_gtk_symbols(manifest, prefix, platform_sha)
+
+    gtk_root = source / "ui/gtk"
+    build = gtk_root / "BUILD.gn"
+    compat = gtk_root / "gtk_compat.cc"
+    gni = source / "build/config/linux/gtk/gtk.gni"
+    for path in (build, compat, gni):
+        if not path.is_file() or path.is_symlink():
+            raise ValueError("Pinned Chromium GTK source is missing or redirected")
+
+    # Migrate the diagnostic no-GTK checkpoint back to Chromium's normal GtkUi.
+    original_use_gtk = "  use_gtk = is_linux && !is_castos\n"
+    legacy_use_gtk = (
+        "  " + LEGACY_STATIC_LINUX_UI_MARKER + "\n"
+        "  use_gtk = false\n"
+    )
+    gni_text = gni.read_text(encoding="utf-8")
+    migrated_fallback = False
+    if legacy_use_gtk in gni_text:
+        if gni_text.count(LEGACY_STATIC_LINUX_UI_MARKER) != 1:
+            raise ValueError("Legacy fallback GTK marker is malformed")
+        gni_text = gni_text.replace(legacy_use_gtk, original_use_gtk, 1)
+        gni.write_text(gni_text, encoding="utf-8", newline="\n")
+        migrated_fallback = True
+    elif gni_text.count(original_use_gtk) != 1:
+        raise ValueError("Pinned Chromium GTK default differs from reviewed source")
+
+    # Keep direct definitions for every ABI symbol that GTK3 actually exports.
+    # Generate normal Chromium stubs only for GTK4-only symbols.
+    sig_dir = gtk_root / STATIC_GTK_SIG_DIR
+    expected_sigs: dict[str, str] = {}
+    counts = {}
+    for name in ("gtk", "gdk", "gsk", "gdk_pixbuf", "gio"):
+        path = gtk_root / (name + ".sigs")
+        if not path.is_file() or path.is_symlink():
+            raise ValueError("Pinned Chromium GTK signature inventory is incomplete")
+        filtered, all_names = _filter_static_gtk_signatures(
+            path.read_text(encoding="utf-8"), symbols
+        )
+        missing_count = len([
+            item for item in filtered.splitlines() if item.strip()
+        ])
+        counts[name] = {"total": len(all_names), "stubbed": missing_count}
+        if name in ("gdk_pixbuf", "gio"):
+            if filtered:
+                raise ValueError("Frozen GTK3 closure lacks a required GLib/GdkPixbuf ABI symbol")
+        else:
+            if not filtered:
+                raise ValueError("Static GTK compatibility inventory unexpectedly has no missing ABI")
+            expected_sigs[name + ".sigs"] = filtered
+    if sig_dir.exists():
+        if sig_dir.is_symlink() or not sig_dir.is_dir():
+            raise ValueError("Static GTK signature directory is redirected")
+        actual = sorted(p.name for p in sig_dir.iterdir() if p.is_file())
+        if actual != sorted(expected_sigs):
+            raise ValueError("Static GTK signature inventory changed")
+        for name, content in expected_sigs.items():
+            path = sig_dir / name
+            if path.is_symlink() or path.read_text(encoding="utf-8") != content:
+                raise ValueError("Static GTK signature bytes changed")
     else:
-        if text.count(original) != 1 or "use_gtk = false" in text:
-            raise ValueError("Pinned Chromium GTK default differs from reviewed source")
-        text = text.replace(original, patched, 1)
-        path.write_text(text, encoding="utf-8", newline="\n")
-        repaired = True
-    summary["runtime_gtk_loader_disabled"] = True
-    summary["runtime_linux_ui_fallback_repaired"] = repaired
+        sig_dir.mkdir()
+        for name, content in expected_sigs.items():
+            (sig_dir / name).write_text(content, encoding="utf-8", newline="\n")
+
+    forced = sorted(set(STATIC_GTK_DLSYM_SYMBOLS) & symbols)
+    required_forced = {
+        "gtk_init_check", "gtk_style_context_get_padding",
+        "gtk_style_context_get_border", "gtk_style_context_get_color",
+        "gtk_window_new", "gtk_css_provider_load_from_data",
+    }
+    if not required_forced.issubset(forced):
+        raise ValueError("Frozen GTK3 closure lacks compatibility symbols required by Chromium")
+    force_flags = "".join(
+        f'      "-Wl,-u,{name}",\n' for name in forced
+    )
+
+    build_text = build.read_text(encoding="utf-8")
+    ignore_original = (
+        "  # We dlopen() GTK, so make sure not to add a link-time dependency on it.\n"
+        "  ignore_libs = true\n"
+    )
+    ignore_patched = (
+        "  # " + STATIC_GTK_BUILD_MARKER.lstrip("# ") + "\n"
+        "  # Dynamic Chromium keeps dlopen GTK; strict CEF links the frozen GTK3 archives.\n"
+        '  ignore_libs = cef_static_platform_manifest == ""\n'
+    )
+    sig_original = '''  sigs = [
+    "gdk_pixbuf.sigs",
+    "gdk.sigs",
+    "gsk.sigs",
+    "gtk.sigs",
+    "gio.sigs",
+  ]
+'''
+    sig_patched = '''  if (cef_static_platform_manifest != "") {
+    sigs = [
+      "cef-static-sigs/gdk.sigs",
+      "cef-static-sigs/gsk.sigs",
+      "cef-static-sigs/gtk.sigs",
+    ]
+  } else {
+    sigs = [
+      "gdk_pixbuf.sigs",
+      "gdk.sigs",
+      "gsk.sigs",
+      "gtk.sigs",
+      "gio.sigs",
+    ]
+  }
+'''
+    group_original = '''group("gtk_config") {
+  public_configs = [ ":gtk_internal_config" ]
+}
+'''
+    group_patched = '''config("cef_static_gtk_link") {
+  if (cef_static_platform_manifest != "") {
+    ldflags = [
+''' + force_flags + '''    ]
+  }
+}
+
+group("gtk_config") {
+  public_configs = [ ":gtk_internal_config" ]
+  if (cef_static_platform_manifest != "") {
+    public_configs += [ ":cef_static_gtk_link" ]
+  }
+}
+'''
+    define_original = '  defines = [ "IS_GTK_IMPL" ]\n'
+    define_patched = (
+        '  defines = [ "IS_GTK_IMPL" ]\n'
+        '  if (cef_static_platform_manifest != "") {\n'
+        '    defines += [ "CEF_STATIC_GTK3=1" ]\n'
+        '  }\n'
+    )
+    if STATIC_GTK_BUILD_MARKER in build_text:
+        if (build_text.count(STATIC_GTK_BUILD_MARKER) != 1
+                or ignore_patched not in build_text
+                or sig_patched not in build_text
+                or group_patched not in build_text
+                or define_patched not in build_text):
+            raise ValueError("Existing static GTK3 GN repair differs from the frozen ABI")
+    else:
+        for anchor in (ignore_original, sig_original, group_original, define_original):
+            if build_text.count(anchor) != 1:
+                raise ValueError("Pinned Chromium GTK GN anchors differ from reviewed source")
+        build_text = build_text.replace(ignore_original, ignore_patched, 1)
+        build_text = build_text.replace(sig_original, sig_patched, 1)
+        build_text = build_text.replace(group_original, group_patched, 1)
+        build_text = build_text.replace(define_original, define_patched, 1)
+        build.write_text(build_text, encoding="utf-8", newline="\n")
+
+    compat_text = compat.read_text(encoding="utf-8")
+    include_original = '#include "ui/gtk/gtk_stubs.h"\n'
+    include_patched = (
+        STATIC_GTK_COMPAT_MARKER + "\n"
+        "#if !defined(CEF_STATIC_GTK3)\n"
+        '#include "ui/gtk/gtk_stubs.h"\n'
+        "#endif\n"
+    )
+    dlopen_original = '''void* DlOpen(const char* library_name, bool check = true) {
+  void* library = dlopen(library_name, RTLD_LAZY | RTLD_GLOBAL);
+  CHECK(!check || library);
+  return library;
+}
+'''
+    dlopen_patched = '''void* DlOpen(const char* library_name, bool check = true) {
+#if defined(CEF_STATIC_GTK3)
+  (void)library_name;
+  (void)check;
+  CHECK(false) << "Static GTK3 profile forbids loading a system GTK module";
+  return nullptr;
+#else
+  void* library = dlopen(library_name, RTLD_LAZY | RTLD_GLOBAL);
+  CHECK(!check || library);
+  return library;
+#endif
+}
+'''
+    get_original = '''void* GetLibGtk() {
+  if (GtkCheckVersion(4)) {
+    return GetLibGtk4();
+  }
+  return GetLibGtk3();
+}
+'''
+    get_patched = '''void* GetLibGtk() {
+#if defined(CEF_STATIC_GTK3)
+  return RTLD_DEFAULT;
+#else
+  if (GtkCheckVersion(4)) {
+    return GetLibGtk4();
+  }
+  return GetLibGtk3();
+#endif
+}
+'''
+    load_original = '''bool LoadGtk(ui::LinuxUiBackend backend) {
+  static bool loaded = LoadGtkImpl(backend);
+  return loaded;
+}
+'''
+    load_patched = '''bool LoadGtk(ui::LinuxUiBackend backend) {
+#if defined(CEF_STATIC_GTK3)
+  (void)backend;
+  return true;
+#else
+  static bool loaded = LoadGtkImpl(backend);
+  return loaded;
+#endif
+}
+'''
+    if STATIC_GTK_COMPAT_MARKER in compat_text:
+        if (compat_text.count(STATIC_GTK_COMPAT_MARKER) != 1
+                or include_patched not in compat_text
+                or dlopen_patched not in compat_text
+                or get_patched not in compat_text
+                or load_patched not in compat_text):
+            raise ValueError("Existing static GTK3 compatibility repair is malformed")
+    else:
+        for anchor in (include_original, dlopen_original, get_original, load_original):
+            if compat_text.count(anchor) != 1:
+                raise ValueError("Pinned Chromium GTK compatibility anchors differ from reviewed source")
+        compat_text = compat_text.replace(include_original, include_patched, 1)
+        compat_text = compat_text.replace(dlopen_original, dlopen_patched, 1)
+        compat_text = compat_text.replace(get_original, get_patched, 1)
+        compat_text = compat_text.replace(load_original, load_patched, 1)
+        compat.write_text(compat_text, encoding="utf-8", newline="\n")
+
+    summary["runtime_gtk_backend"] = "static-gtk3"
+    summary["runtime_gtk_backend_preserved"] = True
+    summary["runtime_gtk_system_dlopen_disabled"] = True
+    summary["runtime_gtk_fallback_migrated"] = migrated_fallback
+    summary["runtime_gtk_static_archive_count"] = len([
+        item for item in gtk_entry["libraries"]
+        if isinstance(item, str) and item.startswith("lib/") and item.endswith(".a")
+    ])
+    summary["runtime_gtk_forced_symbol_count"] = len(forced)
+    summary["runtime_gtk_stub_symbol_count"] = sum(
+        value["stubbed"] for value in counts.values()
+    )
 
 
 def _bounded_status(path: Path) -> dict | None:
@@ -929,9 +1267,13 @@ def main() -> None:
             summary,
         )
 
-        stage = "linux-ui-static-fallback"
-        ensure_static_linux_ui_fallback(
-            engine_work / "download/chromium/src", summary
+        stage = "linux-static-gtk"
+        ensure_static_linux_gtk(
+            engine_work / "download/chromium/src",
+            engine_work / "platform-inputs.json",
+            engine_work / "target-prefix",
+            platform_sha,
+            summary,
         )
 
         stage = "gn-check"

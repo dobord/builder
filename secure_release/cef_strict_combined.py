@@ -455,6 +455,13 @@ def main() -> None:
             platform_sha,
             summary,
         )
+        cef_strict_iteration.ensure_static_linux_gtk(
+            engine_work / "download/chromium/src",
+            engine_work / "platform-inputs.json",
+            engine_work / "target-prefix",
+            platform_sha,
+            summary,
+        )
         stage = "engine-runtime"
         run(
             [sys.executable, source_build, "build",

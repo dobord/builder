@@ -5,13 +5,13 @@
   "upstream_commit": "9e593bb18ea69cc5095e012465dcd675a822ed0d",
   "cef_recipe_commit": "2aff22e09daaa5c28780c5766a70ee13e61c93b6",
   "checkpoint": {
-    "run": 35811522590,
+    "run": 35821882287,
     "attempt": 1,
-    "producer_sha": "4363e1f8798cd887f89a4456780837271bc081f9",
-    "artifact_id": 10732399247,
-    "artifact_sha256": "d6690ed530a67961bdcfa788de6b85fde39b233ec066423d727aef82416d0af9",
-    "summary_artifact_id": 10732877829,
-    "summary_artifact_sha256": "eb436aea929728859bf9fed759eaf49b71c642c61518bd551d8f75643cd48bf6",
+    "producer_sha": "3e0d600439230e576ad9c477294605d990a6865d",
+    "artifact_id": 10738665901,
+    "artifact_sha256": "11a4f27c77ef25c1bb84729ed267b65b9e4609b34b0354de098ba913ea2ac825",
+    "summary_artifact_id": 10738362373,
+    "summary_artifact_sha256": "89a04bf50072105db1a12ce8e57f39fd39034cd38a60b71bf60f28724d643d0a",
     "build_key": "a60c3359bb8fa8df9207f5895729d7bda7c7b1f72ae2ecf0f767a1a1cf719f53",
     "platform_sha256": "351272996be93d25308681ca051e34827b4f07375eff2d0f25de40164cdd206e"
   }

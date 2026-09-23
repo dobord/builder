@@ -128,9 +128,15 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn('producer_fingerprint != current_fingerprint',worker)
         self.assertIn('recipe_env_restore["ImageVersion"] = checkpoint_image',worker)
         self.assertIn('recipe_env["ImageVersion"] = checkpoint_image',worker)
-        self.assertIn('ensure_static_linux_ui_fallback(',worker)
-        self.assertIn('CEF_STATIC_NO_RUNTIME_GTK_V1',worker)
-        self.assertIn('use_gtk = false',worker)
+        self.assertIn('ensure_static_linux_gtk(',worker)
+        self.assertIn('CEF_STATIC_DIRECT_GTK3_V1',worker)
+        self.assertIn('cef-static-sigs',worker)
+        self.assertIn('ignore_libs = cef_static_platform_manifest == ""',worker)
+        self.assertIn('CEF_STATIC_GTK3=1',worker)
+        self.assertIn('RTLD_DEFAULT',worker)
+        self.assertIn('"-Wl,-u,',worker)
+        self.assertIn('"runtime_gtk_backend_preserved"',worker)
+        self.assertNotIn('runtime_linux_ui_fallback_repaired',worker)
         self.assertIn('"glib-gobject-registry-split"',worker)
         self.assertIn('value.get("failure_stage") == "engine-runtime"',worker)
         self.assertIn('progress.get("engine_compilation_complete") is True',worker)
@@ -154,6 +160,17 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
             self.assertRegex(checkpoint['producer_sha'], r'^[0-9a-f]{40}$')
             for name in ('artifact_sha256', 'summary_artifact_sha256', 'build_key', 'platform_sha256'):
                 self.assertRegex(checkpoint[name], r'^[0-9a-f]{64}$')
+
+    def test_static_gtk_signature_filter_keeps_only_unprovided_symbols(self):
+        text = (
+            "void gtk_present(void);\n"
+            "int gtk_missing(int value);\n"
+        )
+        filtered, names = strict._filter_static_gtk_signatures(
+            text, {"gtk_present"}
+        )
+        self.assertEqual(names, ["gtk_present", "gtk_missing"])
+        self.assertEqual(filtered, "int gtk_missing(int value);\n")
 
     def test_engine_runtime_classifier_recognizes_static_glib_gtk_registry_split(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -231,6 +248,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn('ensure_chromium_sysroot(',worker)
         self.assertIn('ensure_dawn_static_x11_headers(',worker)
         self.assertIn('cef_nss_isolation.install(',worker)
+        self.assertIn('ensure_static_linux_gtk(',worker)
         self.assertIn('cef_nss_isolation.record_receipt(',worker)
         self.assertIn('"engine-sysroot-preflight"',worker)
         self.assertIn('verify_relocated_metadata(',worker)
