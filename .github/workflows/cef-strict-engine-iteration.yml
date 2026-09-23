@@ -88,6 +88,8 @@ jobs:
         run: python -m unittest discover -s tests -p test_cef_gtk_codecs.py -v
       - name: Verify static X11 direct-loader repair before engine restore
         run: python -m unittest discover -s tests -p test_cef_x11_static.py -v
+      - name: Verify composed CEF desktop prerequisites before engine restore
+        run: python -m unittest discover -s tests -p test_cef_desktop_prerequisites.py -v
       - name: Verify smoke progress instrumentation before engine restore
         run: |
           python -m unittest discover -s tests -p test_cef_smoke_progress.py -v

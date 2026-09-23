@@ -34,7 +34,7 @@ PATCHED = {'ui/gfx/x/BUILD.gn': 'f8599a765c0f0d13d58dd6664d0c4a88d704899c713cb6f
  'ui/gfx/x/xlib_support.cc': '3640598ee9f7aada1150092347b86f8be5d6193b47278b523df44f5012663bcc',
  'tools/generate_library_loader/generate_library_loader.gni': 'f062ab576e4c2502c9aac84afab2a54f6fd68de9307baa8764036d0948d74c70',
  'third_party/webrtc/modules/desktop_capture/BUILD.gn': '2104e63381732dda404a7c0e0e76c4a42f7344ce626cd2dbdf1f6924bda4870b',
- 'ui/gtk/gtk_ui.cc': '72c8e8c4b65e3b2aac4a0078ab1f1fd2e18aba34b45b0156877f2d237070ac40'}
+ 'ui/gtk/gtk_ui.cc': '1af9fd520dec2d49c06356ed2ca2da141672e96517b096db81d594a2709ecbb2'}
 LEGACY_PATCHED = {'ui/gfx/x/BUILD.gn': '52c8654c2363e060c642161e562d1625fd1902e1c3208d3e986017ebc2bde01f',
  'ui/gfx/x/xlib_support.cc': '69a6855cf294257a7db2d869b061ef4e5e8ccc199ece68d5f0f9d6818af4561b',
  'tools/generate_library_loader/generate_library_loader.gni': 'f062ab576e4c2502c9aac84afab2a54f6fd68de9307baa8764036d0948d74c70'}
@@ -268,6 +268,36 @@ PATCHERS[DESKTOP_FILE] = patch_desktop_capture
 PATCHERS[GTK_FILE] = patch_gtk_software
 
 
+# CEF's linux_gtk_theme_3610.patch is applied before this adapter runs.
+# Never regenerate gtk_ui.cc from stock Chromium and silently discard it.
+CEF_GTK_THEME_BLOB = "4e7f63878bfa1558167db2e91ad08394b3bd57bb"
+CEF_GTK_THEME_SHA256 = "90afaaea63ac37a0ad4f0ca8d07391ccb9eaa6b6db35ac717ff01622cbc5f188"
+
+
+def cef_gtk_baseline(original: bytes) -> bytes:
+    """Reconstruct ONLY the reviewed CEF prerequisite, bound to full-file bytes."""
+    if _digest(original) != FILES[GTK_FILE]:
+        raise ValueError("Unreviewed Chromium GTK prerequisite original")
+    text = original.decode("utf-8")
+    include = '#include "base/strings/string_split.h"\n'
+    text = _one(text, include, include + '#include "cef/libcef/features/features.h"\n',
+                "CEF GTK feature header")
+    theme = '''  connect(settings, "notify::gtk-theme-name", &GtkUi::OnThemeChanged);
+  connect(settings, "notify::gtk-icon-theme-name", &GtkUi::OnThemeChanged);
+  connect(settings, "notify::gtk-application-prefer-dark-theme",
+          &GtkUi::OnThemeChanged);
+'''
+    guarded = '''  // Disable GTK theme change notifications because they are extremely slow.
+  // Light/dark theme changes will still be detected via DarkModeManagerLinux.
+  // See https://issues.chromium.org/issues/40280130#comment7
+#if !BUILDFLAG(ENABLE_CEF)
+''' + theme + "#endif\n"
+    result = _one(text, theme, guarded, "CEF GTK theme prerequisite").encode("utf-8")
+    if _digest(result) != CEF_GTK_THEME_SHA256:
+        raise ValueError("CEF GTK prerequisite differs from reviewed complete source")
+    return result
+
+
 def _regular(root: Path, relative: str) -> Path:
     if (not isinstance(relative, str) or relative.startswith("/")
             or any(part in ("", ".", "..") for part in relative.split("/"))):
@@ -335,14 +365,23 @@ def _validated_platform(manifest: Path, prefix: Path, expected: str) -> dict:
 def transform(relative: str, raw: bytes, original: bytes) -> bytes:
     if relative not in PATCHERS or _digest(original) != FILES[relative]:
         raise ValueError("Unreviewed static desktop original")
-    output = PATCHERS[relative](original.decode("utf-8")).encode("utf-8")
+    baseline = original
+    known = {FILES[relative]}
+    if relative == GTK_FILE:
+        # git show returns stock Chromium, but the restored/fresh CEF workspace
+        # already contains the upstream CEF theme patch. Compose our change on
+        # that exact prerequisite; stock-only and partial states remain errors.
+        baseline = cef_gtk_baseline(original)
+        known = {CEF_GTK_THEME_SHA256}
+    elif relative in LEGACY_PATCHED:
+        known.add(LEGACY_PATCHED[relative])
+    output = PATCHERS[relative](baseline.decode("utf-8")).encode("utf-8")
     if _digest(output) != PATCHED[relative]:
         raise ValueError("Static desktop transform differs from reviewed output")
-    known = {FILES[relative], PATCHED[relative]}
-    if relative in LEGACY_PATCHED:
-        known.add(LEGACY_PATCHED[relative])
+    known.add(PATCHED[relative])
     if _digest(raw) not in known:
-        raise ValueError("Unreviewed or partially patched desktop source")
+        # Only an allowlisted public source path is included, never file text.
+        raise ValueError("Unreviewed or partially patched desktop source: " + relative)
     return output
 
 
