@@ -65,6 +65,50 @@ class DesktopTransformTests(unittest.TestCase):
         self.assertIn('deps -= [ ":xlib_xcb_loader" ]', gn)
         self.assertIn('assert(!enable_vulkan,', gn)
 
+    def test_compiler_failure_checkpoint_migration_is_exact(self):
+        relative = 'ui/gfx/x/xlib_support.cc'
+        original = fixture_files()[relative]
+        good = desktop.transform(relative, original, original)
+        anchor = b'  CHECK(false) << "Xlib/XCB bridge is unavailable in the static no-Vulkan profile";\n'
+        previous = good.replace(anchor, anchor + b'  return nullptr;\n', 1)
+        self.assertEqual(hashlib.sha256(previous).hexdigest(),
+                         desktop.COMPILE_FAILURE_PATCHED[relative])
+        self.assertEqual(desktop.transform(relative, previous, original), good)
+        self.assertEqual(desktop.transform(relative, good, original), good)
+        for altered in (previous + b'\n', previous.replace(b'CHECK(false)', b'CHECK(true)'),
+                        good.replace(b'#if !defined(CEF_STATIC_X11_DIRECT)', b'#if 0', 1)):
+            with self.assertRaises(ValueError):
+                desktop.transform(relative, altered, original)
+
+    def test_resume_changes_only_failed_source_and_keeps_other_clocks(self):
+        originals = fixture_files()
+        selected = {n: desktop.PATCHERS[n] for n in desktop.LEGACY_PATCHED}
+        relative = 'ui/gfx/x/xlib_support.cc'
+        anchor = b'  CHECK(false) << "Xlib/XCB bridge is unavailable in the static no-Vulkan profile";\n'
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            manifest, prefix, sha = fake_platform(root)
+            source = root / 'src'
+            for name in selected:
+                path = source / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                data = desktop.transform(name, originals[name], originals[name])
+                if name == relative:
+                    data = data.replace(anchor, anchor + b'  return nullptr;\n', 1)
+                path.write_bytes(data)
+            def git(args, **kwargs):
+                if 'rev-parse' in args:
+                    return desktop.WEBRTC if Path(args[2]).name == 'webrtc' else desktop.CHROMIUM
+                return originals[args[-1].split(':', 1)[1]]
+            clocks = {n: (source / n).stat().st_mtime_ns for n in selected if n != relative}
+            with patch.object(desktop, 'PATCHERS', selected), patch.object(desktop.subprocess, 'check_output', side_effect=git):
+                result = desktop.install(source, manifest, prefix, sha)
+                self.assertEqual(result['changed_files'], 1)
+                self.assertEqual(clocks, {n: (source / n).stat().st_mtime_ns for n in clocks})
+                stamps = {n: (source / n).stat().st_mtime_ns for n in selected}
+                self.assertEqual(desktop.install(source, manifest, prefix, sha)['changed_files'], 0)
+                self.assertEqual(stamps, {n: (source / n).stat().st_mtime_ns for n in selected})
+
     def test_unknown_original_and_partial_edits_rejected(self):
         originals = fixture_files()
         relative = 'ui/gfx/x/xlib_support.cc'
@@ -163,6 +207,19 @@ class DesktopTransformTests(unittest.TestCase):
 @unittest.skipUnless(sys.platform == 'linux' and shutil.which('c++') and shutil.which('ar') and shutil.which('nm'), 'native Linux C++ tools')
 class DesktopNativeTests(unittest.TestCase):
     def test_complete_xlib_translation_unit_and_real_archive(self):
+        self._exercise_native('c++')
+
+    def test_clang_logging_check_noreturn_and_runtime_guard(self):
+        compiler = shutil.which('clang++')
+        self.assertIsNotNone(compiler, 'Clang is required for the Linux warning regression')
+        self._exercise_native(compiler, clang=True)
+
+    def test_clang_official_check_noreturn_and_runtime_guard(self):
+        compiler = shutil.which('clang++')
+        self.assertIsNotNone(compiler, 'Clang is required for the Linux warning regression')
+        self._exercise_native(compiler, clang=True, official=True)
+
+    def _exercise_native(self, compiler, *, clang=False, official=False):
         originals = fixture_files()
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
@@ -172,8 +229,25 @@ class DesktopNativeTests(unittest.TestCase):
             original = support.read_bytes()
             support.write_bytes(desktop.transform('ui/gfx/x/xlib_support.cc', original, original))
             scaffolds = {
-                'base/check.h': '#pragma once\n#include <cstdlib>\nstruct Check { bool ok; template<class T> Check& operator<<(const T&) { return *this; } ~Check(){if(!ok)std::abort();} };\n#define CHECK(x) Check{bool(x)}\n',
-                'base/logging.h': '#pragma once\n#include "base/check.h"\n#define DVLOG(x) Check{true}\n',
+                # Model the pinned base/check.h control flow, including its
+                # [[noreturn]] fatal destructor and official-build crash path.
+                # A returning fake CHECK hid run 74's unreachable return.
+                # These are disposable base stand-ins, not a CEF runtime proof.
+                'base/check.h': '''#pragma once
+#include <cstdlib>
+struct Check { template<class T> Check& operator<<(const T&) { return *this; } ~Check(){} };
+struct FatalCheck : Check { [[noreturn]] ~FatalCheck(){std::abort();} };
+[[noreturn]] inline void CheckFailure(){std::abort();}
+struct Voidify { void operator&(Check&){} };
+inline Check* swallow_stream = nullptr;
+#define EAT_CHECK_PARAMS true ? (void)0 : Voidify{} & (*swallow_stream)
+#if defined(CEF_FIXTURE_OFFICIAL_CHECK)
+#define CHECK(x) switch(0) case 0: default: if (!((x) ? true : false)) CheckFailure(); else EAT_CHECK_PARAMS
+#else
+#define CHECK(x) switch(0) case 0: default: if ((x) ? true : false) [[likely]]; else FatalCheck{}
+#endif
+''',
+                'base/logging.h': '#pragma once\n#include "base/check.h"\n#define DVLOG(x) Check{}\n',
                 'base/compiler_specific.h': '#pragma once\n#define DISABLE_CFI_DLSYM\n',
                 'base/component_export.h': '#pragma once\n#define COMPONENT_EXPORT(x)\n',
                 'base/no_destructor.h': '#pragma once\nnamespace base { template<class T> struct NoDestructor { T value; T* get(){return &value;} }; }\n',
@@ -191,14 +265,31 @@ class DesktopNativeTests(unittest.TestCase):
             for mode in (0,1):
                 for cls, stem, header, functions in [ ('XlibLoader','xlib_loader','ui/gfx/x/xlib.h',funcs), ('XlibXcbLoader','xlib_xcb_loader','ui/gfx/x/xlib_xcb.h',['XGetXCBConnection']) ]:
                     run([sys.executable, generator, '--name',cls,'--output-h',generated/(stem+'.h'),'--output-cc',generated/(stem+'.cc'),'--header','"'+header+'"','--link-directly',str(mode),*functions])
-                common = ['c++','-std=c++20','-O0','-Wall','-Wextra','-Werror','-I',root]
+                common = [compiler,'-std=c++20','-O0','-Wall','-Wextra','-Werror','-I',root]
                 # Upstream generated direct mode leaves two unused parameters;
                 # Chromium's compiler config suppresses this warning as well.
                 common += ['-Wno-unused-parameter']
+                if clang:
+                    common += ['-Wunreachable-code', '-Wunreachable-code-return']
+                if official:
+                    common += ['-DCEF_FIXTURE_OFFICIAL_CHECK=1']
                 defs = ['-DCEF_STATIC_X11_DIRECT=1'] if mode else []
                 if mode:
                     good_source = support.read_text()
-                    legacy = good_source
+                    check = '  CHECK(false) << "Xlib/XCB bridge is unavailable in the static no-Vulkan profile";\n'
+                    previous = good_source.replace(check, check + '  return nullptr;\n', 1)
+                    self.assertEqual(hashlib.sha256(previous.encode()).hexdigest(),
+                                     desktop.COMPILE_FAILURE_PATCHED['ui/gfx/x/xlib_support.cc'])
+                    # The logging CHECK used by run 74 exposes this warning;
+                    # official CHECK discards the stream through a ternary.
+                    if clang and not official:
+                        support.write_text(previous)
+                        failed = subprocess.run([*map(str,common),*defs,'-c',str(support),'-o','run74.o'],
+                                                cwd=root,capture_output=True,text=True,timeout=40)
+                        self.assertNotEqual(failed.returncode, 0)
+                        self.assertIn('-Wunreachable-code-return', failed.stderr)
+                        support.write_text(good_source)
+                    legacy = previous
                     for body in ('#include "library_loaders/xlib_xcb_loader.h"\n',
                                  'XlibXcbLoader* GetXlibXcbLoader() {\n  static base::NoDestructor<XlibXcbLoader> xlib_xcb_loader;\n  return xlib_xcb_loader.get();\n}\n'):
                         legacy = legacy.replace('#if !defined(CEF_STATIC_X11_DIRECT)\n' + body + '#endif\n', body)
@@ -206,7 +297,11 @@ class DesktopNativeTests(unittest.TestCase):
                     support.write_text(legacy)
                     failed = subprocess.run([*map(str,common),*defs,'-c',str(support),'-o','old.o'],cwd=root,capture_output=True,text=True)
                     self.assertNotEqual(failed.returncode, 0)
-                    self.assertIn('GetXlibXcbLoader', failed.stderr)
+                    if clang:
+                        self.assertTrue('GetXlibXcbLoader' in failed.stderr or
+                                        '-Wunreachable-code-return' in failed.stderr, failed.stderr)
+                    else:
+                        self.assertIn('GetXlibXcbLoader', failed.stderr)
                     support.write_text(good_source)
                 run([*common,*defs,'-c',support,'-o','support.o'])
                 run([*common,'-c',generated/'xlib_loader.cc','-o','loader.o'])
@@ -226,8 +321,14 @@ void XFree(void*){} int XPending(_XDisplay*){return 0;}
 ''')
                 app = root/'app.cc'
                 app.write_text('''#include "ui/gfx/x/xlib_support.h"
-namespace x11 { class Connection { public: static void Test(){XlibDisplay display("");} }; }
-int main(){x11::InitXlib();x11::InitXlib();x11::XlibFree(nullptr);x11::Connection::Test();}
+#include <sys/resource.h>
+namespace x11 { class Connection { public:
+ static void Test(bool forbidden){XlibDisplay display("");if(forbidden)display.GetXcbConnection();}
+}; }
+int main(int argc,char**){
+ struct rlimit limit{0,0};if(setrlimit(RLIMIT_CORE,&limit))return 19;
+ x11::InitXlib();x11::InitXlib();x11::XlibFree(nullptr);x11::Connection::Test(argc>1);
+}
 ''')
                 run([*common,'-c',provider,'-o','provider.o'])
                 run(['ar','rcs','libXfixture.a','provider.o'])
@@ -236,6 +337,10 @@ int main(){x11::InitXlib();x11::InitXlib();x11::XlibFree(nullptr);x11::Connectio
                 self.assertNotEqual(bad.returncode,0)
                 run([*common,'support.o','loader.o',app,'libXfixture.a','-o','test-loader'])
                 run([root/'test-loader'])
+                # The unavailable bridge must still terminate, never return a
+                # null connection or silently relax the no-Vulkan contract.
+                import signal
+                run([root/'test-loader', 'forbidden-bridge'], expected=-signal.SIGABRT)
                 imports = run(['readelf','-d','test-loader']).stdout
                 self.assertNotIn('libX11.so', imports)
                 self.assertNotIn('libX11-xcb.so', imports)

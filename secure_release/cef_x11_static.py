@@ -31,13 +31,21 @@ FILES = {'ui/gfx/x/BUILD.gn': 'b8e0c438f1dab1b88fd5c43572d80acbe18ca681e8f60b5ef
  'third_party/webrtc/modules/desktop_capture/BUILD.gn': '2051a9069681f25a27eba1e788b4406df205e4979ca3864343aabbacea9393d6',
  'ui/gtk/gtk_ui.cc': '004ab865ad14b5ba7779aa00f6af335d57e55729438399fcfc383f3213ad206b'}
 PATCHED = {'ui/gfx/x/BUILD.gn': 'f8599a765c0f0d13d58dd6664d0c4a88d704899c713cb6f30eca9445d542a59d',
- 'ui/gfx/x/xlib_support.cc': '3640598ee9f7aada1150092347b86f8be5d6193b47278b523df44f5012663bcc',
+ 'ui/gfx/x/xlib_support.cc': '83dfd7ef41d6fb0596262dce14294f2318bb00868ff41f37f4d1b57c0611e165',
  'tools/generate_library_loader/generate_library_loader.gni': 'f062ab576e4c2502c9aac84afab2a54f6fd68de9307baa8764036d0948d74c70',
  'third_party/webrtc/modules/desktop_capture/BUILD.gn': '2104e63381732dda404a7c0e0e76c4a42f7344ce626cd2dbdf1f6924bda4870b',
  'ui/gtk/gtk_ui.cc': '1af9fd520dec2d49c06356ed2ca2da141672e96517b096db81d594a2709ecbb2'}
 LEGACY_PATCHED = {'ui/gfx/x/BUILD.gn': '52c8654c2363e060c642161e562d1625fd1902e1c3208d3e986017ebc2bde01f',
  'ui/gfx/x/xlib_support.cc': '69a6855cf294257a7db2d869b061ef4e5e8ccc199ece68d5f0f9d6818af4561b',
  'tools/generate_library_loader/generate_library_loader.gni': 'f062ab576e4c2502c9aac84afab2a54f6fd68de9307baa8764036d0948d74c70'}
+
+
+# Run 74 saved this exact compiler-failed source. Admit only its full digest
+# for migration: remove the unreachable return after the fatal CHECK, without
+# resetting the checkpoint or admitting an arbitrary partially patched file.
+COMPILE_FAILURE_PATCHED = {
+    "ui/gfx/x/xlib_support.cc": "3640598ee9f7aada1150092347b86f8be5d6193b47278b523df44f5012663bcc",
+}
 
 
 def _digest(data: bytes) -> str:
@@ -173,7 +181,6 @@ def patch_xlib_support(text: str) -> str:
   // The strict static CEF profile disables Vulkan, the only reviewed caller of
   // this Xlib/XCB bridge. Fail closed instead of reintroducing libX11-xcb.so.
   CHECK(false) << "Xlib/XCB bridge is unavailable in the static no-Vulkan profile";
-  return nullptr;
 #else
   return GetXlibXcbLoader()->XGetXCBConnection(display_);
 #endif
@@ -375,6 +382,8 @@ def transform(relative: str, raw: bytes, original: bytes) -> bytes:
         known = {CEF_GTK_THEME_SHA256}
     elif relative in LEGACY_PATCHED:
         known.add(LEGACY_PATCHED[relative])
+    if relative in COMPILE_FAILURE_PATCHED:
+        known.add(COMPILE_FAILURE_PATCHED[relative])
     output = PATCHERS[relative](baseline.decode("utf-8")).encode("utf-8")
     if _digest(output) != PATCHED[relative]:
         raise ValueError("Static desktop transform differs from reviewed output")
