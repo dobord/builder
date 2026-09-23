@@ -1,7 +1,10 @@
 """Source-level guards for public-builder strict CEF qualification workflows."""
 import json
 from pathlib import Path
+import tempfile
 import unittest
+
+from secure_release import cef_strict_iteration as strict
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -125,6 +128,12 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn('producer_fingerprint != current_fingerprint',worker)
         self.assertIn('recipe_env_restore["ImageVersion"] = checkpoint_image',worker)
         self.assertIn('recipe_env["ImageVersion"] = checkpoint_image',worker)
+        self.assertIn('ensure_static_linux_ui_fallback(',worker)
+        self.assertIn('CEF_STATIC_NO_RUNTIME_GTK_V1',worker)
+        self.assertIn('use_gtk = false',worker)
+        self.assertIn('"glib-gobject-registry-split"',worker)
+        self.assertIn('value.get("failure_stage") == "engine-runtime"',worker)
+        self.assertIn('progress.get("engine_compilation_complete") is True',worker)
         self.assertNotIn('print(text',worker)
         lock=json.loads((ROOT/'ci/cef-strict-engine-lock.json').read_text())
         self.assertEqual(lock['schema'], 1)
@@ -145,6 +154,26 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
             self.assertRegex(checkpoint['producer_sha'], r'^[0-9a-f]{40}$')
             for name in ('artifact_sha256', 'summary_artifact_sha256', 'build_key', 'platform_sha256'):
                 self.assertRegex(checkpoint[name], r'^[0-9a-f]{64}$')
+
+    def test_engine_runtime_classifier_recognizes_static_glib_gtk_registry_split(self):
+        with tempfile.TemporaryDirectory() as directory:
+            logs = Path(directory)
+            (logs / "static-smoke-status.json").write_text(json.dumps({
+                "status": "timed_out", "exit_code": -9, "timeout_seconds": 120
+            }))
+            attempt = logs / "smoke-attempts-test" / "01"
+            attempt.mkdir(parents=True)
+            (attempt / "cef-static.log").write_text(
+                "GLib-GObject: g_value_get_gtype: assertion "
+                "'G_VALUE_HOLDS_GTYPE (value)' failed\n"
+                "GLib-GObject: can't peek value table for type 'GdkDisplay' "
+                "which is not currently referenced\n"
+            )
+            result = strict.classify_engine_runtime(logs)
+            self.assertEqual(
+                result["runtime_failure_category"], "glib-gobject-registry-split")
+            self.assertTrue(result["runtime_failure_timed_out"])
+            self.assertNotIn("runtime_failure_text", result)
 
     def test_sdk_dependency_qualification_keeps_private_build_logs_runner_local(self):
         text = (ROOT / ".github/workflows/cef-strict-sdk-deps.yml").read_text()

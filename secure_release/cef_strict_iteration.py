@@ -412,6 +412,34 @@ def classify_compile_slice(logs: Path) -> dict:
     return result
 
 
+STATIC_LINUX_UI_MARKER = "# CEF_STATIC_NO_RUNTIME_GTK_V1"
+
+
+def ensure_static_linux_ui_fallback(source: Path, summary: dict) -> None:
+    """Keep a fully static GLib/GObject registry out of Chromium's dlopen GTK path."""
+    if git_head(source) != CHROMIUM:
+        raise ValueError("Pinned Chromium source revision mismatch before Linux UI repair")
+    path = source / "build/config/linux/gtk/gtk.gni"
+    if not path.is_file() or path.is_symlink():
+        raise ValueError("Pinned Chromium gtk.gni is missing or redirected")
+    text = path.read_text(encoding="utf-8")
+    original = "  use_gtk = is_linux && !is_castos\n"
+    patched = "  " + STATIC_LINUX_UI_MARKER + "\n  use_gtk = false\n"
+    repaired = False
+    if STATIC_LINUX_UI_MARKER in text:
+        if (text.count(STATIC_LINUX_UI_MARKER) != 1
+                or patched not in text or original in text):
+            raise ValueError("Existing static Linux UI fallback repair is malformed")
+    else:
+        if text.count(original) != 1 or "use_gtk = false" in text:
+            raise ValueError("Pinned Chromium GTK default differs from reviewed source")
+        text = text.replace(original, patched, 1)
+        path.write_text(text, encoding="utf-8", newline="\n")
+        repaired = True
+    summary["runtime_gtk_loader_disabled"] = True
+    summary["runtime_linux_ui_fallback_repaired"] = repaired
+
+
 def _bounded_status(path: Path) -> dict | None:
     if not path.is_file() or path.is_symlink() or path.stat().st_size > 1024**2:
         return None
@@ -424,6 +452,32 @@ def _bounded_status(path: Path) -> dict | None:
 
 def classify_engine_runtime(logs: Path) -> dict:
     """Expose a bounded runtime/link stage, never private output or arguments."""
+    # Static GLib/GObject plus Chromium's RTLD_GLOBAL dlopen(GTK) creates two
+    # independent GType registries. Match only stable diagnostics and publish
+    # only a category; raw runtime logs remain encrypted/private.
+    registry_split = False
+    try:
+        candidates = [
+            path for path in logs.rglob("cef-static.log")
+            if (path.is_file() and not path.is_symlink()
+                and path.stat().st_size <= 64 * 1024**2)
+        ][:8]
+    except OSError:
+        candidates = []
+    for path in candidates:
+        text = path.read_text(encoding="utf-8", errors="replace")[-8 * 1024**2:]
+        if (
+            "GLib-GObject: g_value_get_gtype: assertion 'G_VALUE_HOLDS_GTYPE (value)' failed" in text
+            and ("can't peek value table for type 'GdkDisplay'" in text
+                 or "invalid param spec type 'GParam" in text)
+        ):
+            registry_split = True
+            break
+    if registry_split:
+        return {
+            "runtime_failure_category": "glib-gobject-registry-split",
+            "runtime_failure_timed_out": True,
+        }
     for name, category in (
         ("validate-static-platform-status.json", "platform-validation"),
         ("gn-gen-status.json", "gn-generation"),
@@ -873,6 +927,11 @@ def main() -> None:
             engine_work / "target-prefix",
             platform_sha,
             summary,
+        )
+
+        stage = "linux-ui-static-fallback"
+        ensure_static_linux_ui_fallback(
+            engine_work / "download/chromium/src", summary
         )
 
         stage = "gn-check"
