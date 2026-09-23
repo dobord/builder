@@ -1,10 +1,10 @@
 """Diagnostic entrypoint delegating to the unchanged strict iteration worker.
 
-Install reference-app instrumentation AFTER the worker's successful source/GN
-check and BEFORE its compilation slice. The original driver, checkpoint
-identity, encryption and success gates remain authoritative. This scoped
-adapter avoids modifying the pinned recipe or inferring an engine fix from an
-unexplained smoke timeout.
+Install the reviewed static X11 binding immediately BEFORE GN validation, then
+install reference-app instrumentation AFTER the successful source/GN check and
+BEFORE its compilation slice. The original driver, checkpoint identity,
+encryption and success gates remain authoritative. The X11 repair removes a
+proved host-shared-library path without widening the runtime allowlist.
 """
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from contextlib import contextmanager
 import os
 from pathlib import Path
 
-from . import cef_smoke_progress
+from . import cef_smoke_progress, cef_x11_static
 from . import cef_strict_iteration as worker
 
 
@@ -24,17 +24,31 @@ def observed_runtime(module, workspace: Path, temp: Path):
     logs = temp / "cef-strict-engine-logs"
     progress = logs / "runtime-progress"
     previous = os.environ.get("CEF_STATIC_SMOKE_PROGRESS_DIR")
-    identity = {}
+    smoke_identity = {}
+    x11_identity = {}
 
     def run(command, **kwargs):
-        result = original_run(command, **kwargs)
         args = list(map(str, command))
-        if (len(args) >= 3 and args[1] == str(recipe / "source_build.py")
-                and args[2] == "check" and result.returncode == 0):
+        is_check = (len(args) >= 3 and args[1] == str(recipe / "source_build.py")
+                    and args[2] == "check")
+        if is_check:
+            try:
+                sha_index = args.index("--platform-sha256")
+                expected = args[sha_index + 1]
+            except (ValueError, IndexError) as error:
+                raise ValueError("Static X11 repair requires the exact platform identity") from error
+            x11_identity.update(cef_x11_static.install(
+                source,
+                temp / "cef-strict-engine-work/platform-inputs.json",
+                temp / "cef-strict-engine-work/target-prefix",
+                expected,
+            ))
+        result = original_run(command, **kwargs)
+        if is_check and result.returncode == 0:
             if (logs.is_symlink() or progress.is_symlink()
                     or not logs.is_dir()):
                 raise ValueError("Invalid smoke progress directory")
-            identity.update(cef_smoke_progress.install(source, recipe / "smoke.c"))
+            smoke_identity.update(cef_smoke_progress.install(source, recipe / "smoke.c"))
             progress.mkdir(mode=0o700, exist_ok=True)
             progress.chmod(0o700)
         return result
@@ -45,8 +59,13 @@ def observed_runtime(module, workspace: Path, temp: Path):
             raise ValueError("Unexpected smoke diagnostic log directory")
         try:
             value.update(cef_smoke_progress.classify(logs))
-            if identity:
-                value["runtime_smoke_fixture_sha256"] = identity["patched_sha256"]
+            if smoke_identity:
+                value["runtime_smoke_fixture_sha256"] = smoke_identity["patched_sha256"]
+            if x11_identity:
+                value["runtime_x11_backend"] = "static-x11"
+                value["runtime_x11_direct_loader_verified"] = True
+                value["runtime_x11_platform_archive_count"] = x11_identity["platform_archives"]
+                value["runtime_x11_source_files_verified"] = x11_identity["verified_files"]
         except (OSError, ValueError, KeyError):
             value["runtime_progress_invalid"] = True
         return value

@@ -104,15 +104,16 @@ class SmokeProgressTests(unittest.TestCase):
                 return types.SimpleNamespace(returncode=0)
             def classify(logs): return {'runtime_failure_category': 'smoke-timeout'}
             module = types.SimpleNamespace(run=run, classify_engine_runtime=classify)
-            command = [sys.executable, str(root / 'private-vcpkg/.full-cef/vcpkg/ports/cef-static/source_build.py'), 'check']
+            command = [sys.executable, str(root / 'private-vcpkg/.full-cef/vcpkg/ports/cef-static/source_build.py'), 'check', '--platform-sha256', 'b'*64]
             def install(*args): calls.append('install'); return {'patched_sha256': 'a'*64}
-            with patch.object(progress, 'install', side_effect=install):
+            def install_x11(*args): calls.append('x11-install'); return {'platform_archives': 2, 'verified_files': 3}
+            with patch.object(progress, 'install', side_effect=install), patch.object(runtime.cef_x11_static, 'install', side_effect=install_x11):
                 with self.assertRaisesRegex(RuntimeError, 'original-error'):
                     with runtime.observed_runtime(module, root, temp):
                         module.run(['unrelated', 'command'])
                         self.assertEqual(calls, ['base-run'])
                         module.run(command)
-                        self.assertEqual(calls, ['base-run', 'base-run', 'install'])
+                        self.assertEqual(calls, ['base-run', 'x11-install', 'base-run', 'install'])
                         value = module.classify_engine_runtime(temp / 'cef-strict-engine-logs')
                         self.assertEqual(value['runtime_failure_category'], 'smoke-timeout')
                         self.assertNotIn('ready', value)
@@ -132,9 +133,10 @@ class SmokeProgressTests(unittest.TestCase):
             root = Path(folder)
             module = types.SimpleNamespace(run=lambda *a, **kw: types.SimpleNamespace(returncode=1),
                                            classify_engine_runtime=lambda logs: {})
-            command = [sys.executable, str(root / 'private-vcpkg/.full-cef/vcpkg/ports/cef-static/source_build.py'), 'check']
-            with patch.object(progress, 'install') as install:
+            command = [sys.executable, str(root / 'private-vcpkg/.full-cef/vcpkg/ports/cef-static/source_build.py'), 'check', '--platform-sha256', 'b'*64]
+            with patch.object(progress, 'install') as install, patch.object(runtime.cef_x11_static, 'install', return_value={'platform_archives': 2, 'verified_files': 3}) as x11_install:
                 with runtime.observed_runtime(module, root, root): module.run(command, check=False)
+                x11_install.assert_called_once()
                 install.assert_not_called()
 
 
