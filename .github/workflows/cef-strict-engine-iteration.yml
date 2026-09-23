@@ -10,6 +10,9 @@ on:
       - secure_release/cef_gtk_loader.py
       - secure_release/cef_nss_isolation.py
       - secure_release/cef_gtk_codecs.py
+      - secure_release/cef_smoke_progress.py
+      - secure_release/cef_smoke_progress.h
+      - secure_release/cef_strict_iteration_runtime.py
       - ci/cef-strict-engine-lock.json
 permissions:
   contents: read
@@ -82,6 +85,10 @@ jobs:
         run: python -m unittest discover -s tests -p test_cef_gtk_loader.py -v
       - name: Verify isolated static image-codec closure before engine restore
         run: python -m unittest discover -s tests -p test_cef_gtk_codecs.py -v
+      - name: Verify smoke progress instrumentation before engine restore
+        run: |
+          python -m unittest discover -s tests -p test_cef_smoke_progress.py -v
+          python -m secure_release.cef_smoke_progress --check-recipe private-vcpkg/.full-cef/vcpkg/ports/cef-static/smoke.c
       - name: Run exact strict platform and Chromium iteration
         id: strict
         env:
@@ -90,7 +97,7 @@ jobs:
           CEF_STRICT_BINARY_CACHE_CORE: ${{ runner.temp }}/cef-strict-cache/core
           CEF_STRICT_BINARY_CACHE_CUPS: ${{ runner.temp }}/cef-strict-cache/cups
           CEF_STRICT_BINARY_CACHE_GBM: ${{ runner.temp }}/cef-strict-cache/gbm
-        run: python -m secure_release.cef_strict_iteration
+        run: python -m secure_release.cef_strict_iteration_runtime
       - name: Upload encrypted strict checkpoint
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
