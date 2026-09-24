@@ -1,0 +1,111 @@
+name: PR103 workstation candidate validation
+on:
+  push:
+    branches: [investigate/frdpd-103-client-matrix]
+    paths: ['.github/workflows/frdpd-103-workstation.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: frdpd-103-workstation-${{ github.ref }}
+  cancel-in-progress: false
+env:
+  SOURCE_SHA: db57855f3f1717214a94a60873429a537eb47013
+  CANDIDATE_TREE: de90a3460a7f3c9866bbd1f80779e46dadb32192
+  ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [product, rpm]
+    env:
+      VERIFY_MODE: ${{ matrix.mode }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.13'
+      - name: Prepare private diagnostics
+        run: |
+          python -m pip install --require-hashes --only-binary=:all: -r requirements.lock
+          mkdir -m 700 "$RUNNER_TEMP/workstation-private"
+      - name: Fetch fixed private source as data
+        env:
+          SOURCE_READ_TOKEN: ${{ secrets.SOURCE_READ_TOKEN }}
+        run: |
+          python - <<'PY'
+          import os,subprocess,json
+          from pathlib import Path
+          root=Path(os.environ['RUNNER_TEMP'])/'workstation-private';source=root/'source';ask=root/'askpass'
+          ask.write_text('#!/bin/sh\ncase "$1" in *Username*) echo x-access-token ;; *) printf "%s\\n" "$SOURCE_READ_TOKEN" ;; esac\n');ask.chmod(0o700)
+          try:
+              env=dict(os.environ,GIT_ASKPASS=str(ask),GIT_TERMINAL_PROMPT='0')
+              with (root/'fetch.log').open('w') as log:
+                  def git(*args): subprocess.run(['git',*args],env=env,stdout=log,stderr=log,check=True,timeout=600)
+                  git('init',str(source));git('-C',str(source),'remote','add','origin','https://github.com/dobord/frdpd.git')
+                  git('-C',str(source),'fetch','--depth=1','origin',os.environ['SOURCE_SHA']);git('-C',str(source),'checkout','--detach','FETCH_HEAD')
+                  tree=subprocess.check_output(['git','-C',str(source),'rev-parse','HEAD^{tree}'],text=True).strip()
+                  assert tree==os.environ['CANDIDATE_TREE']
+                  git('-C',str(source),'-c','url.https://github.com/.insteadOf=git@github.com:','submodule','update','--init','--recursive','--depth=1')
+                  assert subprocess.check_output(['git','-C',str(source/'freerdp'),'rev-parse','HEAD'],text=True).strip()=='aa8650b300aa4cabd85d9c72b431301509b9043f'
+                  (root/'provenance.json').write_text(json.dumps({'source':os.environ['SOURCE_SHA'],'tree':tree,'product_source_edits':False}))
+          finally: ask.unlink(missing_ok=True)
+          PY
+      - name: Execute bounded Docker verification without source credentials
+        run: |
+          python investigations/frdpd-103/verify-workstation.py > "$RUNNER_TEMP/workstation-private/driver.log" 2>&1
+      - name: Encrypt exact runtime for native follow-up
+        if: always() && matrix.mode == 'product'
+        env:
+          BUILDER_INPUT_PRIVATE_KEY: ${{ secrets.BUILDER_INPUT_PRIVATE_KEY }}
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from secure_release.crypto import encrypt_file,public_text
+          root=Path(os.environ['RUNNER_TEMP']);source=root/'workstation-private/native-rootfs.tar.gz'
+          if source.exists():
+              encrypt_file(source,root/'native.enc',public_text(os.environ['BUILDER_INPUT_PRIVATE_KEY']),{'purpose':'frdpd-103-native-input','run_id':os.environ['GITHUB_RUN_ID'],'source_sha':os.environ['SOURCE_SHA']})
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always() && matrix.mode == 'product'
+        with:
+          name: workstation-native-input-${{ github.run_id }}
+          path: ${{ runner.temp }}/native.enc
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: warn
+      - name: Encrypt all diagnostic evidence
+        if: always()
+        run: |
+          python - <<'PY'
+          import os,tarfile
+          from pathlib import Path
+          from secure_release.crypto import encrypt_file
+          root=Path(os.environ['RUNNER_TEMP']);archive=root/'workstation.tar.gz'
+          with tarfile.open(archive,'w:gz') as out:
+              for p in (root/'workstation-private').glob('*'):
+                  if p.name not in ('source','askpass','native-rootfs.tar.gz'):out.add(p,arcname=p.name)
+          encrypt_file(archive,root/'workstation.enc',os.environ['ARTIFACT_ENCRYPTION_PUBLIC_KEY'],{'purpose':'frdpd-103-workstation-validation','run_id':os.environ['GITHUB_RUN_ID'],'source_sha':os.environ['SOURCE_SHA'],'tree_sha':os.environ['CANDIDATE_TREE'],'mode':os.environ['VERIFY_MODE']})
+          archive.unlink()
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: encrypted-workstation-${{ matrix.mode }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/workstation.enc
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - name: Cleanup and report actual outcome
+        if: always()
+        run: |
+          rc=1
+          if [ -f "$RUNNER_TEMP/workstation-private/exit-code" ]; then rc=$(cat "$RUNNER_TEMP/workstation-private/exit-code"); fi
+          rm -rf "$RUNNER_TEMP/workstation-private" "$RUNNER_TEMP/workstation.enc" "$RUNNER_TEMP/native.enc"
+          exit "$rc"
