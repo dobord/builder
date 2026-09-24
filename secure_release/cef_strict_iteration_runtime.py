@@ -8,11 +8,78 @@ checkpoint identity, encryption and success gates remain authoritative.
 from __future__ import annotations
 
 from contextlib import contextmanager
+import json
 import os
 from pathlib import Path
+import re
 
 from . import cef_elf_evidence, cef_native_link_static, cef_smoke_progress, cef_x11_static
 from . import cef_strict_iteration as worker
+
+
+_MODULE_FAMILY_FIELDS = ("x11", "graphics", "gtk", "cxx", "security", "xml", "audio", "font", "other")
+
+
+def _module_family(name: str) -> str:
+    lower = name.lower()
+    if lower.startswith(("libgtk", "libgdk", "libglib", "libgobject", "libgio", "libcairo", "libpango", "libharfbuzz", "libatk", "libatspi", "libepoxy")):
+        return "gtk"
+    if lower.startswith(("libx11", "libxcb", "libxext", "libxcomposite", "libxdamage", "libxfixes", "libxrandr", "libxi.", "libxrender", "libxtst")):
+        return "x11"
+    if lower.startswith(("libgl.", "libglx", "libglapi", "libegl", "libgles", "libgbm", "libdrm", "libvulkan", "libwayland", "libxshmfence", "libpciaccess", "swrast_dri", "iris_dri")):
+        return "graphics"
+    if lower.startswith(("libstdc++", "libgcc_s", "libc++.", "libc++abi", "libunwind")):
+        return "cxx"
+    if lower.startswith(("libnss", "libnspr", "libssl", "libcrypto")):
+        return "security"
+    if lower.startswith(("libexpat", "libxml")):
+        return "xml"
+    if lower.startswith(("libasound", "libpulse")):
+        return "audio"
+    if lower.startswith(("libfontconfig", "libfreetype")):
+        return "font"
+    return "other"
+
+
+def classify_public_runtime_evidence(logs: Path) -> dict:
+    # Raw module basenames remain in the existing encrypted diagnostics.
+    root = logs / "runtime-progress"
+    if not root.is_dir() or root.is_symlink():
+        return {}
+    rows = []
+    for path in sorted(root.glob("smoke-progress-*.json"))[:64]:
+        if path.is_symlink() or not path.is_file() or path.stat().st_size > 8192:
+            continue
+        try:
+            row = json.loads(path.read_bytes())
+        except (OSError, ValueError):
+            continue
+        if (not isinstance(row, dict) or row.get("schema") != 1
+                or type(row.get("pid")) is not int or row["pid"] <= 0
+                or type(row.get("role")) is not int or row["role"] not in range(6)
+                or path.name != f"smoke-progress-{row['pid']}.json"):
+            continue
+        rows.append(row)
+    result = {}
+    browsers = [row for row in rows if row["role"] == 0]
+    if len(browsers) == 1:
+        row = browsers[0]
+        for key in ("pixel_b", "pixel_g", "pixel_r", "pixel_a"):
+            value = row.get(key)
+            if type(value) is int and 0 <= value <= 255:
+                result["runtime_fixture_" + key] = value
+    for role, selected in (("browser", browsers), ("renderer", [row for row in rows if row["role"] == 1])):
+        families = {name: set() for name in _MODULE_FAMILY_FIELDS}
+        for row in selected:
+            path = root / f"smoke-modules-{row['pid']}.txt"
+            if not path.is_file() or path.is_symlink() or path.stat().st_size > 128 * 1024:
+                continue
+            for name in path.read_text(errors="replace").splitlines()[:512]:
+                if (re.fullmatch(r"[A-Za-z0-9_.+-]{1,192}", name) and name not in cef_smoke_progress.OS_MODULES):
+                    families[_module_family(name)].add(name)
+        for family in _MODULE_FAMILY_FIELDS:
+            result[f"runtime_{role}_unexpected_{family}_module_count"] = len(families[family])
+    return result
 
 
 @contextmanager
@@ -107,6 +174,7 @@ def observed_runtime(module, workspace: Path, temp: Path):
             raise ValueError("Unexpected smoke diagnostic log directory")
         try:
             value.update(cef_smoke_progress.classify(logs))
+            value.update(classify_public_runtime_evidence(logs))
             if smoke_identity:
                 value["runtime_smoke_fixture_sha256"] = smoke_identity["patched_sha256"]
             if x11_identity:
