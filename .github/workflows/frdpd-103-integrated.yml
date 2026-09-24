@@ -1,0 +1,134 @@
+name: Persisted RemoteApp integrated lifecycle verification
+on:
+  push:
+    branches: [investigate/frdpd-103-mstsc-20260924]
+    paths: ['.github/workflows/frdpd-103-integrated.yml']
+permissions:
+  contents: read
+concurrency:
+  group: frdpd-103-integrated-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  CANDIDATE_SHA: b44f42b665adaeb4c3ebe9e9b36be7c92cfa52b8
+  CANDIDATE_TREE: a408421cc667e371f8aa443bd8d13d0af7c3745d
+  ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.13'
+      - name: Initialize encrypted workspace
+        run: |
+          python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r requirements.lock
+          mkdir -p "$RUNNER_TEMP/integrated-private" "$RUNNER_TEMP/integrated-cipher"
+          chmod 700 "$RUNNER_TEMP/integrated-private"
+      - name: Read the persisted private source without running it
+        env:
+          SOURCE_READ_TOKEN: ${{ secrets.SOURCE_READ_TOKEN }}
+        run: |
+          umask 077
+          python - <<'PY'
+          import os,subprocess,json
+          from pathlib import Path
+          root=Path(os.environ['RUNNER_TEMP'])/'integrated-private'; source=root/'source'; ask=root/'askpass'
+          ask.write_text('#!/bin/sh\ncase "$1" in *Username*) echo x-access-token ;; *) printf "%s\\n" "$SOURCE_READ_TOKEN" ;; esac\n');ask.chmod(0o700)
+          env=dict(os.environ,GIT_ASKPASS=str(ask),GIT_TERMINAL_PROMPT='0')
+          try:
+              with (root/'prepare.log').open('w') as log:
+                  def git(*args): return subprocess.run(['git',*args],env=env,stdout=log,stderr=log,timeout=600,check=True)
+                  git('init',str(source));git('-C',str(source),'remote','add','origin','https://github.com/dobord/frdpd.git')
+                  git('-C',str(source),'fetch','--depth=1','origin',os.environ['CANDIDATE_SHA']);git('-C',str(source),'checkout','--detach','FETCH_HEAD')
+                  tree=subprocess.check_output(['git','-C',str(source),'rev-parse','HEAD^{tree}'],text=True).strip()
+                  assert tree==os.environ['CANDIDATE_TREE']
+                  git('-C',str(source),'-c','url.https://github.com/.insteadOf=git@github.com:','submodule','update','--init','--recursive','--depth=1')
+                  (root/'provenance.json').write_text(json.dumps({'commit':os.environ['CANDIDATE_SHA'],'tree':tree,'source_changes':False}))
+          finally: ask.unlink(missing_ok=True)
+          PY
+      - name: Build unchanged persisted source in Docker
+        run: |
+          root="$RUNNER_TEMP/integrated-private"
+          rc=0
+          docker build --build-arg FRDP_BUILD_COMPONENT_TESTS=ON -f "$root/source/server/frdp/test/e2e/Dockerfile" -t frdpd-integrated:fixed "$root/source" >"$root/build.log" 2>&1 || rc=$?
+          echo "build=$rc" >"$root/status.txt"
+          if [ "$rc" -eq 0 ]; then touch "$root/image-ready"; fi
+      - name: Full wrapper with a real reaper and local-only NSS fixture
+        if: always()
+        run: |
+          root="$RUNNER_TEMP/integrated-private"
+          if [ ! -f "$root/image-ready" ]; then exit 0; fi
+          rc=0
+          docker run --rm --init --network none --entrypoint bash frdpd-integrated:fixed -lc '
+            set -u
+            sed -i -E "s/^(passwd|group|shadow):.*/\1: files/" /etc/nsswitch.conf
+            result=0
+            FRDP_BUILD_DIR=/opt/freerdp-build FRDP_BUILD_JOBS=2 /src/scripts/test.sh || result=$?
+            if [ "$result" -ne 0 ]; then ps -eo pid,ppid,stat,comm; fi
+            exit "$result"
+          ' >"$root/full-init.log" 2>&1 || rc=$?
+          echo "full_init=$rc" >>"$root/status.txt"
+      - name: Full wrapper under real systemd with pam_systemd and local NSS
+        if: always()
+        run: |
+          set -uo pipefail
+          root="$RUNNER_TEMP/integrated-private"
+          if [ ! -f "$root/image-ready" ]; then exit 0; fi
+          rc=0
+          printf 'FROM frdpd-integrated:fixed\nRUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends systemd systemd-sysv libpam-systemd dbus dbus-user-session && apt-get clean\n' >"$root/Systemd.Dockerfile"
+          docker build -t frdpd-integrated:systemd -f "$root/Systemd.Dockerfile" "$root" >"$root/systemd-build.log" 2>&1 || rc=$?
+          if [ "$rc" -eq 0 ]; then
+            docker run -d --name frdpd-integrated-systemd --privileged --cgroupns=private --network none --tmpfs /run --tmpfs /run/lock --tmpfs /tmp --entrypoint /sbin/init frdpd-integrated:systemd >"$root/systemd-start.log" 2>&1 || rc=$?
+            if [ "$rc" -eq 0 ]; then
+              ready=0
+              for i in $(seq 1 30); do
+                if docker exec frdpd-integrated-systemd systemctl is-system-running 2>/dev/null | grep -Eq 'running|degraded'; then ready=1; break; fi
+                sleep 1
+              done
+              if [ "$ready" -eq 1 ]; then
+                docker exec frdpd-integrated-systemd bash -lc 'sed -i -E "s/^(passwd|group|shadow):.*/\1: files/" /etc/nsswitch.conf; result=0; FRDP_BUILD_DIR=/opt/freerdp-build FRDP_BUILD_JOBS=2 /src/scripts/test.sh || result=$?; if [ "$result" -ne 0 ]; then ps -eo pid,ppid,stat,comm; fi; exit "$result"' >"$root/full-systemd.log" 2>&1 || rc=$?
+              else rc=125; fi
+              docker logs frdpd-integrated-systemd >"$root/systemd-boot.log" 2>&1
+              docker exec frdpd-integrated-systemd journalctl --no-pager -n 250 >"$root/systemd-journal.log" 2>&1 || true
+            fi
+          fi
+          echo "full_systemd=$rc" >>"$root/status.txt"
+          docker rm -f frdpd-integrated-systemd >/dev/null 2>&1 || true
+      - name: Encrypt status and complete diagnostic evidence
+        if: always()
+        run: |
+          python - <<'PY'
+          import os,tarfile
+          from pathlib import Path
+          from secure_release.crypto import encrypt_file
+          root=Path(os.environ['RUNNER_TEMP']);private=root/'integrated-private';archive=root/'integrated.tar.gz'
+          with tarfile.open(archive,'w:gz') as tar:
+              for p in sorted(private.iterdir()):
+                  if p.name not in ('source','askpass'): tar.add(p,arcname=p.name)
+          encrypt_file(archive,root/'integrated-cipher'/'integrated.enc',os.environ['ARTIFACT_ENCRYPTION_PUBLIC_KEY'],{'purpose':'frdpd-103-integrated','run_id':os.environ['GITHUB_RUN_ID'],'source_sha':os.environ['CANDIDATE_SHA'],'tree_sha':os.environ['CANDIDATE_TREE']})
+          archive.unlink()
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: encrypted-integrated-${{ github.run_id }}
+          path: ${{ runner.temp }}/integrated-cipher/integrated.enc
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - name: Report actual full-systemd outcome and clean plaintext
+        if: always()
+        run: |
+          python - <<'PY'
+          import os,shutil
+          from pathlib import Path
+          root=Path(os.environ['RUNNER_TEMP']);p=root/'integrated-private'/'status.txt'
+          statuses=dict(line.split('=',1) for line in p.read_text().splitlines()) if p.exists() else {}
+          passed=all(statuses.get(k)=='0' for k in ('build','full_systemd'))
+          shutil.rmtree(root/'integrated-private',ignore_errors=True);shutil.rmtree(root/'integrated-cipher',ignore_errors=True)
+          raise SystemExit(0 if passed else 1)
+          PY
