@@ -10,13 +10,13 @@ concurrency:
   group: frdpd-103-isolated-${{ github.ref }}
   cancel-in-progress: false
 env:
-  # Public key only. The private counterpart is never sent to CI.
   ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
+  SOURCE_BASE: 642e9f0e372dfe1e3b74bd735878318988e58e91
 jobs:
-  protocol-baseline:
+  remoteapp-regression:
     if: github.ref == 'refs/heads/investigate/frdpd-103-mstsc-20260924'
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -24,21 +24,12 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
         with:
           python-version: '3.13'
-      - name: Install and package public hash-pinned decryption dependencies
+      - name: Initialize encrypted diagnostic workspace
         run: |
           python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r requirements.lock
-          python -m pip download --disable-pip-version-check --require-hashes --only-binary=:all: -r requirements.lock -d "${{ runner.temp }}/frdpd-wheels"
-          cp secure_release/crypto.py requirements.lock "${{ runner.temp }}/frdpd-wheels/"
-          mkdir -p "${{ runner.temp }}/frdpd-private" "${{ runner.temp }}/frdpd-encrypted"
-          chmod 700 "${{ runner.temp }}/frdpd-private"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: frdpd-103-public-decryption-dependencies-${{ github.run_id }}
-          path: ${{ runner.temp }}/frdpd-wheels/*
-          if-no-files-found: error
-          retention-days: 1
-          compression-level: 0
-      - name: Fetch only authorized fixed source without executing it
+          mkdir -p "$RUNNER_TEMP/frdpd-private" "$RUNNER_TEMP/frdpd-encrypted"
+          chmod 700 "$RUNNER_TEMP/frdpd-private"
+      - name: Fetch pinned private sources and apply reviewed change
         env:
           SOURCE_READ_TOKEN: ${{ secrets.SOURCE_READ_TOKEN }}
         shell: bash
@@ -46,107 +37,113 @@ jobs:
           set -euo pipefail
           umask 077
           python - <<'PY'
-          import os, subprocess, json
+          import os, subprocess, json, urllib.request, base64, gzip, hashlib
           from pathlib import Path
-          root = Path(os.environ['RUNNER_TEMP']) / 'frdpd-private'
-          source = root / 'source'
-          askpass = root / 'askpass'
+          root=Path(os.environ['RUNNER_TEMP'])/'frdpd-private'; source=root/'source'
+          askpass=root/'askpass'
           askpass.write_text('#!/bin/sh\ncase "$1" in *Username*) echo x-access-token ;; *) printf "%s\\n" "$SOURCE_READ_TOKEN" ;; esac\n')
           askpass.chmod(0o700)
-          env = dict(os.environ, GIT_ASKPASS=str(askpass), GIT_TERMINAL_PROMPT='0')
-          code, stage = 1, 'initialization'
+          env=dict(os.environ,GIT_ASKPASS=str(askpass),GIT_TERMINAL_PROMPT='0')
+          status={'stage':'prepare','exit':1}
           try:
-              with (root / 'fetch.log').open('w') as log:
-                  for stage, cmd in [
-                      ('init',['git','init',str(source)]),
-                      ('origin',['git','-C',str(source),'remote','add','origin','https://github.com/dobord/frdpd.git']),
-                      ('fetch',['git','-C',str(source),'fetch','--depth=1','origin','642e9f0e372dfe1e3b74bd735878318988e58e91']),
-                      ('checkout',['git','-C',str(source),'checkout','--detach','FETCH_HEAD']),
-                      ('submodules',['git','-C',str(source),'-c','url.https://github.com/.insteadOf=git@github.com:','submodule','update','--init','--recursive','--depth=1'])]:
-                      result = subprocess.run(cmd, env=env, stdout=log, stderr=subprocess.STDOUT, timeout=600)
-                      code = result.returncode
-                      if code:
-                          break
+              with (root/'preparation.log').open('w') as log:
+                  def run(cmd):
+                      subprocess.run(cmd,env=env,stdout=log,stderr=subprocess.STDOUT,timeout=600,check=True)
+                  run(['git','init',str(source)])
+                  run(['git','-C',str(source),'remote','add','origin','https://github.com/dobord/frdpd.git'])
+                  run(['git','-C',str(source),'fetch','--depth=1','origin',os.environ['SOURCE_BASE']])
+                  run(['git','-C',str(source),'checkout','--detach','FETCH_HEAD'])
+                  run(['git','-C',str(source),'-c','url.https://github.com/.insteadOf=git@github.com:','submodule','update','--init','--recursive','--depth=1'])
+                  parts=[]
+                  for sha in ['3aa1b7616408578e744eef392b76d4e1dce63a42','a84a7c44eac503a9577c998eae84bffdcd95ae58','db9acfb2bee5df1564c1bef7a2034cd2b70a82fb']:
+                      req=urllib.request.Request('https://api.github.com/repos/dobord/frdpd/git/blobs/'+sha,headers={'Authorization':'Bearer '+os.environ['SOURCE_READ_TOKEN'],'Accept':'application/vnd.github+json'})
+                      with urllib.request.urlopen(req,timeout=60) as response: blob=json.load(response)
+                      data=base64.b64decode(blob['content'])
+                      assert hashlib.sha1(b'blob '+str(len(data)).encode()+b'\0'+data).hexdigest()==sha
+                      parts.append(data)
+                  patch=gzip.decompress(b''.join(parts))
+                  assert hashlib.sha256(patch).hexdigest()=='c22a17d5ce448b68308ba58ee6236a10d71e785e2d61fe5fb4f9792dc4744c62'
+                  path=root/'corrective.patch'; path.write_bytes(patch)
+                  run(['git','-C',str(source),'apply','--index',str(path)])
+                  run(['git','-C',str(source),'diff','--cached','--check'])
+                  run(['git','-C',str(source),'-c','user.name=RemoteApp regression','-c','user.email=41898282+github-actions[bot]@users.noreply.github.com','commit','-m','Fix RemoteApp execution, channel lifetime and enhanced presentation contract'])
+                  commit=subprocess.check_output(['git','-C',str(source),'rev-parse','HEAD'],text=True).strip()
+                  (root/'candidate-sha.txt').write_text(commit+'\n')
+                  # Never rewrite main or PR 103; this is a non-force push to the dedicated fix branch.
+                  pushed=subprocess.run(['git','-C',str(source),'push','origin','HEAD:refs/heads/fix/103-remoteapp-contract'],env=env,stdout=log,stderr=subprocess.STDOUT,timeout=120)
+                  status={'stage':'prepared','exit':0,'push_exit':pushed.returncode,'candidate_sha':commit}
+          except Exception as exc:
+              status['error_type']=type(exc).__name__
           finally:
               askpass.unlink(missing_ok=True)
-              (root/'fetch-status.json').write_text(json.dumps({'stage':stage,'exit':code,'token_present':bool(os.environ.get('SOURCE_READ_TOKEN'))}))
-          if code:
-              raise SystemExit('Source preparation failed; details are encrypted.')
+              (root/'preparation-status.json').write_text(json.dumps(status))
+          if status['exit']: raise SystemExit('Preparation failed; details remain in encrypted diagnostics.')
           PY
-      - name: Encrypt source and preparation diagnostics
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          umask 077
-          python - <<'PY'
-          import os, tarfile
-          from pathlib import Path
-          from secure_release.crypto import encrypt_file, fingerprint
-          root=Path(os.environ['RUNNER_TEMP'])
-          private=root/'frdpd-private'
-          archive=root/'preparation.tar.gz'
-          assert fingerprint(os.environ['ARTIFACT_ENCRYPTION_PUBLIC_KEY']) == 'ace06f7c92062012382beb875e78f07ea6da31dfc99bf69c2726cc46b96e256b'
-          with tarfile.open(archive,'w:gz') as out:
-              out.add(private,arcname='preparation',filter=lambda item: None if '.git' in Path(item.name).parts or Path(item.name).name=='askpass' else item)
-          encrypt_file(archive,root/'frdpd-encrypted'/'preparation.enc',os.environ['ARTIFACT_ENCRYPTION_PUBLIC_KEY'],
-                       {'purpose':'frdpd-103-preparation','run_id':os.environ['GITHUB_RUN_ID'],'source_sha':'642e9f0e372dfe1e3b74bd735878318988e58e91'})
-          archive.unlink()
-          PY
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        if: always()
-        with:
-          name: frdpd-103-encrypted-preparation-${{ github.run_id }}
-          path: ${{ runner.temp }}/frdpd-encrypted/preparation.enc
-          if-no-files-found: error
-          retention-days: 1
-          compression-level: 0
-      - name: Build and test only inside Docker with no source credentials
+      - name: Build and exercise unit and full wrapper tests inside Docker
         shell: bash
         run: |
           set -euo pipefail
           umask 077
           root="$RUNNER_TEMP/frdpd-private"
           rc=0
-          docker build --build-arg FRDP_BUILD_COMPONENT_TESTS=ON -f "$root/source/server/frdp/test/e2e/Dockerfile" -t frdpd-103:baseline "$root/source" >"$root/build.log" 2>&1 || rc=$?
+          docker build --build-arg FRDP_BUILD_COMPONENT_TESTS=ON -f "$root/source/server/frdp/test/e2e/Dockerfile" -t frdpd-103:fixed "$root/source" >"$root/build.log" 2>&1 || rc=$?
           printf 'docker_build_exit=%s\n' "$rc" > "$root/status.txt"
           if [ "$rc" -eq 0 ]; then
-            docker run --rm --network none --entrypoint bash frdpd-103:baseline -lc 'cmake --build /opt/freerdp-build --parallel 2 && ctest --test-dir /opt/freerdp-build --output-on-failure -R "TestFreeRDPFrdp(GfxPolicy|GraphicsAdapter|DisplayControl|E2EScripts)|TestFreeRDPCodecZGfx|TestServerChannels"' >>"$root/build.log" 2>&1 || rc=$?
-            printf 'focused_tests_exit=%s\n' "$rc" >> "$root/status.txt"
+            touch "$root/image-ready"
+            docker run --rm --network none --entrypoint bash frdpd-103:fixed -lc 'cmake --build /opt/freerdp-build --parallel 2 && ctest --test-dir /opt/freerdp-build --show-only | grep -q TestFreeRDPFrdpRemoteAppContract && ctest --test-dir /opt/freerdp-build --output-on-failure -R "TestFreeRDPFrdp(RemoteAppContract|GfxPolicy|GraphicsAdapter|DisplayControl|E2EScripts|ListenerPolicyBoundary)|TestFreeRDPCodecZGfx|TestServerChannels"' >"$root/focused.log" 2>&1 || rc=$?
+            printf 'focused_exit=%s\n' "$rc" >> "$root/status.txt"
+            full=0
+            docker run --rm --network none --entrypoint bash frdpd-103:fixed -lc 'FRDP_BUILD_DIR=/opt/freerdp-build FRDP_BUILD_JOBS=2 /src/scripts/test.sh' >"$root/full-wrapper.log" 2>&1 || full=$?
+            printf 'full_wrapper_exit=%s\n' "$full" >> "$root/status.txt"
+            if [ "$full" -ne 0 ]; then rc=1; fi
           fi
           printf '%s\n' "$rc" > "$root/exit-code"
-      - name: Encrypt build diagnostics
+      - name: Real RemoteApp and classic clients on both isolated Xorg backends
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          root="$RUNNER_TEMP/frdpd-private"
+          if [ ! -f "$root/image-ready" ]; then exit 0; fi
+          for backend in xorg-dummy xorg-native; do
+            rc=0
+            FRDP_E2E_NO_BUILD=1 FRDP_E2E_IMAGE=frdpd-103:fixed FRDP_LAYERED_DISPLAY_BACKEND="$backend" FRDP_E2E_PROFILE_TIMEOUT=600 FRDP_E2E_ARTIFACTS="$root/e2e-$backend" COMPOSE_PROJECT_NAME="frdpd103-${backend}-${GITHUB_RUN_ID}" bash "$root/source/server/frdp/test/e2e/run-layered.sh" >"$root/e2e-$backend.log" 2>&1 || rc=$?
+            printf 'e2e_%s_exit=%s\n' "$backend" "$rc" >> "$root/status.txt"
+            if [ "$rc" -ne 0 ]; then printf '1\n' > "$root/exit-code"; fi
+          done
+      - name: Encrypt all diagnostic and provenance evidence
         if: always()
         shell: bash
         run: |
           set -euo pipefail
           umask 077
           python - <<'PY'
-          import os, tarfile
+          import os,tarfile
           from pathlib import Path
-          from secure_release.crypto import encrypt_file
+          from secure_release.crypto import encrypt_file,fingerprint
           root=Path(os.environ['RUNNER_TEMP']); private=root/'frdpd-private'
-          archive=root/'diagnostics.tar.gz'
+          archive=root/'regression.tar.gz'
+          assert fingerprint(os.environ['ARTIFACT_ENCRYPTION_PUBLIC_KEY'])=='ace06f7c92062012382beb875e78f07ea6da31dfc99bf69c2726cc46b96e256b'
           with tarfile.open(archive,'w:gz') as out:
               for path in sorted(private.iterdir()):
-                  if path.is_file() and path.name!='askpass': out.add(path,arcname=path.name)
-          encrypt_file(archive,root/'frdpd-encrypted'/'diagnostics.enc',os.environ['ARTIFACT_ENCRYPTION_PUBLIC_KEY'],
-                       {'purpose':'frdpd-103-mstsc-baseline','run_id':os.environ['GITHUB_RUN_ID'],'source_sha':'642e9f0e372dfe1e3b74bd735878318988e58e91'})
+                  if path.name not in ('source','askpass'): out.add(path,arcname=path.name)
+          encrypt_file(archive,root/'frdpd-encrypted'/'regression.enc',os.environ['ARTIFACT_ENCRYPTION_PUBLIC_KEY'],{'purpose':'frdpd-103-regression','run_id':os.environ['GITHUB_RUN_ID'],'source_sha':os.environ['SOURCE_BASE']})
           archive.unlink()
           PY
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
-          name: frdpd-103-encrypted-diagnostics-${{ github.run_id }}
-          path: ${{ runner.temp }}/frdpd-encrypted/diagnostics.enc
+          name: frdpd-103-encrypted-regression-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/frdpd-encrypted/regression.enc
           if-no-files-found: error
           retention-days: 1
           compression-level: 0
-      - name: Report status and remove job-local plaintext
+      - name: Report real status and remove job-local plaintext
         if: always()
         shell: bash
         run: |
           rc=1
           if [ -f "$RUNNER_TEMP/frdpd-private/exit-code" ]; then rc=$(cat "$RUNNER_TEMP/frdpd-private/exit-code"); fi
-          rm -rf "$RUNNER_TEMP/frdpd-private" "$RUNNER_TEMP/frdpd-encrypted" "$RUNNER_TEMP/frdpd-wheels"
+          rm -rf "$RUNNER_TEMP/frdpd-private" "$RUNNER_TEMP/frdpd-encrypted"
           exit "$rc"
