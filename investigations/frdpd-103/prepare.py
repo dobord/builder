@@ -1,13 +1,10 @@
-"""Fetch only the user-authorized fixed source; never execute with source credentials."""
-import os, subprocess, json, urllib.request, base64, gzip, hashlib
+"""Fetch fixed authorized sources and validate the reviewed patch without executing sources."""
+import os, subprocess, json, urllib.request, base64, hashlib
 from pathlib import Path
-BASE = '642e9f0e372dfe1e3b74bd735878318988e58e91'
-PATCHES = [
-    (['3aa1b7616408578e744eef392b76d4e1dce63a42','a84a7c44eac503a9577c998eae84bffdcd95ae58','db9acfb2bee5df1564c1bef7a2034cd2b70a82fb'], 'c22a17d5ce448b68308ba58ee6236a10d71e785e2d61fe5fb4f9792dc4744c62'),
-    (['62643949fe2408b7646cc1a861a8eee8825223bd'], '225cb7f9c6dd79a3f7196aeb233b461a4fdba8fc81fad63eec9dded48053893a'),
-    (['ff339cc88c78cdb4ea2839e5a4e9390c1a09f77f'], 'dcc6540708028400a0dc8898f197dd7e2f0f90daecd7e1f05f4d83aeedbd4e87'),
-    (['c35e390bcf367d87b812f5cc9c935292ae28df2e'], 'e78fff635ae5abce8a4f28bb5873981bafffa2149bf8a7237daa227c62d6606e'),
-]
+BASE = '217252d1f1a82ce08df4fb8a25c9f23a5296b68a'
+BASE_TREE = 'b558491fbd1a7ff8bb354e8d1ed7922812d6ba19'
+PATCH_SHA = '746d0ddc740b0eb3866047ee00b64f0eafefea32'
+PATCH_DIGEST = 'f490b27cd7ba39f2b5136edfe923f9867c21c9ad1933a0b005f2872f65db0418'
 root = Path(os.environ['RUNNER_TEMP'])/'frdpd-private'
 source = root/'source'
 root.mkdir(mode=0o700, exist_ok=True)
@@ -24,26 +21,22 @@ try:
         run(['git','-C',str(source),'remote','add','origin','https://github.com/dobord/frdpd.git'])
         run(['git','-C',str(source),'fetch','--depth=1','origin',BASE])
         run(['git','-C',str(source),'checkout','--detach','FETCH_HEAD'])
+        assert subprocess.check_output(['git','-C',str(source),'rev-parse','HEAD^{tree}'],text=True).strip() == BASE_TREE
         run(['git','-C',str(source),'-c','url.https://github.com/.insteadOf=git@github.com:','submodule','update','--init','--recursive','--depth=1'])
-        for index,(parts,expected) in enumerate(PATCHES):
-            payload = []
-            for sha in parts:
-                req = urllib.request.Request('https://api.github.com/repos/dobord/frdpd/git/blobs/'+sha, headers={'Authorization':'Bearer '+os.environ['SOURCE_READ_TOKEN'],'Accept':'application/vnd.github+json'})
-                with urllib.request.urlopen(req,timeout=60) as response:
-                    blob = json.load(response)
-                data = base64.b64decode(blob['content'])
-                assert hashlib.sha1(b'blob '+str(len(data)).encode()+b'\0'+data).hexdigest() == sha
-                payload.append(data)
-            patch = gzip.decompress(b''.join(payload))
-            assert hashlib.sha256(patch).hexdigest() == expected
-            path = root/f'corrective-{index}.patch'
-            path.write_bytes(patch)
-            run(['git','-C',str(source),'apply','--index',str(path)])
+        req = urllib.request.Request('https://api.github.com/repos/dobord/frdpd/git/blobs/'+PATCH_SHA, headers={'Authorization':'Bearer '+os.environ['SOURCE_READ_TOKEN'],'Accept':'application/vnd.github+json'})
+        with urllib.request.urlopen(req,timeout=60) as response:
+            blob = json.load(response)
+        patch = base64.b64decode(blob['content'])
+        assert hashlib.sha1(b'blob '+str(len(patch)).encode()+b'\0'+patch).hexdigest() == PATCH_SHA
+        assert hashlib.sha256(patch).hexdigest() == PATCH_DIGEST
+        path = root/'native-epoch.patch'
+        path.write_bytes(patch)
+        run(['git','-C',str(source),'apply','--index',str(path)])
         run(['git','-C',str(source),'diff','--cached','--check'])
-        with (root/'final.patch').open('wb') as patch:
-            subprocess.run(['git','-C',str(source),'diff','--cached','--binary'],stdout=patch,check=True)
+        with (root/'final.patch').open('wb') as output:
+            subprocess.run(['git','-C',str(source),'diff','--cached','--binary'],stdout=output,check=True)
         tree = subprocess.check_output(['git','-C',str(source),'write-tree'],text=True).strip()
-        status = {'stage':'prepared','exit':0,'base_sha':BASE,'tree_sha':tree,'patch_sha256':hashlib.sha256((root/'final.patch').read_bytes()).hexdigest()}
+        status = {'stage':'prepared','exit':0,'base_sha':BASE,'base_tree':BASE_TREE,'tree_sha':tree,'patch_sha256':hashlib.sha256((root/'final.patch').read_bytes()).hexdigest()}
 except Exception as exc:
     status['error_type'] = type(exc).__name__
 finally:
