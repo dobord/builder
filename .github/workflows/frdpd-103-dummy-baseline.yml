@@ -1,0 +1,99 @@
+name: PR103 baseline GFX startup
+on:
+  push:
+    branches: [investigate/frdpd-103-client-matrix]
+    paths: ['.github/workflows/frdpd-103-dummy-baseline.yml']
+permissions:
+  contents: read
+  actions: read
+env:
+  SOURCE_RUN: '36019579949'
+  SOURCE_SHA: 3637007a36881a460693be50d66079291c1f4d33
+  CANDIDATE_SHA: 3637007a36881a460693be50d66079291c1f4d33
+  CANDIDATE_TREE: ffa3bd512e739cc396ec56431f0759e501d9c359
+  MATRIX_BACKEND: xorg-dummy
+  MATRIX_WIDTH: '1024'
+  MATRIX_HEIGHT: '768'
+  ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
+jobs:
+  native:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    env:
+      MATRIX_OS: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.13'
+      - run: |
+          python -m pip install --require-hashes --only-binary=:all: -r requirements.lock
+      - name: Process-scoped fixture consent
+        shell: pwsh
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File investigations/frdpd-103/native-preflight.ps1
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: matrix-native-input-${{ env.SOURCE_RUN }}
+          run-id: ${{ env.SOURCE_RUN }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/native-cipher
+      - name: Authenticate unchanged baseline
+        env:
+          BUILDER_INPUT_PRIVATE_KEY: ${{ secrets.BUILDER_INPUT_PRIVATE_KEY }}
+        shell: pwsh
+        run: |
+          @'
+          import os
+          from pathlib import Path
+          from secure_release.crypto import decrypt_file
+          root=Path(os.environ['RUNNER_TEMP']);(root/'native-private').mkdir(exist_ok=True)
+          decrypt_file(root/'native-cipher/native.enc',root/'native-private/native-rootfs.tar.gz',os.environ['BUILDER_INPUT_PRIVATE_KEY'],{'purpose':'frdpd-103-native-input','run_id':os.environ['SOURCE_RUN'],'source_sha':os.environ['SOURCE_SHA']})
+          '@ | python -
+      - name: Exercise native GFX startup without source edits
+        shell: pwsh
+        run: |
+          python investigations/frdpd-103/native-workstation-setup.py
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
+          python investigations/frdpd-103/native.py
+          Set-Content "$env:RUNNER_TEMP/native-exit" $LASTEXITCODE
+          exit 0
+      - name: Encrypt native evidence
+        if: always()
+        shell: pwsh
+        run: |
+          @'
+          import os,tarfile
+          from pathlib import Path
+          from secure_release.crypto import encrypt_file
+          root=Path(os.environ['RUNNER_TEMP']);archive=root/'native.tar.gz'
+          with tarfile.open(archive,'w:gz') as out:
+              for p in (root/'native-private').glob('*'):
+                  if p.is_file() and p.suffix in ('.log','.json','.png','.txt'):out.add(p,arcname=p.name)
+          encrypt_file(archive,root/'native.enc',os.environ['ARTIFACT_ENCRYPTION_PUBLIC_KEY'],{'purpose':'frdpd-103-gfx-baseline','run_id':os.environ['GITHUB_RUN_ID'],'source_sha':os.environ['SOURCE_SHA'],'tree_sha':os.environ['CANDIDATE_TREE'],'os':os.environ['MATRIX_OS'],'input_run':os.environ['SOURCE_RUN']})
+          archive.unlink()
+          '@ | python -
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: encrypted-gfx-baseline-${{ matrix.os }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/native.enc
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - name: Cleanup and actual native result
+        if: always()
+        shell: pwsh
+        run: |
+          Get-Process qemu-system-x86_64 -ErrorAction SilentlyContinue | Stop-Process -Force
+          $rc=1
+          if (Test-Path "$env:RUNNER_TEMP/native-exit") {$rc=[int](Get-Content "$env:RUNNER_TEMP/native-exit")}
+          Remove-Item -Recurse -Force "$env:RUNNER_TEMP/native-private","$env:RUNNER_TEMP/native-cipher" -ErrorAction SilentlyContinue
+          exit $rc
