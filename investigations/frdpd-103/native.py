@@ -1,5 +1,5 @@
 """Native mstsc against a disposable loopback QEMU guest; the Linux server runs in Docker."""
-import ctypes, functools, hashlib, http.server, json, os, secrets, shutil, subprocess
+import ctypes, functools, hashlib, hmac, http.server, json, os, secrets, shutil, subprocess
 import threading, time, traceback, urllib.request
 from ctypes import wintypes as W
 from pathlib import Path
@@ -7,6 +7,10 @@ ROOT=Path(os.environ['RUNNER_TEMP'])/'native-private'
 ROOT.mkdir(exist_ok=True)
 LOG=(ROOT/'fixture.log').open('w',encoding='utf-8')
 REPORT={'native_pass':False,'stage':'initialization','candidate_sha':os.environ.get('CANDIDATE_SHA','unknown')}
+START=time.monotonic()
+def mark(stage):
+    REPORT['stage']=stage
+    REPORT.setdefault('stage_elapsed_seconds',{})[stage]=round(time.monotonic()-START,3)
 PROCS=[]
 ENV={k:v for k,v in os.environ.items() if k not in ('GH_TOKEN','BUILDER_INPUT_PRIVATE_KEY','SOURCE_READ_TOKEN')}
 KEY=ROOT/'guest-key'
@@ -54,22 +58,46 @@ class Credential(ctypes.Structure):
     _fields_=[('Flags',W.DWORD),('Type',W.DWORD),('TargetName',W.LPWSTR),('Comment',W.LPWSTR),('LastWritten',W.FILETIME),('CredentialBlobSize',W.DWORD),('CredentialBlob',ctypes.POINTER(ctypes.c_ubyte)),('Persist',W.DWORD),('AttributeCount',W.DWORD),('Attributes',ctypes.c_void_p),('TargetAlias',W.LPWSTR),('UserName',W.LPWSTR)]
 def credential(target,password=None,user='rdpuser'):
     adv=ctypes.WinDLL('advapi32',use_last_error=True)
+    adv.CredDeleteW.argtypes=[W.LPCWSTR,W.DWORD,W.DWORD]
     if password is None:
-        adv.CredDeleteW.argtypes=[W.LPCWSTR,W.DWORD,W.DWORD]; adv.CredDeleteW(target,2,0); return
+        # Only the two localhost entries created by this disposable fixture.
+        for kind in (1,2): adv.CredDeleteW(target,kind,0)
+        return
+    # mstsc retrieves TERMSRV entries as application-specific GENERIC credentials,
+    # not an SSPI DOMAIN_PASSWORD entry. Do not silently use the runner's logon.
+    adv.CredDeleteW(target,2,0)
     raw=password.encode('utf-16-le'); buf=(ctypes.c_ubyte*len(raw)).from_buffer_copy(raw)
-    value=Credential(Type=2,TargetName=target,CredentialBlobSize=len(raw),CredentialBlob=buf,Persist=1,UserName=user)
+    value=Credential(Type=1,TargetName=target,CredentialBlobSize=len(raw),CredentialBlob=buf,Persist=1,UserName=user)
     adv.CredWriteW.argtypes=[ctypes.POINTER(Credential),W.DWORD]
-    if not adv.CredWriteW(ctypes.byref(value),0): raise ctypes.WinError(ctypes.get_last_error())
-    ctypes.memset(buf,0,len(raw))
+    stored=ctypes.POINTER(Credential)()
+    adv.CredReadW.argtypes=[W.LPCWSTR,W.DWORD,W.DWORD,ctypes.POINTER(ctypes.POINTER(Credential))]
+    adv.CredFree.argtypes=[ctypes.c_void_p]
+    try:
+        if not adv.CredWriteW(ctypes.byref(value),0): raise ctypes.WinError(ctypes.get_last_error())
+        if not adv.CredReadW(target,1,0,ctypes.byref(stored)): raise ctypes.WinError(ctypes.get_last_error())
+        saved=stored.contents
+        if saved.Type!=1 or saved.UserName!=user or saved.CredentialBlobSize!=len(raw) or not hmac.compare_digest(ctypes.string_at(saved.CredentialBlob,saved.CredentialBlobSize),raw):
+            raise RuntimeError('Fixture credential read-back mismatch')
+    finally:
+        if stored:
+            saved=stored.contents
+            if saved.CredentialBlob: ctypes.memset(saved.CredentialBlob,0,saved.CredentialBlobSize)
+            adv.CredFree(stored)
+        ctypes.memset(buf,0,len(raw))
+
 try:
-    REPORT['stage']='verified-qemu-download'
+    mark('verified-generic-credentials')
+    password='Rdp!'+secrets.token_hex(16)
+    credential('TERMSRV/localhost',password); credential('TERMSRV/localhost:3390',password)
+    REPORT['generic_credentials_verified']=True
+    mark('verified-qemu-download')
     installer=ROOT/'qemu.exe'
     download('https://qemu.weilnetz.de/w64/2026/qemu-w64-setup-20260422.exe',installer,'64a43c0d39acddc9d30d290935a312a2b5c4fa62cffe6c27090f2a45ca6c8de0f0e8673e1e5117fb116a8742f86df92163531afc23f34758aadfc6d82c1f41a5','sha512')
     qdir=ROOT/'qemu'; run([str(installer),'/S','/D='+str(qdir)],timeout=300)
     qemu=qdir/'qemu-system-x86_64.exe'; image_tool=qdir/'qemu-img.exe'
     if not qemu.exists(): raise RuntimeError('QEMU executable missing')
     REPORT['qemu_version']=run([str(qemu),'--version'],capture=True).stdout.decode(errors='replace'); installer.unlink()
-    REPORT['stage']='verified-cloud-image-download'
+    mark('verified-cloud-image-download')
     base='https://cloud-images.ubuntu.com/noble/current/'
     with urllib.request.urlopen(base+'SHA256SUMS',timeout=60) as response: sums=response.read().decode()
     (ROOT/'cloud-SHA256SUMS').write_text(sums)
@@ -79,11 +107,18 @@ try:
     seed=ROOT/'seed'; seed.mkdir(); (seed/'meta-data').write_text('instance-id: frdpd-native-test\nlocal-hostname: native-test\n')
     public=(ROOT/'guest-key.pub').read_text().strip()
     (seed/'user-data').write_text('#cloud-config\nssh_authorized_keys:\n  - '+public+'\nssh_pwauth: false\npackage_update: true\npackages:\n  - docker.io\nruncmd:\n  - systemctl enable --now docker\n'); (seed/'vendor-data').write_text('')
+    # Localhost/QEMU-only transfer avoids doing half a gigabyte of SSH encryption
+    # in the emulated guest. The artifact remains encrypted outside this runner;
+    # verify its exact plaintext digest in the guest before Docker imports it.
+    image=ROOT/'native-rootfs.tar.gz'; image_name=secrets.token_hex(24)+'.rootfs.gz'
+    with image.open('rb') as stream: image_digest=hashlib.file_digest(stream,'sha256').hexdigest()
+    os.link(image,seed/image_name)
     class Quiet(http.server.SimpleHTTPRequestHandler):
         def log_message(self,*args): pass
+        def list_directory(self,path): self.send_error(404); return None
     http=http.server.ThreadingHTTPServer(('127.0.0.1',8000),functools.partial(Quiet,directory=str(seed)))
     threading.Thread(target=http.serve_forever,daemon=True).start()
-    REPORT['stage']='guest-boot'; serial=ROOT/'serial.log'
+    mark('guest-boot'); serial=ROOT/'serial.log'
     command=[str(qemu),'-accel','tcg,thread=multi','-machine','q35','-cpu','max','-smp','2','-m','4096','-drive',f'file={disk},if=virtio,format=qcow2','-display','none','-monitor','none','-serial','file:'+str(serial),'-netdev','user,id=n0,hostfwd=tcp:127.0.0.1:3222-:22,hostfwd=tcp:127.0.0.1:3390-:3389','-device','virtio-net-pci,netdev=n0','-smbios','type=1,serial=ds=nocloud;s=http://10.0.2.2:8000/']
     vm=subprocess.Popen(command,stdout=LOG,stderr=LOG,env=ENV); PROCS.append(vm)
     deadline=time.monotonic()+900
@@ -100,19 +135,22 @@ try:
             REPORT['ssh_bootstrap_timeouts']+=1
         time.sleep(min(3,max(0,deadline-time.monotonic())))
     else: raise RuntimeError('SSH bootstrap timeout')
-    shell('sudo cloud-init status --wait; sudo docker info >/dev/null\n',timeout=900); http.shutdown()
-    REPORT['stage']='docker-runtime-import'; image=ROOT/'native-rootfs.tar.gz'
-    run(['scp','-i',str(KEY),'-P','3222','-o','StrictHostKeyChecking=yes','-o',f'UserKnownHostsFile={ROOT/"known-hosts"}',str(image),'ubuntu@127.0.0.1:/home/ubuntu/native-rootfs.tar.gz'],timeout=600)
+    shell('sudo cloud-init status --wait; sudo docker info >/dev/null\n',timeout=900)
+    mark('docker-runtime-import')
+    transfer="python3 - <<'PY_TRANSFER'\nimport urllib.request,shutil\nwith urllib.request.urlopen('http://10.0.2.2:8000/"+image_name+"',timeout=120) as source,open('/home/ubuntu/native-rootfs.tar.gz','wb') as target: shutil.copyfileobj(source,target,1024*1024)\nPY_TRANSFER\n"
+    transfer+="printf '%s  %s\\n' '"+image_digest+"' '/home/ubuntu/native-rootfs.tar.gz' | sha256sum --check --status\n"
+    shell(transfer,timeout=600)
+    REPORT['runtime_digest_verified']=True
+    http.shutdown(); http.server_close(); (seed/image_name).unlink()
     shell('sudo docker import /home/ubuntu/native-rootfs.tar.gz frdpd-native:fixed >/dev/null; rm /home/ubuntu/native-rootfs.tar.gz\n',timeout=600); image.unlink()
-    password='Rdp!'+secrets.token_hex(16)
-    envfile='FRDP_IDENTITY_PROVIDER=local\nFRDP_TEST_USER=rdpuser\nFRDP_TEST_PASSWORD='+password+'\nFRDP_CLASSIC_USER=rdpclassic\nFRDP_CLASSIC_PASSWORD='+secrets.token_hex(20)+'\nFRDP_E2E_LAYERED_POLICY=1\nFRDP_DISPLAY_BACKEND=xorg-dummy\n'
+    envfile='FRDP_IDENTITY_PROVIDER=local\nFRDP_TEST_USER=rdpuser\nFRDP_TEST_PASSWORD='+password+'\nFRDP_CLASSIC_USER=rdpclassic\nFRDP_CLASSIC_PASSWORD=Classic!'+secrets.token_hex(20)+'\nFRDP_E2E_LAYERED_POLICY=1\nFRDP_DISPLAY_BACKEND=xorg-dummy\n'
     shell("umask 077; cat > /home/ubuntu/server.env <<'END_TEST_ENV'\n"+envfile+"END_TEST_ENV\nsudo docker run -d --name server --hostname frdpd.layered.test --cap-add SYS_PTRACE -p 3389:3389 --env-file /home/ubuntu/server.env --entrypoint bash frdpd-native:fixed /opt/frdp-e2e/scripts/frdpd-entrypoint.sh\nrm /home/ubuntu/server.env\n",timeout=180)
-    REPORT['stage']='server-health'
+    mark('server-health')
     shell('for i in $(seq 1 120); do if sudo docker exec server bash /opt/frdp-e2e/scripts/frdpd-healthcheck.sh; then exit 0; fi; sleep 1; done; exit 1\n',timeout=240)
     (ROOT/'server.crt').write_bytes(shell('sudo docker exec server cat /etc/frdpd/tls.crt\n',capture=True).stdout)
     ps(f"$c=Import-Certificate -FilePath '{ROOT/'server.crt'}' -CertStoreLocation Cert:\\LocalMachine\\Root; $c.Thumbprint | Set-Content '{ROOT/'server-thumb.txt'}'")
-    credential('TERMSRV/localhost',password); credential('TERMSRV/localhost:3390',password); del password,envfile
-    REPORT['stage']='native-client'; rdp=ROOT/'remoteapp.rdp'
+    del password,envfile
+    mark('native-client'); rdp=ROOT/'remoteapp.rdp'
     rdp.write_text('full address:s:localhost:3390\nusername:s:rdpuser\nremoteapplicationmode:i:1\nremoteapplicationprogram:s:||xcalc\nremoteapplicationname:s:FRDP xcalc\nalternate shell:s:||xcalc\nprompt for credentials:i:0\nauthentication level:i:2\nenablecredsspsupport:i:1\nredirectclipboard:i:0\nredirectprinters:i:0\nredirectcomports:i:0\nredirectsmartcards:i:0\naudiomode:i:2\nremoteapplicationexpandcmdline:i:0\nremoteapplicationexpandworkingdir:i:0\ndisableconnectionsharing:i:1\n',encoding='utf-16')
     ps(f"$c=New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=Disposable RemoteApp test' -CertStoreLocation Cert:\\CurrentUser\\My; $c.Thumbprint | Set-Content '{ROOT/'signer-thumb.txt'}'; Export-Certificate -Cert $c -FilePath '{ROOT/'signer.cer'}' | Out-Null; Import-Certificate -FilePath '{ROOT/'signer.cer'}' -CertStoreLocation Cert:\\LocalMachine\\Root | Out-Null; Import-Certificate -FilePath '{ROOT/'signer.cer'}' -CertStoreLocation Cert:\\LocalMachine\\TrustedPublisher | Out-Null; & rdpsign /sha256 $c.Thumbprint '{rdp}'; if ($LASTEXITCODE -ne 0) {{exit $LASTEXITCODE}}")
     ps("wevtutil sl Microsoft-Windows-TerminalServices-RDPClient/Operational /e:true",check=False)
@@ -131,7 +169,7 @@ try:
             if time.monotonic()-stable_since>=10:
                 REPORT['stable_window_seconds']=time.monotonic()-stable_since; screenshot('native-remoteapp.png'); break
         else: stable_since=None
-    (ROOT/'windows-timeline.json').write_text(json.dumps(seen,indent=2)); REPORT['stage']='evidence'
+    (ROOT/'windows-timeline.json').write_text(json.dumps(seen,indent=2)); mark('evidence')
     data=shell('sudo docker logs server 2>&1\n',capture=True,check=False).stdout; (ROOT/'server.log').write_bytes(data)
     REPORT['exec_result_success']=b'RAIL EXEC_RESULT sent result=0 raw=0' in data
     REPORT['frame_ack']=b'first RDPGFX client frame acknowledgement received' in data
@@ -164,5 +202,6 @@ finally:
             except subprocess.TimeoutExpired: proc.kill()
     for name in ('guest-key','guest.qcow2','native-rootfs.tar.gz','remoteapp.rdp','signer.cer'): (ROOT/name).unlink(missing_ok=True)
     shutil.rmtree(ROOT/'qemu',ignore_errors=True)
+    REPORT['elapsed_seconds']=round(time.monotonic()-START,3)
     (ROOT/'result.json').write_text(json.dumps(REPORT,indent=2)); LOG.close()
 raise SystemExit(0 if REPORT['native_pass'] else 1)
