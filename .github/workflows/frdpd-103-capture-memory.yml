@@ -1,0 +1,102 @@
+name: Bounded capture memory diagnostics
+on:
+  push:
+    branches: [investigate/frdpd-103-mstsc-20260924]
+    paths: ['.github/workflows/frdpd-103-capture-memory.yml']
+permissions:
+  contents: read
+jobs:
+  memory:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.13'
+      - run: |
+          python -m pip install --require-hashes --only-binary=:all: -r requirements.lock
+          mkdir -m 700 "$RUNNER_TEMP/capture-memory"
+      - name: Read the three fixed private source files without execution
+        env:
+          SOURCE_READ_TOKEN: ${{ secrets.SOURCE_READ_TOKEN }}
+        run: |
+          python - <<'PY'
+          import os,urllib.request,json,base64,hashlib
+          from pathlib import Path
+          root=Path(os.environ['RUNNER_TEMP'])/'capture-memory';source=root/'source';source.mkdir()
+          hashes={}
+          for relative in ['frdp-session-agent/x11_window_capture.c','frdp-session-agent/x11_window_capture.h','test/TestFreeRDPFrdpX11WindowCapture.c']:
+              request=urllib.request.Request('https://api.github.com/repos/dobord/frdpd/contents/server/frdp/'+relative+'?ref=d2dc6b6d7b0d5e7ded35f5ca24d760f5d33a9596',headers={'Authorization':'Bearer '+os.environ['SOURCE_READ_TOKEN'],'Accept':'application/vnd.github+json'})
+              with urllib.request.urlopen(request,timeout=60) as response: document=json.load(response)
+              data=base64.b64decode(document['content']);assert hashlib.sha1(b'blob '+str(len(data)).encode()+b'\0'+data).hexdigest()==document['sha']
+              path=source/relative;path.parent.mkdir(exist_ok=True);path.write_bytes(data);hashes[relative]=document['sha']
+          (root/'source-hashes.json').write_text(json.dumps(hashes))
+          test=source/'test'/'TestFreeRDPFrdpX11WindowCapture.c'
+          text=test.read_text();text=text.replace('\tstage = ', '\tfprintf(stderr,"previous stage: %s\\n",stage);\n\tstage = ')
+          test.write_text(text)
+          PY
+      - name: Run baseline and memory checks solely inside an isolated Docker container
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/capture-memory"
+          printf 'FROM ubuntu:24.04\nRUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gcc libc6-dev libx11-dev libxcomposite-dev xvfb xauth x11-utils && rm -rf /var/lib/apt/lists/*\n' >"$root/Dockerfile"
+          docker build -t capture-memory:only -f "$root/Dockerfile" "$root" >"$root/build.log" 2>&1
+          cat >"$root/check.sh" <<'SH'
+          #!/bin/bash
+          set -uo pipefail
+          export DISPLAY=:91
+          Xvfb :91 -screen 0 1024x768x24 -nolisten tcp >/evidence/xvfb.log 2>&1 & xp=$!
+          trap 'kill "$xp" 2>/dev/null || true; wait "$xp" 2>/dev/null || true' EXIT
+          ready=0
+          for i in $(seq 1 50); do if xdpyinfo >/dev/null 2>&1; then ready=1; break; fi; sleep .1; done
+          test "$ready" = 1 || exit 2
+          for mode in plain undefined address combined; do
+            case "$mode" in plain) flags='' ;; undefined) flags='-fsanitize=undefined' ;; address) flags='-fsanitize=address' ;; combined) flags='-fsanitize=address,undefined' ;; esac
+            echo "compile=$mode"
+            timeout -k 5 30 cc -std=c11 -g -O1 -Wall -Wextra -Werror -fno-omit-frame-pointer $flags -I/source /source/frdp-session-agent/x11_window_capture.c /source/test/TestFreeRDPFrdpX11WindowCapture.c -lX11 -lXcomposite -o "/tmp/test-$mode"
+            rc=$?; echo "compile_$mode=$rc" >>/evidence/status.txt
+            if [ "$rc" -eq 0 ]; then
+              echo "execute=$mode"
+              ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 LSAN_OPTIONS=verbosity=1 timeout -k 5 30 "/tmp/test-$mode" >"/evidence/$mode.log" 2>&1
+              echo "test_$mode=$?" >>/evidence/status.txt
+            fi
+          done
+          SH
+          docker run --rm --init --network none -v "$root/source:/source:ro" -v "$root:/evidence" --entrypoint bash capture-memory:only /evidence/check.sh >"$root/runner.log" 2>&1
+      - name: Encrypt stage diagnostics
+        if: always()
+        run: |
+          python - <<'PY'
+          import os,tarfile
+          from pathlib import Path
+          from secure_release.crypto import encrypt_file
+          root=Path(os.environ['RUNNER_TEMP']);work=root/'capture-memory';archive=root/'capture-memory.tar.gz'
+          public='{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
+          with tarfile.open(archive,'w:gz') as out:
+              for p in work.iterdir():
+                  if p.is_file(): out.add(p,arcname=p.name)
+          encrypt_file(archive,root/'capture-memory.enc',public,{'purpose':'frdpd-103-capture-memory','run_id':os.environ['GITHUB_RUN_ID'],'source_sha':'d2dc6b6d7b0d5e7ded35f5ca24d760f5d33a9596','diagnostic_test_progress_only':True})
+          archive.unlink()
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: encrypted-capture-memory-${{ github.run_id }}
+          path: ${{ runner.temp }}/capture-memory.enc
+          retention-days: 1
+          compression-level: 0
+      - name: Report every check and clean
+        if: always()
+        run: |
+          python - <<'PY'
+          import os,shutil
+          from pathlib import Path
+          root=Path(os.environ['RUNNER_TEMP']);work=root/'capture-memory';p=work/'status.txt'
+          status=dict(line.split('=',1) for line in p.read_text().splitlines()) if p.exists() else {}
+          passed=all(status.get(prefix+'_'+mode)=='0' for prefix in ('compile','test') for mode in ('plain','undefined','address','combined'))
+          shutil.rmtree(work,ignore_errors=True);(root/'capture-memory.enc').unlink(missing_ok=True)
+          raise SystemExit(0 if passed else 1)
+          PY
