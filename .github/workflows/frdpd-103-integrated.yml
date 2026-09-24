@@ -47,7 +47,7 @@ jobs:
                   tree=subprocess.check_output(['git','-C',str(source),'rev-parse','HEAD^{tree}'],text=True).strip()
                   assert tree==os.environ['CANDIDATE_TREE']
                   git('-C',str(source),'-c','url.https://github.com/.insteadOf=git@github.com:','submodule','update','--init','--recursive','--depth=1')
-                  (root/'provenance.json').write_text(json.dumps({'commit':os.environ['CANDIDATE_SHA'],'tree':tree,'source_changes':False}))
+                  (root/'provenance.json').write_text(json.dumps({'commit':os.environ['CANDIDATE_SHA'],'tree':tree,'source_changes':False,'local_test_nss':'files','unwrapped_test_pam':'deny','positive_pam':'per-test explicit pam_wrapper or common-session-noninteractive'}))
           finally: ask.unlink(missing_ok=True)
           PY
       - name: Build unchanged persisted source in Docker
@@ -57,7 +57,7 @@ jobs:
           docker build --build-arg FRDP_BUILD_COMPONENT_TESTS=ON -f "$root/source/server/frdp/test/e2e/Dockerfile" -t frdpd-integrated:fixed "$root/source" >"$root/build.log" 2>&1 || rc=$?
           echo "build=$rc" >"$root/status.txt"
           if [ "$rc" -eq 0 ]; then touch "$root/image-ready"; fi
-      - name: Full wrapper with a real reaper and local-only NSS fixture
+      - name: Full wrapper with a real reaper and explicit local negative PAM fixture
         if: always()
         run: |
           root="$RUNNER_TEMP/integrated-private"
@@ -66,13 +66,17 @@ jobs:
           docker run --rm --init --network none --entrypoint bash frdpd-integrated:fixed -lc '
             set -u
             sed -i -E "s/^(passwd|group|shadow):.*/\1: files/" /etc/nsswitch.conf
+            echo "Fixture: local NSS; unwrapped default PAM denies; positive tests retain their explicit PAM stacks"
+            for service in frdpd frdpd-password; do
+              printf "%s\n" "auth required pam_deny.so" "account required pam_deny.so" "session required pam_deny.so" "password required pam_deny.so" >"/etc/pam.d/$service"
+            done
             result=0
             FRDP_BUILD_DIR=/opt/freerdp-build FRDP_BUILD_JOBS=2 /src/scripts/test.sh || result=$?
             if [ "$result" -ne 0 ]; then ps -eo pid,ppid,stat,comm; fi
             exit "$result"
           ' >"$root/full-init.log" 2>&1 || rc=$?
           echo "full_init=$rc" >>"$root/status.txt"
-      - name: Full wrapper under real systemd with pam_systemd and local NSS
+      - name: Full wrapper under real systemd with pam_systemd and executable test tmpfs
         if: always()
         run: |
           set -uo pipefail
@@ -82,7 +86,7 @@ jobs:
           printf 'FROM frdpd-integrated:fixed\nRUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends systemd systemd-sysv libpam-systemd dbus dbus-user-session && apt-get clean\n' >"$root/Systemd.Dockerfile"
           docker build -t frdpd-integrated:systemd -f "$root/Systemd.Dockerfile" "$root" >"$root/systemd-build.log" 2>&1 || rc=$?
           if [ "$rc" -eq 0 ]; then
-            docker run -d --name frdpd-integrated-systemd --privileged --cgroupns=private --network none --tmpfs /run --tmpfs /run/lock --tmpfs /tmp --entrypoint /sbin/init frdpd-integrated:systemd >"$root/systemd-start.log" 2>&1 || rc=$?
+            docker run -d --name frdpd-integrated-systemd --privileged --cgroupns=private --network none --tmpfs /run --tmpfs /run/lock --tmpfs /tmp:exec,mode=1777 --entrypoint /sbin/init frdpd-integrated:systemd >"$root/systemd-start.log" 2>&1 || rc=$?
             if [ "$rc" -eq 0 ]; then
               ready=0
               for i in $(seq 1 30); do
@@ -90,10 +94,20 @@ jobs:
                 sleep 1
               done
               if [ "$ready" -eq 1 ]; then
-                docker exec frdpd-integrated-systemd bash -lc 'sed -i -E "s/^(passwd|group|shadow):.*/\1: files/" /etc/nsswitch.conf; result=0; FRDP_BUILD_DIR=/opt/freerdp-build FRDP_BUILD_JOBS=2 /src/scripts/test.sh || result=$?; if [ "$result" -ne 0 ]; then ps -eo pid,ppid,stat,comm; fi; exit "$result"' >"$root/full-systemd.log" 2>&1 || rc=$?
+                docker exec frdpd-integrated-systemd bash -lc '
+                  sed -i -E "s/^(passwd|group|shadow):.*/\1: files/" /etc/nsswitch.conf
+                  echo "Fixture: systemd PID 1; executable test tmpfs; local NSS; explicit negative default PAM"
+                  for service in frdpd frdpd-password; do
+                    printf "%s\n" "auth required pam_deny.so" "account required pam_deny.so" "session required pam_deny.so" "password required pam_deny.so" >"/etc/pam.d/$service"
+                  done
+                  result=0
+                  FRDP_BUILD_DIR=/opt/freerdp-build FRDP_BUILD_JOBS=2 /src/scripts/test.sh || result=$?
+                  if [ "$result" -ne 0 ]; then ps -eo pid,ppid,stat,comm; fi
+                  exit "$result"
+                ' >"$root/full-systemd.log" 2>&1 || rc=$?
               else rc=125; fi
               docker logs frdpd-integrated-systemd >"$root/systemd-boot.log" 2>&1
-              docker exec frdpd-integrated-systemd journalctl --no-pager -n 250 >"$root/systemd-journal.log" 2>&1 || true
+              docker exec frdpd-integrated-systemd journalctl --no-pager -n 350 >"$root/systemd-journal.log" 2>&1 || true
             fi
           fi
           echo "full_systemd=$rc" >>"$root/status.txt"
