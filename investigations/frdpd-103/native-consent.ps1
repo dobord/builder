@@ -7,30 +7,54 @@ Add-Type @'
 using System;
 using System.Runtime.InteropServices;
 public static class FixtureTaskDialog {
- [DllImport("user32.dll",SetLastError=true)]
- public static extern bool PostMessage(IntPtr hWnd,uint message,IntPtr wParam,IntPtr lParam);
- [DllImport("user32.dll")]
- public static extern uint GetWindowThreadProcessId(IntPtr hWnd,out uint processId);
+ [StructLayout(LayoutKind.Sequential)] public struct Point { public int x,y; }
+ [StructLayout(LayoutKind.Sequential)] public struct MouseInput {
+  public int dx,dy; public uint mouseData,flags,time; public UIntPtr extra;
+ }
+ [StructLayout(LayoutKind.Explicit)] public struct InputUnion {
+  [FieldOffset(0)] public MouseInput mouse;
+ }
+ [StructLayout(LayoutKind.Sequential)] public struct Input {
+  public uint type; public InputUnion data;
+ }
+ [DllImport("user32.dll",SetLastError=true)] public static extern bool PostMessage(IntPtr hWnd,uint message,IntPtr wParam,IntPtr lParam);
+ [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd,out uint processId);
+ [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(Point p);
+ [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hWnd);
+ [DllImport("user32.dll",SetLastError=true)] static extern bool SetCursorPos(int x,int y);
+ [DllImport("user32.dll",SetLastError=true)] static extern uint SendInput(uint n,Input[] input,int size);
+ public static void ClickOwned(IntPtr window,uint pid,int x,int y) {
+  uint owner; GetWindowThreadProcessId(window,out owner);
+  if(window==IntPtr.Zero || owner!=pid) throw new InvalidOperationException("Dialog owner mismatch");
+  SetForegroundWindow(window);
+  GetWindowThreadProcessId(WindowFromPoint(new Point{x=x,y=y}),out owner);
+  if(owner!=pid) throw new InvalidOperationException("Consent button is covered by another process");
+  if(!SetCursorPos(x,y)) throw new InvalidOperationException("Unable to position fixture input");
+  Input[] input=new Input[2];
+  input[0].data.mouse.flags=0x0002; input[1].data.mouse.flags=0x0004;
+  if(SendInput(2,input,Marshal.SizeOf(typeof(Input)))!=2) throw new InvalidOperationException("Fixture click was not delivered");
+ }
 }
 '@
 }
 $root=[System.Windows.Automation.AutomationElement]::RootElement
 $condition=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ProcessIdProperty,$ClientProcessId)
 $windows=$root.FindAll([System.Windows.Automation.TreeScope]::Children,$condition)
-$evidence=@();$actions=@()
-foreach($window in $windows) {
- try {
+$evidence=@();$actions=@();$failure=$null
+try {
+ foreach($window in $windows) {
+  try {
     $elements=$window.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
     $names=@()
     foreach($element in $elements) {
         $names += $element.Current.Name
         if($evidence.Count -lt 200) {
             $patterns=@($element.GetSupportedPatterns() | ForEach-Object {$_.ProgrammaticName})
-            $evidence += @{name=$element.Current.Name;type=$element.Current.ControlType.ProgrammaticName;id=$element.Current.AutomationId;enabled=$element.Current.IsEnabled;patterns=$patterns}
+            $evidence += @{name=$element.Current.Name;type=$element.Current.ControlType.ProgrammaticName;id=$element.Current.AutomationId;enabled=$element.Current.IsEnabled;patterns=$patterns;window=$window.Current.Name}
         }
     }
-    # Only this generated localhost fixture's process is authorized. Do not
-    # change machine security policy or accept certificate/authentication errors.
+    # Consent is restricted to this generated localhost fixture and its verified
+    # publisher. Never dismiss TLS/authentication errors or change machine policy.
     $education='I understand and allow RDP files to open on this device for my account'
     $educationOn=$false
     foreach($element in $elements) {
@@ -41,13 +65,12 @@ foreach($window in $windows) {
             if($educationOn) {$actions += 'fixture-education-checkbox-on'}
         }
     }
-    $signedFixture=($names -join "`n") -match 'Disposable RemoteApp test' -and ($names -join "`n") -match 'localhost'
+    $text=$names -join "`n"
+    $signedFixture=$window.Current.Name -eq 'RemoteApp security warning' -and $text.Contains('Disposable RemoteApp test') -and $text.Contains('localhost') -and $text.Contains('FRDP xcalc')
     foreach($element in $elements) {
         if(-not $element.Current.IsEnabled) {continue}
         $name=$element.Current.Name.Replace('&','')
         if($educationOn -and $name -eq 'OK' -and $element.Current.AutomationId -eq 'CommandButton_1') {
-            # TaskDialog's command buttons are exposed as ControlType.Pane.
-            # TDM_CLICK_BUTTON (WM_USER+102), IDOK=1 is its documented interface.
             $handle=[IntPtr]$window.Current.NativeWindowHandle
             [uint32]$owner=0
             [void][FixtureTaskDialog]::GetWindowThreadProcessId($handle,[ref]$owner)
@@ -56,18 +79,27 @@ foreach($window in $windows) {
             $actions += 'fixture-education-ok-posted'
             break
         }
-        if($signedFixture -and $name -in @('Connect','Continue')) {
+        if($signedFixture -and $name -eq 'Connect') {
             $pattern=$null
             if($element.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern,[ref]$pattern)) {
-                $pattern.Invoke();$actions += ('fixture-publisher-'+$name);break
+                $pattern.Invoke();$actions += 'fixture-publisher-invoke';break
             }
-            if($element.TryGetCurrentPattern([System.Windows.Automation.LegacyIAccessiblePattern]::Pattern,[ref]$pattern)) {
-                $pattern.DoDefaultAction();$actions += ('fixture-publisher-legacy-'+$name);break
-            }
+            # Managed UIAutomationClient has no LegacyIAccessiblePattern type.
+            # DirectUI buttons without InvokePattern use real, owner-checked input.
+            $rect=$element.Current.BoundingRectangle
+            if($rect.IsEmpty -or $rect.Width -lt 10 -or $rect.Height -lt 10 -or $rect.Width -gt 300 -or $rect.Height -gt 100) {throw 'Invalid consent button bounds'}
+            [FixtureTaskDialog]::ClickOwned([IntPtr]$window.Current.NativeWindowHandle,[uint32]$ClientProcessId,[int]($rect.X+$rect.Width/2),[int]($rect.Y+$rect.Height/2))
+            $actions += 'fixture-publisher-owned-input'
+            break
         }
     }
- } catch [System.Windows.Automation.ElementNotAvailableException] {
-    # The owned dialog may disappear immediately after the verified action.
+  } catch [System.Windows.Automation.ElementNotAvailableException] {
+    # The dialog can disappear immediately after the verified action.
+  }
  }
+} catch {
+ $failure=$_.Exception.Message
+ throw
+} finally {
+ @{controls=$evidence;actions=$actions;failure=$failure} | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 (Join-Path $EvidenceDirectory 'uia-dialog.json')
 }
-@{controls=$evidence;actions=$actions} | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 (Join-Path $EvidenceDirectory 'uia-dialog.json')
