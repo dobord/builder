@@ -9,9 +9,9 @@ concurrency:
   group: frdpd-103-cap-review-${{ github.ref }}
   cancel-in-progress: false
 env:
-  SOURCE_SHA: 87ce1c1663b95bb95a1d17d4b520bcd6ef534afd
-  CANDIDATE_SHA: 87ce1c1663b95bb95a1d17d4b520bcd6ef534afd
-  CANDIDATE_TREE: 09b49bcff5d7d95313608bae6a6edce02e231aeb
+  SOURCE_SHA: 334cfa8554993578f48de643622cece6737a038b
+  CANDIDATE_SHA: 334cfa8554993578f48de643622cece6737a038b
+  CANDIDATE_TREE: 5a528eda5c43118340173da77ad37de9311733ab
   BASE_SHA: 3637007a36881a460693be50d66079291c1f4d33
   ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
 jobs:
@@ -44,7 +44,7 @@ jobs:
               with (root/'fetch.log').open('w') as log:
                   def git(*args): subprocess.run(['git',*args],env=env,stdout=log,stderr=log,timeout=600,check=True)
                   git('init',str(source));git('-C',str(source),'remote','add','origin','https://github.com/dobord/frdpd.git')
-                  git('-C',str(source),'fetch','--depth=3','origin',os.environ['SOURCE_SHA']);git('-C',str(source),'checkout','--detach','FETCH_HEAD')
+                  git('-C',str(source),'fetch','--depth=4','origin',os.environ['SOURCE_SHA']);git('-C',str(source),'checkout','--detach','FETCH_HEAD')
                   assert subprocess.check_output(['git','-C',str(source),'rev-parse','HEAD^{tree}'],text=True).strip()==os.environ['CANDIDATE_TREE']
                   git('-C',str(source),'-c','url.https://github.com/.insteadOf=git@github.com:','submodule','update','--init','--recursive','--depth=1')
                   (root/'provenance.json').write_text(json.dumps({'commit':os.environ['SOURCE_SHA'],'tree':os.environ['CANDIDATE_TREE'],'source_edits':False}))
@@ -67,7 +67,9 @@ jobs:
           main='\nint main(void) { RDPGFX_CAPSET input={RDPGFX_CAPVERSION_106,4,RDPGFX_CAPS_FLAG_AVC_THINCLIENT}, output={0}; if (frdpd_gfx_select_capability(&input,1,FALSE,&output)!=0) return 2; printf("confirmed_flags=0x%08x\\n",output.flags); return output.flags==RDPGFX_CAPS_FLAG_AVC_DISABLED ? 0 : 1; }\n'
           for label,text in texts.items():
               p=Path('/tmp')/(label+'.c');p.write_text('#include <stdio.h>\n'+text.split('\nBOOL frdpd_gfx_rfx_compress(',1)[0]+main)
-              command=['cc','-std=c11','-Wall','-Wextra','-Werror','-I/src/server/frdp/frdpd','-I/src/freerdp/include','-I/opt/freerdp-build/include','-I/src/freerdp/winpr/include','-I/opt/freerdp-build/winpr/include',str(p),'-o','/tmp/'+label]
+              # Match the project's GNU C dialect. WinPR's public SSPI header itself
+              # uses deprecated typedefs; this is not a warning in our selector.
+              command=['cc','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-deprecated-declarations','-I/src/server/frdp/frdpd','-I/src/freerdp/include','-I/opt/freerdp-build/include','-I/src/freerdp/winpr/include','-I/opt/freerdp-build/winpr/include',str(p),'-o','/tmp/'+label]
               subprocess.run(command,check=True)
               result=subprocess.run(['/tmp/'+label],capture_output=True,text=True)
               print(label, result.returncode, result.stdout.strip(), flush=True)
@@ -144,7 +146,7 @@ jobs:
           compression-level: 0
       - if: always()
         run: |
-          rm -rf "$RUNNER_TEMP/review-private" "$RUNNER_TEMP/review.enc" "$RUNNER_TEMP/native.enc"
+          sudo rm -rf "$RUNNER_TEMP/review-private" "$RUNNER_TEMP/review.enc" "$RUNNER_TEMP/native.enc"
   full-regression-gate:
     needs: linux
     if: always()
@@ -184,7 +186,7 @@ jobs:
               with (root/'fetch.log').open('w') as log:
                   def git(*args):subprocess.run(['git',*args],env=env,stdout=log,stderr=log,timeout=600,check=True)
                   git('init',str(source));git('-C',str(source),'remote','add','origin','https://github.com/dobord/frdpd.git')
-                  git('-C',str(source),'fetch','--depth=3','origin',os.environ['SOURCE_SHA']);git('-C',str(source),'checkout','--detach','FETCH_HEAD')
+                  git('-C',str(source),'fetch','--depth=4','origin',os.environ['SOURCE_SHA']);git('-C',str(source),'checkout','--detach','FETCH_HEAD')
                   assert subprocess.check_output(['git','-C',str(source),'rev-parse','HEAD^{tree}'],text=True).strip()==os.environ['CANDIDATE_TREE']
                   git('-C',str(source),'-c','url.https://github.com/.insteadOf=git@github.com:','submodule','update','--init','--recursive','--depth=1')
           finally: ask.unlink(missing_ok=True)
@@ -216,6 +218,9 @@ jobs:
           test -n "$xorg"
           rpm -qp --requires "$xorg" >/evidence/package-requires.log
           grep -Fx "xorg-x11-server(Xorg-ABI-VIDEODRV) = $abi" /evidence/package-requires.log
+          rpm -qpl "$xorg" >/evidence/package-files.log
+          grep -Fx '/usr/lib64/frdpd/xorg/modules/frdp_drv.so' /evidence/package-files.log
+          ! grep -F '/root/rpmbuild' /evidence/package-files.log
           SH
           docker run --rm --init -v "$root/source:/src" -v "$root:/evidence" --entrypoint bash fedora:42 /evidence/run-rpm.sh >"$root/rpm.log" 2>&1
       - name: Encrypt RPM evidence
@@ -240,16 +245,16 @@ jobs:
           compression-level: 0
       - if: always()
         run: |
-          rm -rf "$RUNNER_TEMP/rpm-private" "$RUNNER_TEMP/rpm.enc"
+          sudo rm -rf "$RUNNER_TEMP/rpm-private" "$RUNNER_TEMP/rpm.enc"
   native:
     needs: linux
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-2022, windows-2025]
+        os: [windows-2022, windows-2025, windows-11-arm]
         backend: [xorg-dummy, xorg-native]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 35
+    timeout-minutes: 40
     env:
       SOURCE_RUN: ${{ github.run_id }}
       TEST_OS: ${{ matrix.os }}
@@ -261,6 +266,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
         with:
           python-version: '3.13'
+          architecture: x64
       - run: |
           python -m pip install --require-hashes --only-binary=:all: -r requirements.lock
       - shell: pwsh
@@ -284,6 +290,10 @@ jobs:
           decrypt_file(root/'native-cipher'/'native.enc',root/'native-private'/'native-rootfs.tar.gz',os.environ['BUILDER_INPUT_PRIVATE_KEY'],{'purpose':'frdpd-103-native-input','run_id':os.environ['SOURCE_RUN'],'source_sha':os.environ['SOURCE_SHA']})
           '@ | python -
           if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
+      - name: Record actual Windows product and processor architecture
+        shell: pwsh
+        run: |
+          @{ operating_system=(Get-CimInstance Win32_OperatingSystem | Select-Object Caption,Version,BuildNumber,OSArchitecture); processor=(Get-CimInstance Win32_Processor | Select-Object Architecture); python_architecture='x64' } | ConvertTo-Json -Depth 4 | Set-Content "$env:RUNNER_TEMP/native-private/host-product.json"
       - name: Native RemoteApp stability and debug evidence
         shell: pwsh
         run: |
