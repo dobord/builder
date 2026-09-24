@@ -1,0 +1,91 @@
+name: Persist reviewed private RemoteApp candidate
+on:
+  push:
+    branches: [investigate/frdpd-103-mstsc-20260924]
+    paths: ['.github/workflows/frdpd-103-publish.yml']
+permissions:
+  contents: read
+jobs:
+  persist:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.13'
+      - name: Install hash-pinned cryptography
+        run: |
+          python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r requirements.lock
+      - name: Store only reviewed sources on the existing isolated branch
+        env:
+          SOURCE_READ_TOKEN: ${{ secrets.SOURCE_READ_TOKEN }}
+        run: |
+          umask 077
+          python - <<'PY'
+          import os,subprocess,json
+          from pathlib import Path
+          root=Path(os.environ['RUNNER_TEMP'])/'frdpd-private'; root.mkdir(mode=0o700,exist_ok=True)
+          status={'published':False}; ask=root/'publish-askpass'
+          try:
+              with (root/'publish.log').open('w') as log:
+                  subprocess.run(['python','investigations/frdpd-103/prepare.py'],stdout=log,stderr=log,check=True)
+                  source=root/'source'
+                  ask.write_text('#!/bin/sh\ncase "$1" in *Username*) echo x-access-token ;; *) printf "%s\\n" "$SOURCE_READ_TOKEN" ;; esac\n'); ask.chmod(0o700)
+                  env=dict(os.environ,GIT_ASKPASS=str(ask),GIT_TERMINAL_PROMPT='0')
+                  def git(*args,output=False,data=None):
+                      result=subprocess.run(['git','-C',str(source),*args],env=env,input=data,stdout=subprocess.PIPE if output else log,stderr=log,check=True,timeout=120)
+                      return result.stdout.decode().strip() if output else None
+                  parent='d5088d7a2414acf1575dae87083fdb5dac2e2475'; branch='fix/103-remoteapp-contract'
+                  git('fetch','--depth=1','origin',branch)
+                  if git('rev-parse','FETCH_HEAD',output=True)!=parent: raise RuntimeError('Target branch changed; refusing overwrite')
+                  tree=git('write-tree',output=True)
+                  status['tree_sha']=tree
+                  commit=git('-c','user.name=RemoteApp regression','-c','user.email=41898282+github-actions[bot]@users.noreply.github.com','commit-tree',tree,'-p',parent,'-m','Fix RemoteApp execution, channel lifetime, enhanced presentation and native frame multiplexing',output=True)
+                  git('push','--force-with-lease=refs/heads/'+branch+':'+parent,'origin',commit+':refs/heads/'+branch)
+                  status.update(published=True,commit_sha=commit,branch=branch)
+          except Exception as exc:
+              status['error_type']=type(exc).__name__
+          finally:
+              ask.unlink(missing_ok=True)
+              (root/'publication.json').write_text(json.dumps(status))
+          PY
+      - name: Encrypt publication evidence
+        if: always()
+        run: |
+          python - <<'PY'
+          import os,tarfile
+          from pathlib import Path
+          from secure_release.crypto import encrypt_file
+          root=Path(os.environ['RUNNER_TEMP']); archive=root/'publication.tar.gz'
+          with tarfile.open(archive,'w:gz') as out:
+              for name in ('publication.json','publish.log','preparation-status.json'):
+                  p=root/'frdpd-private'/name
+                  if p.exists(): out.add(p,arcname=name)
+          encrypt_file(archive,root/'publication.enc',os.environ['ARTIFACT_ENCRYPTION_PUBLIC_KEY'],{'purpose':'frdpd-103-publication','run_id':os.environ['GITHUB_RUN_ID']})
+          archive.unlink()
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: encrypted-publication-${{ github.run_id }}
+          path: ${{ runner.temp }}/publication.enc
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - name: Clean plaintext and report the actual result
+        if: always()
+        run: |
+          python - <<'PY'
+          import os,json,shutil
+          from pathlib import Path
+          root=Path(os.environ['RUNNER_TEMP']); p=root/'frdpd-private'/'publication.json'
+          passed=p.exists() and json.loads(p.read_text()).get('published',False)
+          shutil.rmtree(root/'frdpd-private',ignore_errors=True)
+          (root/'publication.enc').unlink(missing_ok=True)
+          raise SystemExit(0 if passed else 1)
+          PY
