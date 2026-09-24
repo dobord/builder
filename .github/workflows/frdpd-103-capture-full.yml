@@ -12,7 +12,7 @@ env:
 jobs:
   full:
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -44,12 +44,14 @@ jobs:
           finally:ask.unlink(missing_ok=True)
           PY
       - name: Build unchanged source inside Docker
+        timeout-minutes: 12
         run: |
           set -euo pipefail
           root="$RUNNER_TEMP/full-private"
           docker build --build-arg FRDP_BUILD_COMPONENT_TESTS=ON -f "$root/source/server/frdp/test/e2e/Dockerfile" -t frdpd-full:capture "$root/source" >"$root/build.log" 2>&1
           touch "$root/image-ready"
       - name: Run all wrapper tests with a reaping init
+        timeout-minutes: 5
         run: |
           root="$RUNNER_TEMP/full-private"
           cat >"$root/full.sh" <<'SH'
@@ -62,10 +64,11 @@ jobs:
           FRDP_BUILD_DIR=/opt/freerdp-build FRDP_BUILD_JOBS=2 /src/scripts/test.sh
           SH
           rc=0
-          docker run --rm --init --network none -v "$root/full.sh:/tmp/full.sh:ro" --entrypoint bash frdpd-full:capture /tmp/full.sh >"$root/full-init.log" 2>&1 || rc=$?
+          docker run --rm --init --network none -v "$root/full.sh:/root/frdp-full.sh:ro" --entrypoint bash frdpd-full:capture /root/frdp-full.sh >"$root/full-init.log" 2>&1 || rc=$?
           echo "full_init=$rc" >"$root/status.txt"
       - name: Repeat all tests under actual systemd PID 1
         if: always()
+        timeout-minutes: 6
         run: |
           set -uo pipefail
           root="$RUNNER_TEMP/full-private"
@@ -74,16 +77,15 @@ jobs:
           printf 'FROM frdpd-full:capture\nRUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends systemd systemd-sysv libpam-systemd dbus dbus-user-session && apt-get clean\n' >"$root/Systemd.Dockerfile"
           docker build -t frdpd-full:systemd -f "$root/Systemd.Dockerfile" "$root" >"$root/systemd-build.log" 2>&1 || rc=$?
           if [ "$rc" -eq 0 ]; then
-            docker run -d --name full-systemd --privileged --cgroupns=private --network none --tmpfs /run --tmpfs /run/lock --tmpfs /tmp:exec,mode=1777 --entrypoint /sbin/init frdpd-full:systemd >"$root/systemd-start.log" 2>&1 || rc=$?
+            docker run -d --name full-systemd --privileged --cgroupns=private --network none --env container=docker --tmpfs /run --tmpfs /run/lock --tmpfs /tmp:exec,mode=1777 -v "$root/full.sh:/root/frdp-full.sh:ro" --entrypoint /sbin/init frdpd-full:systemd >"$root/systemd-start.log" 2>&1 || rc=$?
             if [ "$rc" -eq 0 ]; then
               ready=0
-              for i in $(seq 1 30); do
+              for i in $(seq 1 45); do
                 if docker exec full-systemd systemctl is-system-running 2>/dev/null | grep -Eq 'running|degraded'; then ready=1; break; fi
                 sleep 1
               done
               if [ "$ready" -eq 1 ]; then
-                docker cp "$root/full.sh" full-systemd:/tmp/full.sh
-                docker exec full-systemd bash /tmp/full.sh >"$root/full-systemd.log" 2>&1 || rc=$?
+                docker exec full-systemd bash -c 'test "$(cat /proc/1/comm)" = systemd && test -r /root/frdp-full.sh && bash /root/frdp-full.sh' >"$root/full-systemd.log" 2>&1 || rc=$?
               else rc=125; fi
               docker exec full-systemd journalctl --no-pager -n 350 >"$root/journal.log" 2>&1 || true
             fi
