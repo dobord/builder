@@ -18,6 +18,7 @@ on:
       - secure_release/cef_unwind_backtrace.py
       - secure_release/cef_unwind_backtrace.h
       - tests/test_cef_unwind_backtrace.py
+      - tests/test_cef_resume_cache_policy.py
       - tests/fixtures/cef-backtrace/**
       - tests/test_cef_gtk_loader.py
       - tests/test_cef_gtk_codecs.py
@@ -71,12 +72,22 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-14 g++-14 autoconf autoconf-archive automake libtool pkg-config ninja-build gperf flex bison nasm gettext texinfo libltdl-dev xvfb xauth fonts-dejavu-core ccache
           df -h /
+      - name: Verify checkpoint-aware package cache policy
+        run: python -m unittest discover -s tests -p test_cef_resume_cache_policy.py -v
       - name: Restore reviewed completed-package caches by exact artifact digest
         env:
           GH_TOKEN: ${{ secrets.SOURCE_READ_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
+          # A resumed workspace already contains the complete frozen prefix.
+          # Validate the selector shape here; the worker still authenticates the
+          # producer, transport, full identity and prefix before using anything.
+          mode="$(python -c 'from pathlib import Path; from secure_release.cef_strict_iteration import qualification_lock; print("resume" if qualification_lock(Path.cwd())["checkpoint"] is not None else "fresh")')"
+          if [ "$mode" = "resume" ]; then
+            echo "CEF_PACKAGE_CACHES_UNUSED_FOR_CHECKPOINT_RESUME"
+            exit 0
+          fi
           mkdir -p "$RUNNER_TEMP/cef-strict-cache"
           fetch_cache() {
             id="$1"; sha="$2"; name="$3"
