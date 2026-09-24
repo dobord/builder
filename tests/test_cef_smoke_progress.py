@@ -111,20 +111,26 @@ class SmokeProgressTests(unittest.TestCase):
                 return {'expat_backend': 'frozen-static-expat',
                         'unwind_backend': 'chromium-libunwind',
                         'verified_files': 2}
+            def install_backtrace(*args):
+                calls.append('backtrace-install')
+                return {'backend': 'in-tree-unwind-backtrace', 'verified_files': 3}
             def install_x11(*args): calls.append('x11-install'); return {'platform_archives': 2, 'verified_files': 3}
             with patch.object(progress, 'install', side_effect=install), \
                     patch.object(runtime.cef_native_link_static, 'install', side_effect=install_native), \
+                    patch.object(runtime.cef_unwind_backtrace, 'install', side_effect=install_backtrace), \
                     patch.object(runtime.cef_x11_static, 'install', side_effect=install_x11):
                 with self.assertRaisesRegex(RuntimeError, 'original-error'):
                     with runtime.observed_runtime(module, root, temp):
                         module.run(['unrelated', 'command'])
                         self.assertEqual(calls, ['base-run'])
                         module.run(command)
-                        self.assertEqual(calls, ['base-run', 'native-install', 'x11-install', 'base-run', 'install'])
+                        self.assertEqual(calls, ['base-run', 'native-install', 'backtrace-install', 'x11-install', 'base-run', 'install'])
                         value = module.classify_engine_runtime(temp / 'cef-strict-engine-logs')
                         self.assertEqual(value['runtime_failure_category'], 'smoke-timeout')
                         self.assertEqual(value['runtime_expat_backend'], 'frozen-static-expat')
                         self.assertEqual(value['runtime_unwind_backend'], 'chromium-libunwind')
+                        self.assertEqual(value['runtime_backtrace_backend'], 'in-tree-unwind-backtrace')
+                        self.assertEqual(value['runtime_backtrace_source_files_verified'], 3)
                         self.assertEqual(value['runtime_native_link_source_files_verified'], 2)
                         self.assertNotIn('ready', value)
                         raise RuntimeError('original-error')
@@ -149,10 +155,12 @@ class SmokeProgressTests(unittest.TestCase):
                                'verified_files': 2}
             with patch.object(progress, 'install') as install, \
                     patch.object(runtime.cef_native_link_static, 'install', return_value=native_identity) as native_install, \
+                    patch.object(runtime.cef_unwind_backtrace, 'install', return_value={'backend': 'in-tree-unwind-backtrace', 'verified_files': 3}) as backtrace_install, \
                     patch.object(runtime.cef_x11_static, 'install', return_value={'platform_archives': 2, 'verified_files': 3}) as x11_install:
                 with runtime.observed_runtime(module, root, root): module.run(command, check=False)
                 native_install.assert_called_once()
                 x11_install.assert_called_once()
+                backtrace_install.assert_called_once()
                 install.assert_not_called()
 
 

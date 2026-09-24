@@ -15,6 +15,10 @@ on:
       - secure_release/cef_strict_iteration_runtime.py
       - secure_release/cef_x11_static.py
       - secure_release/cef_native_link_static.py
+      - secure_release/cef_unwind_backtrace.py
+      - secure_release/cef_unwind_backtrace.h
+      - tests/test_cef_unwind_backtrace.py
+      - tests/fixtures/cef-backtrace/**
       - tests/test_cef_gtk_loader.py
       - tests/test_cef_gtk_codecs.py
       - tests/test_cef_x11_static.py
@@ -88,7 +92,7 @@ jobs:
           fetch_cache 10513582038 13070e63a1a5ccdaef82d483f4296ba31fa7ef1f237cd17729cf81fddf3d118f cups
           fetch_cache 10512319512 c837f50873e149ac8c1d823ab906fbb36217616c3198e029bc6ee647e0222b8e gbm
       - name: Validate strict iteration worker syntax
-        run: python -m py_compile secure_release/cef_strict_iteration.py secure_release/cef_gtk_loader.py secure_release/cef_nss_isolation.py secure_release/cef_gtk_codecs.py secure_release/cef_x11_static.py secure_release/cef_native_link_static.py secure_release/cef_strict_iteration_runtime.py
+        run: python -m py_compile secure_release/cef_strict_iteration.py secure_release/cef_gtk_loader.py secure_release/cef_nss_isolation.py secure_release/cef_gtk_codecs.py secure_release/cef_x11_static.py secure_release/cef_native_link_static.py secure_release/cef_strict_iteration_runtime.py secure_release/cef_unwind_backtrace.py
       - name: Compile static GTK loader regression before engine restore
         run: python -m unittest discover -s tests -p test_cef_gtk_loader.py -v
       - name: Verify isolated static image-codec closure before engine restore
@@ -101,6 +105,17 @@ jobs:
           python -m secure_release.cef_native_link_static --check-recipe private-vcpkg/.full-cef/vcpkg/ports/cef-static/source_build.py
       - name: Verify composed CEF desktop prerequisites before engine restore
         run: python -m unittest discover -s tests -p test_cef_desktop_prerequisites.py -v
+      - name: Verify direct static backtrace and pinned source before engine restore
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m unittest discover -s tests -p test_cef_unwind_backtrace.py -v
+          source="$RUNNER_TEMP/cef-backtrace-public-source"
+          for path in base/BUILD.gn base/debug/stack_trace_posix.cc; do
+            mkdir -p "$source/$(dirname "$path")"
+            curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o "$source/$path" "https://raw.githubusercontent.com/chromium/chromium/79460ebecaa5625e57a5fb679a735659e73dc687/$path"
+          done
+          python -m secure_release.cef_unwind_backtrace --check-source "$source"
       - name: Verify smoke progress instrumentation before engine restore
         run: |
           python -m unittest discover -s tests -p test_cef_smoke_progress.py -v

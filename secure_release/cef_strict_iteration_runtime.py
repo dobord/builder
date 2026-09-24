@@ -11,6 +11,7 @@ from contextlib import contextmanager
 import os
 from pathlib import Path
 
+from . import cef_unwind_backtrace
 from . import cef_elf_evidence, cef_native_link_static, cef_smoke_progress, cef_x11_static
 from . import cef_strict_iteration as worker
 
@@ -27,6 +28,7 @@ def observed_runtime(module, workspace: Path, temp: Path):
     native_link_identity = {}
     x11_identity = {}
     elf_identity = {}
+    backtrace_identity = {}
 
     def run(command, **kwargs):
         args = list(map(str, command))
@@ -55,6 +57,7 @@ def observed_runtime(module, workspace: Path, temp: Path):
             native_link_identity.update(cef_native_link_static.install(
                 recipe / "source_build.py", source
             ))
+            backtrace_identity.update(cef_unwind_backtrace.install(source))
             x11_identity.update(cef_x11_static.install(
                 source,
                 temp / "cef-strict-engine-work/platform-inputs.json",
@@ -97,6 +100,9 @@ def observed_runtime(module, workspace: Path, temp: Path):
     def classify(actual_logs):
         value = original_classify(actual_logs)
         value.update(elf_identity)
+        if backtrace_identity:
+            value["runtime_backtrace_backend"] = backtrace_identity["backend"]
+            value["runtime_backtrace_source_files_verified"] = backtrace_identity["verified_files"]
         if native_link_identity:
             value["runtime_expat_backend"] = native_link_identity["expat_backend"]
             value["runtime_unwind_backend"] = native_link_identity["unwind_backend"]
