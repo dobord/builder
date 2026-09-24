@@ -1,0 +1,138 @@
+name: PR103 native baseline replay
+on:
+  push:
+    branches: [investigate/frdpd-103-client-matrix]
+    paths: ['.github/workflows/frdpd-103-client-replay.yml']
+permissions:
+  contents: read
+  actions: read
+env:
+  SOURCE_RUN: '36019579949'
+  SOURCE_SHA: 3637007a36881a460693be50d66079291c1f4d33
+  CANDIDATE_SHA: 3637007a36881a460693be50d66079291c1f4d33
+  CANDIDATE_TREE: ffa3bd512e739cc396ec56431f0759e501d9c359
+  ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            backend: xorg-native
+            width: 1024
+            height: 768
+          - os: windows-2022
+            backend: xorg-native
+            width: 2560
+            height: 1440
+          - os: windows-2025
+            backend: xorg-native
+            width: 2560
+            height: 1440
+          - os: windows-2025
+            backend: xorg-dummy
+            width: 2560
+            height: 1440
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    env:
+      MATRIX_OS: ${{ matrix.os }}
+      MATRIX_BACKEND: ${{ matrix.backend }}
+      MATRIX_WIDTH: ${{ matrix.width }}
+      MATRIX_HEIGHT: ${{ matrix.height }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.13'
+      - run: |
+          python -m pip install --require-hashes --only-binary=:all: -r requirements.lock
+      - name: Handle only fixture first-use consent
+        shell: pwsh
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File investigations/frdpd-103/native-preflight.ps1
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: matrix-native-input-${{ env.SOURCE_RUN }}
+          run-id: ${{ env.SOURCE_RUN }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/native-cipher
+      - name: Authenticate exact runtime
+        env:
+          BUILDER_INPUT_PRIVATE_KEY: ${{ secrets.BUILDER_INPUT_PRIVATE_KEY }}
+        shell: pwsh
+        run: |
+          @'
+          import os
+          from pathlib import Path
+          from secure_release.crypto import decrypt_file
+          root=Path(os.environ['RUNNER_TEMP']);(root/'native-private').mkdir(exist_ok=True)
+          decrypt_file(root/'native-cipher/native.enc',root/'native-private/native-rootfs.tar.gz',os.environ['BUILDER_INPUT_PRIVATE_KEY'],{'purpose':'frdpd-103-native-input','run_id':os.environ['SOURCE_RUN'],'source_sha':os.environ['SOURCE_SHA']})
+          '@ | python -
+      - name: Replay signed native RemoteApp with recorded environment
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $e=@{os=(Get-CimInstance Win32_OperatingSystem | Select Caption,Version,BuildNumber);display=(Get-CimInstance Win32_VideoController | Select Name,DriverVersion);session=(Get-Process -Id $PID).SessionId;desktop=(Get-Process dwm,explorer -ErrorAction SilentlyContinue | Select ProcessName,Id,SessionId)}
+          $e | ConvertTo-Json -Depth 5 | Set-Content "$env:RUNNER_TEMP/native-private/graphics-environment.json"
+          @'
+          import hashlib,os,subprocess
+          from pathlib import Path
+          p=Path('investigations/frdpd-103/native.py')
+          blob=subprocess.check_output(['git','show','HEAD:'+p.as_posix()])
+          assert hashlib.sha1(b'blob '+str(len(blob)).encode()+b'\0'+blob).hexdigest()=='aaccff9fc516437479ba9cfb53e8440d065e2eb6'
+          assert p.read_text(encoding='utf-8')==blob.decode('utf-8'), 'Unexpected checkout content, not a line-ending conversion'
+          s=blob.decode('utf-8')
+          pairs=[
+              ('time.monotonic()-stable_since>=10','time.monotonic()-stable_since>=30'),
+              ("REPORT.get('stable_window_seconds',0)>=10","REPORT.get('stable_window_seconds',0)>=30"),
+              ('FRDP_DISPLAY_BACKEND=xorg-dummy\\n','FRDP_DISPLAY_BACKEND='+os.environ['MATRIX_BACKEND']+'\\nWLOG_FILTER=com.freerdp.server.frdpd:DEBUG,com.freerdp.channels.rdpgfx.server:DEBUG\\n'),
+              ('full address:s:localhost:3390\\n','full address:s:localhost:3390\\ndesktopwidth:i:'+os.environ['MATRIX_WIDTH']+'\\ndesktopheight:i:'+os.environ['MATRIX_HEIGHT']+'\\nsession bpp:i:32\\n')]
+          for old,new in pairs:
+              assert s.count(old)==1,'Native fixture hook changed'
+              s=s.replace(old,new,1)
+          s=s.replace("REPORT={'native_pass':False,","REPORT={'matrix':{k:os.environ[k] for k in ('MATRIX_OS','MATRIX_BACKEND','MATRIX_WIDTH','MATRIX_HEIGHT')},'native_pass':False,",1)
+          p.write_text(s,encoding='utf-8',newline='\n')
+          compile(s,str(p),'exec')
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
+          python investigations/frdpd-103/native.py
+          Set-Content "$env:RUNNER_TEMP/native-exit" $LASTEXITCODE
+          exit 0
+      - name: Encrypt native results
+        if: always()
+        shell: pwsh
+        run: |
+          @'
+          import os,tarfile
+          from pathlib import Path
+          from secure_release.crypto import encrypt_file
+          root=Path(os.environ['RUNNER_TEMP']);archive=root/'native-diagnostics.tar.gz'
+          with tarfile.open(archive,'w:gz') as out:
+              for p in (root/'native-private').glob('*'):
+                  if p.is_file() and p.suffix in ('.log','.json','.png','.txt'):out.add(p,arcname=p.name)
+          ctx={'purpose':'frdpd-103-client-matrix','run_id':os.environ['GITHUB_RUN_ID'],'source_sha':os.environ['SOURCE_SHA'],'tree_sha':os.environ['CANDIDATE_TREE'],'input_run':os.environ['SOURCE_RUN'],'os':os.environ['MATRIX_OS'],'backend':os.environ['MATRIX_BACKEND'],'width':os.environ['MATRIX_WIDTH']}
+          encrypt_file(archive,root/'native.enc',os.environ['ARTIFACT_ENCRYPTION_PUBLIC_KEY'],ctx)
+          archive.unlink()
+          '@ | python -
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: encrypted-replay-${{ matrix.os }}-${{ matrix.backend }}-${{ matrix.width }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/native.enc
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - name: Cleanup and truthful result
+        if: always()
+        shell: pwsh
+        run: |
+          Get-Process qemu-system-x86_64 -ErrorAction SilentlyContinue | Stop-Process -Force
+          $rc=1
+          if (Test-Path "$env:RUNNER_TEMP/native-exit") {$rc=[int](Get-Content "$env:RUNNER_TEMP/native-exit")}
+          Remove-Item -Recurse -Force "$env:RUNNER_TEMP/native-private","$env:RUNNER_TEMP/native-cipher" -ErrorAction SilentlyContinue
+          exit $rc
