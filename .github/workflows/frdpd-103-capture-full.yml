@@ -1,0 +1,126 @@
+name: Complete capture candidate regression
+on:
+  push:
+    branches: [investigate/frdpd-103-mstsc-20260924]
+    paths: ['.github/workflows/frdpd-103-capture-full.yml']
+permissions:
+  contents: read
+env:
+  CANDIDATE_SHA: d2dc6b6d7b0d5e7ded35f5ca24d760f5d33a9596
+  CANDIDATE_TREE: cfbea18ef02d78b68a44f2d69d6cd8225e4eb133
+  ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
+jobs:
+  full:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.13'
+      - run: |
+          python -m pip install --require-hashes --only-binary=:all: -r requirements.lock
+          mkdir -m 700 "$RUNNER_TEMP/full-private"
+      - name: Fetch fixed private source without executing it
+        env:
+          SOURCE_READ_TOKEN: ${{ secrets.SOURCE_READ_TOKEN }}
+        run: |
+          python - <<'PY'
+          import os,subprocess,json
+          from pathlib import Path
+          root=Path(os.environ['RUNNER_TEMP'])/'full-private';source=root/'source';ask=root/'askpass'
+          ask.write_text('#!/bin/sh\ncase "$1" in *Username*) echo x-access-token ;; *) printf "%s\\n" "$SOURCE_READ_TOKEN" ;; esac\n');ask.chmod(0o700)
+          try:
+              env=dict(os.environ,GIT_ASKPASS=str(ask),GIT_TERMINAL_PROMPT='0')
+              with (root/'fetch.log').open('w') as log:
+                  def git(*args):subprocess.run(['git',*args],env=env,stdout=log,stderr=log,timeout=600,check=True)
+                  git('init',str(source));git('-C',str(source),'remote','add','origin','https://github.com/dobord/frdpd.git')
+                  git('-C',str(source),'fetch','--depth=1','origin',os.environ['CANDIDATE_SHA']);git('-C',str(source),'checkout','--detach','FETCH_HEAD')
+                  tree=subprocess.check_output(['git','-C',str(source),'rev-parse','HEAD^{tree}'],text=True).strip();assert tree==os.environ['CANDIDATE_TREE']
+                  git('-C',str(source),'-c','url.https://github.com/.insteadOf=git@github.com:','submodule','update','--init','--recursive','--depth=1')
+                  (root/'provenance.json').write_text(json.dumps({'commit':os.environ['CANDIDATE_SHA'],'tree':tree,'source_edits':False}))
+          finally:ask.unlink(missing_ok=True)
+          PY
+      - name: Build unchanged source inside Docker
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/full-private"
+          docker build --build-arg FRDP_BUILD_COMPONENT_TESTS=ON -f "$root/source/server/frdp/test/e2e/Dockerfile" -t frdpd-full:capture "$root/source" >"$root/build.log" 2>&1
+          touch "$root/image-ready"
+      - name: Run all wrapper tests with a reaping init
+        run: |
+          root="$RUNNER_TEMP/full-private"
+          cat >"$root/full.sh" <<'SH'
+          #!/bin/bash
+          set -uo pipefail
+          sed -i -E 's/^(passwd|group|shadow):.*/\1: files/' /etc/nsswitch.conf
+          for service in frdpd frdpd-password; do
+            printf '%s\n' 'auth required pam_deny.so' 'account required pam_deny.so' 'session required pam_deny.so' 'password required pam_deny.so' >"/etc/pam.d/$service"
+          done
+          FRDP_BUILD_DIR=/opt/freerdp-build FRDP_BUILD_JOBS=2 /src/scripts/test.sh
+          SH
+          rc=0
+          docker run --rm --init --network none -v "$root/full.sh:/tmp/full.sh:ro" --entrypoint bash frdpd-full:capture /tmp/full.sh >"$root/full-init.log" 2>&1 || rc=$?
+          echo "full_init=$rc" >"$root/status.txt"
+      - name: Repeat all tests under actual systemd PID 1
+        if: always()
+        run: |
+          set -uo pipefail
+          root="$RUNNER_TEMP/full-private"
+          if [ ! -f "$root/image-ready" ]; then exit 0; fi
+          rc=0
+          printf 'FROM frdpd-full:capture\nRUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends systemd systemd-sysv libpam-systemd dbus dbus-user-session && apt-get clean\n' >"$root/Systemd.Dockerfile"
+          docker build -t frdpd-full:systemd -f "$root/Systemd.Dockerfile" "$root" >"$root/systemd-build.log" 2>&1 || rc=$?
+          if [ "$rc" -eq 0 ]; then
+            docker run -d --name full-systemd --privileged --cgroupns=private --network none --tmpfs /run --tmpfs /run/lock --tmpfs /tmp:exec,mode=1777 --entrypoint /sbin/init frdpd-full:systemd >"$root/systemd-start.log" 2>&1 || rc=$?
+            if [ "$rc" -eq 0 ]; then
+              ready=0
+              for i in $(seq 1 30); do
+                if docker exec full-systemd systemctl is-system-running 2>/dev/null | grep -Eq 'running|degraded'; then ready=1; break; fi
+                sleep 1
+              done
+              if [ "$ready" -eq 1 ]; then
+                docker cp "$root/full.sh" full-systemd:/tmp/full.sh
+                docker exec full-systemd bash /tmp/full.sh >"$root/full-systemd.log" 2>&1 || rc=$?
+              else rc=125; fi
+              docker exec full-systemd journalctl --no-pager -n 350 >"$root/journal.log" 2>&1 || true
+            fi
+          fi
+          echo "full_systemd=$rc" >>"$root/status.txt"
+          docker rm -f full-systemd >/dev/null 2>&1 || true
+      - name: Encrypt complete evidence without exposing private test output
+        if: always()
+        run: |
+          python - <<'PY'
+          import os,tarfile
+          from pathlib import Path
+          from secure_release.crypto import encrypt_file
+          root=Path(os.environ['RUNNER_TEMP']);archive=root/'full.tar.gz'
+          with tarfile.open(archive,'w:gz') as out:
+              for p in (root/'full-private').glob('*'):
+                  if p.name not in ('source','askpass'):out.add(p,arcname=p.name)
+          encrypt_file(archive,root/'full.enc',os.environ['ARTIFACT_ENCRYPTION_PUBLIC_KEY'],{'purpose':'frdpd-103-complete-capture','run_id':os.environ['GITHUB_RUN_ID'],'source_sha':os.environ['CANDIDATE_SHA'],'tree_sha':os.environ['CANDIDATE_TREE']})
+          archive.unlink()
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: encrypted-complete-capture-${{ github.run_id }}
+          path: ${{ runner.temp }}/full.enc
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+      - name: Report the actual full-systemd result and clean
+        if: always()
+        run: |
+          python - <<'PY'
+          import os,shutil
+          from pathlib import Path
+          root=Path(os.environ['RUNNER_TEMP']);p=root/'full-private'/'status.txt'
+          statuses=dict(line.split('=',1) for line in p.read_text().splitlines()) if p.exists() else {}
+          passed=statuses.get('full_systemd')=='0'
+          shutil.rmtree(root/'full-private',ignore_errors=True);(root/'full.enc').unlink(missing_ok=True)
+          raise SystemExit(0 if passed else 1)
+          PY
