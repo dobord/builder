@@ -1,0 +1,59 @@
+name: Encrypted RemoteApp source snapshot
+on:
+  push:
+    branches: [investigate/frdpd-103-mstsc-20260924]
+    paths: ['.github/workflows/frdpd-103-snapshot.yml']
+permissions:
+  contents: read
+jobs:
+  snapshot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.13'
+      - name: Install pinned cryptography
+        run: |
+          python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r requirements.lock
+      - name: Fetch fixed source without running it
+        env:
+          SOURCE_READ_TOKEN: ${{ secrets.SOURCE_READ_TOKEN }}
+        run: |
+          umask 077
+          python investigations/frdpd-103/prepare.py
+      - name: Encrypt snapshot without tokens or Git credentials
+        run: |
+          umask 077
+          python - <<'PY'
+          import os,tarfile
+          from pathlib import Path
+          from secure_release.crypto import encrypt_file
+          root=Path(os.environ['RUNNER_TEMP']); source=root/'frdpd-private'/'source'
+          archive=root/'snapshot.tar.gz'
+          def keep(info):
+              if '.git' in Path(info.name).parts: return None
+              return info
+          with tarfile.open(archive,'w:gz') as out:
+              out.add(source,arcname='source',filter=keep)
+              out.add(Path.cwd(),arcname='builder',filter=keep)
+              out.add(root/'frdpd-private'/'preparation-status.json',arcname='provenance.json')
+          encrypt_file(archive,root/'snapshot.enc',os.environ['ARTIFACT_ENCRYPTION_PUBLIC_KEY'],{'purpose':'frdpd-103-source-review','run_id':os.environ['GITHUB_RUN_ID'],'source_sha':'642e9f0e372dfe1e3b74bd735878318988e58e91'})
+          archive.unlink()
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: encrypted-source-review-${{ github.run_id }}
+          path: ${{ runner.temp }}/snapshot.enc
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - name: Remove plaintext
+        if: always()
+        run: |
+          rm -rf "$RUNNER_TEMP/frdpd-private" "$RUNNER_TEMP/snapshot.tar.gz" "$RUNNER_TEMP/snapshot.enc"
