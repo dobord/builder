@@ -31,11 +31,12 @@ jobs:
         run: |
           umask 077
           python - <<'PY'
-          import os,tarfile
+          import os,tarfile,json
           from pathlib import Path
           from secure_release.crypto import encrypt_file
           root=Path(os.environ['RUNNER_TEMP']); source=root/'frdpd-private'/'source'
           archive=root/'snapshot.tar.gz'
+          provenance=json.loads((root/'frdpd-private'/'preparation-status.json').read_text())
           def keep(info):
               if '.git' in Path(info.name).parts: return None
               return info
@@ -43,7 +44,7 @@ jobs:
               out.add(source,arcname='source',filter=keep)
               out.add(Path.cwd(),arcname='builder',filter=keep)
               out.add(root/'frdpd-private'/'preparation-status.json',arcname='provenance.json')
-          encrypt_file(archive,root/'snapshot.enc',os.environ['ARTIFACT_ENCRYPTION_PUBLIC_KEY'],{'purpose':'frdpd-103-source-review','run_id':os.environ['GITHUB_RUN_ID'],'source_sha':'642e9f0e372dfe1e3b74bd735878318988e58e91'})
+          encrypt_file(archive,root/'snapshot.enc',os.environ['ARTIFACT_ENCRYPTION_PUBLIC_KEY'],{'purpose':'frdpd-103-source-review','run_id':os.environ['GITHUB_RUN_ID'],'source_sha':provenance['base_sha'],'tree_sha':provenance['tree_sha']})
           archive.unlink()
           PY
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
