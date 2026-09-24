@@ -43,9 +43,19 @@ jobs:
           compression-level: 0
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
         with:
-          python-version: '3.12'
+          python-version: '3.11'
       - name: Install hash-pinned encryption libraries
-        run: python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r requirements.lock
+        run: |
+          python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r requirements.lock
+          python -m pip download --disable-pip-version-check --require-hashes --only-binary=:all: -r requirements.lock -d "${{ runner.temp }}/frdpd-wheels"
+          cp secure_release/crypto.py "${{ runner.temp }}/frdpd-wheels/crypto.py"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: frdpd-103-public-decryption-dependencies-${{ github.run_id }}
+          path: ${{ runner.temp }}/frdpd-wheels/*
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
       - name: Build and run focused tests only inside Docker
         shell: bash
         run: |
@@ -99,5 +109,5 @@ jobs:
         run: |
           rc=1
           if [ -f "$RUNNER_TEMP/frdpd-private/exit-code" ]; then rc=$(cat "$RUNNER_TEMP/frdpd-private/exit-code"); fi
-          rm -rf "$RUNNER_TEMP/frdpd-private" "$RUNNER_TEMP/frdpd-encrypted" "$RUNNER_TEMP/frdpd-public"
+          rm -rf "$RUNNER_TEMP/frdpd-private" "$RUNNER_TEMP/frdpd-encrypted" "$RUNNER_TEMP/frdpd-public" "$RUNNER_TEMP/frdpd-wheels"
           exit "$rc"
