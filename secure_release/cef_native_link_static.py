@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 
@@ -19,6 +21,7 @@ CHROMIUM = "79460ebecaa5625e57a5fb679a735659e73dc687"
 RECIPE_BLOB = "b23ac3604fb2021f2fd5f91f311f5b233605185d"
 EXPAT_BLOB = "9ad36d41f159d817fa932e632f23205709265e37"
 MARKER = "CEF_STATIC_NATIVE_LINK_V1"
+CHECKPOINT_POLICY_BLOB = "8e04c160c33a808602aa3cdb727fc2fb8bedad29"
 
 _RECIPE_OLD = """        result['enable_remoting'] = False
     return result
@@ -146,6 +149,88 @@ def _stage(path: Path, data: bytes) -> Path:
     except BaseException:
         temporary.unlink(missing_ok=True)
         raise
+
+
+
+def prepare_restore(recipe_file: Path, package: Path) -> dict:
+    """Recreate one of two reviewed recipe states, never rewrite an identity.
+
+    Call only AFTER the existing transport has authenticated the checkpoint.
+    linux_checkpoint.ci_identity hashes source_build.py along with the complete
+    recipe tree. A native-link producer therefore cannot be restored using a
+    pristine recipe checkout. Match that *recorded* hash against the original
+    pin or our exact native-link transformation, then let the unchanged driver
+    verify the complete identity, archive parts and workspace before restoring.
+    """
+    recipe_file = recipe_file.absolute()
+    repo = recipe_file.parents[3].resolve(strict=True)
+    if _head(repo) != CEF_RECIPE:
+        raise ValueError("Restore recipe revision changed")
+    recipe_file = _regular(recipe_file, repo)
+    raw = recipe_file.read_bytes()
+    patched = reviewed_output(raw, RECIPE_BLOB, patch_recipe, unpatch_recipe, "CEF recipe")
+    original = unpatch_recipe(patched.decode("utf-8")).encode("utf-8")
+
+    if package.is_symlink() or not package.is_dir():
+        raise ValueError("Redirected or missing checkpoint recipe package")
+    record = _regular(package / "checkpoint.json", package)
+    if record.stat().st_size > 64 * 1024**2:
+        raise ValueError("Oversized checkpoint recipe manifest")
+    value = json.loads(record.read_bytes())
+    if (not isinstance(value, dict) or value.get("schema") != 3
+            or value.get("kind") != "build-checkpoint-not-sdk"
+            or value.get("engine_runtime_verified") is not False
+            or not isinstance(value.get("identity"), dict)):
+        raise ValueError("Invalid checkpoint recipe manifest")
+    recorded = value["identity"].get("recipe")
+    if not isinstance(recorded, str) or re.fullmatch(r"[0-9a-f]{64}", recorded) is None:
+        raise ValueError("Invalid checkpoint recipe fingerprint")
+
+    # This layout is exactly the pinned ci_identity algorithm. Bind its source
+    # before reproducing it, so an upstream algorithm change cannot be ignored.
+    policy = _regular(repo / "vcpkg/static/linux_checkpoint.py", repo)
+    if git_blob(policy.read_bytes()) != CHECKPOINT_POLICY_BLOB:
+        raise ValueError("Checkpoint recipe hashing policy changed")
+    paths = list((repo / "vcpkg/ports/cef-static").rglob("*")) + [
+        repo / "vcpkg/static/ci.py", repo / "vcpkg/static/checkpoint.py",
+        repo / "vcpkg/static/windows_slice.py", policy,
+        repo / "vcpkg/static/linux_slice.py",
+        repo / "vcpkg/static/triplets/x64-linux.cmake",
+    ]
+    original_hash, patched_hash = hashlib.sha256(), hashlib.sha256()
+    recipe_seen = False
+    for path in sorted(paths):
+        # Refuse redirected inputs rather than hashing their destinations.
+        if path.is_symlink():
+            raise ValueError("Redirected checkpoint recipe input")
+        if not path.is_file() or "__pycache__" in path.parts or path.suffix == ".pyc":
+            continue
+        _regular(path, repo)
+        name = path.relative_to(repo).as_posix().encode() + b"\0"
+        is_recipe = path.resolve(strict=True) == recipe_file.resolve(strict=True)
+        data = path.read_bytes()
+        recipe_seen |= is_recipe
+        original_hash.update(name)
+        original_hash.update(original if is_recipe else data)
+        patched_hash.update(name)
+        patched_hash.update(patched if is_recipe else data)
+    if not recipe_seen:
+        raise ValueError("Restore recipe is outside the checkpoint hashing layout")
+
+    if recorded == original_hash.hexdigest():
+        selected, profile = original, "pinned-recipe"
+    elif recorded == patched_hash.hexdigest():
+        selected, profile = patched, "native-link-v1"
+    else:
+        raise ValueError("Checkpoint requires an unreviewed recipe state")
+    if raw != selected:
+        temporary = _stage(recipe_file, selected)
+        try:
+            os.replace(temporary, recipe_file)
+        finally:
+            temporary.unlink(missing_ok=True)
+    return {"schema": 1, "profile": profile, "changed": raw != selected,
+            "recorded_recipe_matched": True, "runtime_verified": False}
 
 
 def install(recipe_file: Path, source: Path) -> dict:

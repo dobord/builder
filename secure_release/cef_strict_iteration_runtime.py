@@ -30,6 +30,20 @@ def observed_runtime(module, workspace: Path, temp: Path):
 
     def run(command, **kwargs):
         args = list(map(str, command))
+        is_restore = (len(args) >= 3
+                      and args[1] == str(recipe.parents[1] / "integration/driver.py")
+                      and args[2] == "restore")
+        if is_restore:
+            # The worker has already authenticated/unsealed this exact package.
+            # Restore its actual recipe state before the unchanged driver checks
+            # the full identity. Never edit the manifest or ignore a mismatch.
+            package = temp / "cef-strict-restored-checkpoint"
+            if args.count("--checkpoint") != 1:
+                raise ValueError("Unexpected native restore package")
+            index = args.index("--checkpoint")
+            if index + 1 >= len(args) or args[index + 1] != str(package):
+                raise ValueError("Unexpected native restore package")
+            cef_native_link_static.prepare_restore(recipe / "source_build.py", package)
         is_check = (len(args) >= 3 and args[1] == str(recipe / "source_build.py")
                     and args[2] == "check")
         if is_check:
