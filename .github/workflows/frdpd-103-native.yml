@@ -2,17 +2,19 @@ name: Isolated native mstsc RemoteApp regression
 on:
   push:
     branches: [investigate/frdpd-103-mstsc-20260924]
-    paths: ['.github/workflows/frdpd-103-native.yml', 'investigations/frdpd-103/native.py']
+    paths: ['.github/workflows/frdpd-103-native.yml', 'investigations/frdpd-103/native.py', 'investigations/frdpd-103/native-consent.ps1']
   workflow_dispatch:
 permissions:
   contents: read
   actions: read
 concurrency:
   group: frdpd-103-native-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 env:
-  SOURCE_RUN: '35965044177'
+  SOURCE_RUN: '35974471507'
   SOURCE_SHA: 642e9f0e372dfe1e3b74bd735878318988e58e91
+  CANDIDATE_SHA: 0e665b8dda40cc8a3fb597e94013495fd66ec0c3
+  CANDIDATE_TREE: 3ed8ceb8d749b858818fe60e1da8964950699717
   ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
 jobs:
   native:
@@ -71,7 +73,7 @@ jobs:
                   for path in sorted(private.iterdir()):
                       if path.is_file() and path.suffix in ('.log','.json','.png','.txt'):
                           out.add(path,arcname=path.name)
-          encrypt_file(archive,root/'native-diagnostics.enc',os.environ['ARTIFACT_ENCRYPTION_PUBLIC_KEY'],{'purpose':'frdpd-103-native','run_id':os.environ['GITHUB_RUN_ID'],'source_sha':os.environ['SOURCE_SHA']})
+          encrypt_file(archive,root/'native-diagnostics.enc',os.environ['ARTIFACT_ENCRYPTION_PUBLIC_KEY'],{'purpose':'frdpd-103-native','run_id':os.environ['GITHUB_RUN_ID'],'source_sha':os.environ['CANDIDATE_SHA'],'tree_sha':os.environ['CANDIDATE_TREE'],'input_run':os.environ['SOURCE_RUN']})
           archive.unlink()
           '@ | python -
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
