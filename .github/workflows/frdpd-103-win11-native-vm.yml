@@ -46,19 +46,10 @@ jobs:
       - run: |
           python -m pip install --require-hashes --only-binary=:all: -r requirements.lock
           New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/native-private" | Out-Null
-      - name: Install native ARM64 QEMU from signed MSYS2 packages
+      - name: Install native ARM64 VM dependencies from authenticated distributions
         id: msys
-        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884
-        with:
-          msystem: CLANGARM64
-          update: true
-          cache: false
-          install: mingw-w64-clang-aarch64-qemu mingw-w64-clang-aarch64-qemu-image-util
-      - name: Record exact signed VM package versions
-        shell: msys2 {0}
         run: |
-          set -euo pipefail
-          pacman -Q > "$(cygpath -u "$RUNNER_TEMP")/native-private/vm-packages.txt"
+          & ./investigations/frdpd-103/install-arm-vm.ps1
       - name: Verify native PE architecture and VM startup before loading private runtime
         env:
           MSYS2_ROOT: ${{ steps.msys.outputs.msys2-location }}
