@@ -9,6 +9,9 @@ permissions:
 concurrency:
   group: frdpd-103-isolated-${{ github.ref }}
   cancel-in-progress: false
+env:
+  # Public key only. The private counterpart is never sent to CI.
+  ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
 jobs:
   protocol-baseline:
     if: github.ref == 'refs/heads/investigate/frdpd-103-mstsc-20260924'
@@ -21,7 +24,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
         with:
           python-version: '3.13'
-      - name: Install and package public hash-pinned encryption dependencies
+      - name: Install and package public hash-pinned decryption dependencies
         run: |
           python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r requirements.lock
           python -m pip download --disable-pip-version-check --require-hashes --only-binary=:all: -r requirements.lock -d "${{ runner.temp }}/frdpd-wheels"
@@ -35,7 +38,7 @@ jobs:
           if-no-files-found: error
           retention-days: 1
           compression-level: 0
-      - name: Fetch only the authorized fixed source without executing it
+      - name: Fetch only authorized fixed source without executing it
         env:
           SOURCE_READ_TOKEN: ${{ secrets.SOURCE_READ_TOKEN }}
         shell: bash
@@ -43,7 +46,7 @@ jobs:
           set -euo pipefail
           umask 077
           python - <<'PY'
-          import os, subprocess
+          import os, subprocess, json
           from pathlib import Path
           root = Path(os.environ['RUNNER_TEMP']) / 'frdpd-private'
           source = root / 'source'
@@ -51,71 +54,69 @@ jobs:
           askpass.write_text('#!/bin/sh\ncase "$1" in *Username*) echo x-access-token ;; *) printf "%s\\n" "$SOURCE_READ_TOKEN" ;; esac\n')
           askpass.chmod(0o700)
           env = dict(os.environ, GIT_ASKPASS=str(askpass), GIT_TERMINAL_PROMPT='0')
-          code = 0
+          code, stage = 1, 'initialization'
           try:
               with (root / 'fetch.log').open('w') as log:
-                  for cmd in [
-                      ['git','init',str(source)],
-                      ['git','-C',str(source),'remote','add','origin','https://github.com/dobord/frdpd.git'],
-                      ['git','-C',str(source),'fetch','--depth=1','origin','642e9f0e372dfe1e3b74bd735878318988e58e91'],
-                      ['git','-C',str(source),'checkout','--detach','FETCH_HEAD'],
-                      ['git','-C',str(source),'-c','url.https://github.com/.insteadOf=git@github.com:','submodule','update','--init','--recursive','--depth=1']]:
+                  for stage, cmd in [
+                      ('init',['git','init',str(source)]),
+                      ('origin',['git','-C',str(source),'remote','add','origin','https://github.com/dobord/frdpd.git']),
+                      ('fetch',['git','-C',str(source),'fetch','--depth=1','origin','642e9f0e372dfe1e3b74bd735878318988e58e91']),
+                      ('checkout',['git','-C',str(source),'checkout','--detach','FETCH_HEAD']),
+                      ('submodules',['git','-C',str(source),'-c','url.https://github.com/.insteadOf=git@github.com:','submodule','update','--init','--recursive','--depth=1'])]:
                       result = subprocess.run(cmd, env=env, stdout=log, stderr=subprocess.STDOUT, timeout=600)
-                      if result.returncode:
-                          code = result.returncode
+                      code = result.returncode
+                      if code:
                           break
           finally:
               askpass.unlink(missing_ok=True)
-              (root / 'fetch-exit').write_text(str(code))
+              (root/'fetch-status.json').write_text(json.dumps({'stage':stage,'exit':code,'token_present':bool(os.environ.get('SOURCE_READ_TOKEN'))}))
           if code:
-              raise SystemExit('Fixed-source fetch failed; details retained for encrypted diagnostics.')
+              raise SystemExit('Source preparation failed; details are encrypted.')
           PY
-      - name: Encrypt source snapshot for offline review
-        env:
-          ARTIFACT_ENCRYPTION_PUBLIC_KEY: ${{ secrets.ARTIFACT_ENCRYPTION_PUBLIC_KEY }}
+      - name: Encrypt source and preparation diagnostics
+        if: always()
         shell: bash
         run: |
           set -euo pipefail
           umask 077
           python - <<'PY'
-          import os, subprocess
+          import os, tarfile
           from pathlib import Path
-          from secure_release.crypto import encrypt_file
-          root = Path(os.environ['RUNNER_TEMP'])
-          archive = root / 'frdpd-private' / 'sources.tar.gz'
-          subprocess.run(['tar','--exclude=.git','-czf',str(archive),'-C',str(root/'frdpd-private'/'source'),'.'],check=True)
-          encrypt_file(archive,root/'frdpd-encrypted'/'sources.enc',os.environ['ARTIFACT_ENCRYPTION_PUBLIC_KEY'],
-                       {'purpose':'frdpd-103-source','run_id':os.environ['GITHUB_RUN_ID'],
-                        'source_sha':'642e9f0e372dfe1e3b74bd735878318988e58e91'})
+          from secure_release.crypto import encrypt_file, fingerprint
+          root=Path(os.environ['RUNNER_TEMP'])
+          private=root/'frdpd-private'
+          archive=root/'preparation.tar.gz'
+          assert fingerprint(os.environ['ARTIFACT_ENCRYPTION_PUBLIC_KEY']) == 'ace06f7c92062012382beb875e78f07ea6da31dfc99bf69c2726cc46b96e256b'
+          with tarfile.open(archive,'w:gz') as out:
+              out.add(private,arcname='preparation',filter=lambda item: None if '.git' in Path(item.name).parts or Path(item.name).name=='askpass' else item)
+          encrypt_file(archive,root/'frdpd-encrypted'/'preparation.enc',os.environ['ARTIFACT_ENCRYPTION_PUBLIC_KEY'],
+                       {'purpose':'frdpd-103-preparation','run_id':os.environ['GITHUB_RUN_ID'],'source_sha':'642e9f0e372dfe1e3b74bd735878318988e58e91'})
           archive.unlink()
           PY
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
         with:
-          name: frdpd-103-encrypted-source-${{ github.run_id }}
-          path: ${{ runner.temp }}/frdpd-encrypted/sources.enc
+          name: frdpd-103-encrypted-preparation-${{ github.run_id }}
+          path: ${{ runner.temp }}/frdpd-encrypted/preparation.enc
           if-no-files-found: error
           retention-days: 1
           compression-level: 0
-      - name: Build and run focused tests only inside Docker
+      - name: Build and test only inside Docker with no source credentials
         shell: bash
         run: |
           set -euo pipefail
           umask 077
           root="$RUNNER_TEMP/frdpd-private"
-          log="$root/baseline.log"
           rc=0
-          docker build --build-arg FRDP_BUILD_COMPONENT_TESTS=ON -f "$root/source/server/frdp/test/e2e/Dockerfile" -t frdpd-103:baseline "$root/source" >"$log" 2>&1 || rc=$?
+          docker build --build-arg FRDP_BUILD_COMPONENT_TESTS=ON -f "$root/source/server/frdp/test/e2e/Dockerfile" -t frdpd-103:baseline "$root/source" >"$root/build.log" 2>&1 || rc=$?
           printf 'docker_build_exit=%s\n' "$rc" > "$root/status.txt"
           if [ "$rc" -eq 0 ]; then
-            docker run --rm --network none --entrypoint bash frdpd-103:baseline -lc 'cmake --build /opt/freerdp-build --parallel 2 && ctest --test-dir /opt/freerdp-build --output-on-failure -R "TestFreeRDPFrdp(GfxPolicy|GraphicsAdapter|DisplayControl|E2EScripts)|TestFreeRDPCodecZGfx|TestServerChannels"' >>"$log" 2>&1 || rc=$?
+            docker run --rm --network none --entrypoint bash frdpd-103:baseline -lc 'cmake --build /opt/freerdp-build --parallel 2 && ctest --test-dir /opt/freerdp-build --output-on-failure -R "TestFreeRDPFrdp(GfxPolicy|GraphicsAdapter|DisplayControl|E2EScripts)|TestFreeRDPCodecZGfx|TestServerChannels"' >>"$root/build.log" 2>&1 || rc=$?
             printf 'focused_tests_exit=%s\n' "$rc" >> "$root/status.txt"
           fi
           printf '%s\n' "$rc" > "$root/exit-code"
-          echo "Execution finished; detailed output is encrypted."
-      - name: Encrypt diagnostics without publishing plaintext
+      - name: Encrypt build diagnostics
         if: always()
-        env:
-          ARTIFACT_ENCRYPTION_PUBLIC_KEY: ${{ secrets.ARTIFACT_ENCRYPTION_PUBLIC_KEY }}
         shell: bash
         run: |
           set -euo pipefail
@@ -124,17 +125,13 @@ jobs:
           import os, tarfile
           from pathlib import Path
           from secure_release.crypto import encrypt_file
-          root = Path(os.environ['RUNNER_TEMP'])
-          private = root / 'frdpd-private'
-          private.mkdir(exist_ok=True)
-          archive = private / 'diagnostics.tar.gz'
+          root=Path(os.environ['RUNNER_TEMP']); private=root/'frdpd-private'
+          archive=root/'diagnostics.tar.gz'
           with tarfile.open(archive,'w:gz') as out:
               for path in sorted(private.iterdir()):
-                  if path.is_file() and path != archive and path.name != 'askpass':
-                      out.add(path,arcname=path.name)
+                  if path.is_file() and path.name!='askpass': out.add(path,arcname=path.name)
           encrypt_file(archive,root/'frdpd-encrypted'/'diagnostics.enc',os.environ['ARTIFACT_ENCRYPTION_PUBLIC_KEY'],
-                       {'purpose':'frdpd-103-mstsc-baseline','run_id':os.environ['GITHUB_RUN_ID'],
-                        'source_sha':'642e9f0e372dfe1e3b74bd735878318988e58e91'})
+                       {'purpose':'frdpd-103-mstsc-baseline','run_id':os.environ['GITHUB_RUN_ID'],'source_sha':'642e9f0e372dfe1e3b74bd735878318988e58e91'})
           archive.unlink()
           PY
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
