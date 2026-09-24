@@ -63,7 +63,9 @@ rpmspec -P /input/packaging/rpm/frdpd.spec > /out/resolved.spec
 grep -Fx "Requires: $isaname = $sdk" /out/resolved.spec
 printf '%s\n' "$sdk" > /out/sdk-evr.txt
 mkdir -p /build/source /root/rpmbuild/SOURCES
-tar -C /input --exclude-vcs -cf - . | tar -C /build/source -xf -
+cp -a /input/. /build/source/
+git config --global --add safe.directory /build/source
+git config --global --add safe.directory /build/source/freerdp
 cd /build/source
 bash scripts/apply-freerdp-patches.sh
 tar --exclude-vcs --transform='s,^,frdpd-0.1.0/,' -czf /root/rpmbuild/SOURCES/frdpd-0.1.0.tar.gz .
