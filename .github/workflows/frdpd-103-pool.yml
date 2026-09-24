@@ -1,0 +1,146 @@
+name: Native framebuffer generation regression proof
+on:
+  push:
+    branches: [investigate/frdpd-103-mstsc-20260924]
+    paths: ['.github/workflows/frdpd-103-pool.yml']
+permissions:
+  contents: read
+concurrency:
+  group: frdpd-103-pool-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
+jobs:
+  regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.13'
+      - name: Initialize encryption
+        run: |
+          python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r requirements.lock
+          mkdir -p "$RUNNER_TEMP/pool-private" "$RUNNER_TEMP/pool-cipher"
+          chmod 700 "$RUNNER_TEMP/pool-private"
+      - name: Prepare the exact reviewed source and old allocator control
+        env:
+          SOURCE_READ_TOKEN: ${{ secrets.SOURCE_READ_TOKEN }}
+        run: |
+          umask 077
+          python - <<'PY'
+          import os,subprocess,urllib.request,json,base64,hashlib
+          from pathlib import Path
+          root=Path(os.environ['RUNNER_TEMP'])/'pool-private'; source=root/'source'
+          ask=root/'askpass'
+          ask.write_text('#!/bin/sh\ncase "$1" in *Username*) echo x-access-token ;; *) printf "%s\\n" "$SOURCE_READ_TOKEN" ;; esac\n');ask.chmod(0o700)
+          env=dict(os.environ,GIT_ASKPASS=str(ask),GIT_TERMINAL_PROMPT='0')
+          try:
+              with (root/'prepare.log').open('w') as log:
+                  def git(*args): return subprocess.run(['git',*args],env=env,stdout=log,stderr=log,timeout=600,check=True)
+                  git('init',str(source));git('-C',str(source),'remote','add','origin','https://github.com/dobord/frdpd.git')
+                  base='0e665b8dda40cc8a3fb597e94013495fd66ec0c3'
+                  git('-C',str(source),'fetch','--depth=1','origin',base);git('-C',str(source),'checkout','--detach','FETCH_HEAD')
+                  assert subprocess.check_output(['git','-C',str(source),'rev-parse','HEAD^{tree}'],text=True).strip()=='2a6b6352dee2a656faee6ab2acf4f23bb6df41d0'
+                  git('-C',str(source),'-c','url.https://github.com/.insteadOf=git@github.com:','submodule','update','--init','--recursive','--depth=1')
+                  (root/'pool-original.c').write_bytes((source/'server/frdp/graphics-control/shared-buffer.c').read_bytes())
+                  sha='00dcc32a15a57661392fffe8a7f125cc4d730266'
+                  req=urllib.request.Request('https://api.github.com/repos/dobord/frdpd/git/blobs/'+sha,headers={'Authorization':'Bearer '+os.environ['SOURCE_READ_TOKEN'],'Accept':'application/vnd.github+json'})
+                  with urllib.request.urlopen(req,timeout=60) as response: doc=json.load(response)
+                  patch=base64.b64decode(doc['content'])
+                  assert hashlib.sha256(patch).hexdigest()=='25d0c7ddc995e77a9ab6315e2b784da1a852a9ced4c2740ba8a44c606885d2a7'
+                  assert hashlib.sha1(b'blob '+str(len(patch)).encode()+b'\0'+patch).hexdigest()==sha
+                  (root/'candidate.patch').write_bytes(patch)
+                  git('-C',str(source),'apply','--index',str(root/'candidate.patch'));git('-C',str(source),'diff','--cached','--check')
+                  tree=subprocess.check_output(['git','-C',str(source),'write-tree'],text=True).strip()
+                  (root/'provenance.json').write_text(json.dumps({'base_sha':base,'tree_sha':tree,'patch_blob':sha}))
+          finally: ask.unlink(missing_ok=True)
+          PY
+      - name: Build fixed source in Docker
+        run: |
+          root="$RUNNER_TEMP/pool-private"
+          rc=0
+          docker build --build-arg FRDP_BUILD_COMPONENT_TESTS=ON -f "$root/source/server/frdp/test/e2e/Dockerfile" -t frdpd-pool:fixed "$root/source" >"$root/build.log" 2>&1 || rc=$?
+          echo "build=$rc" >"$root/status.txt"
+          if [ "$rc" -eq 0 ]; then touch "$root/image-ready"; fi
+      - name: Red-green proof and address/undefined-behavior sanitizer checks
+        run: |
+          root="$RUNNER_TEMP/pool-private"
+          if [ ! -f "$root/image-ready" ]; then exit 0; fi
+          rc=0
+          docker run --rm --network none -v "$root/pool-original.c:/control/shared-buffer.c:ro" --entrypoint bash frdpd-pool:fixed -lc '
+            set -eu
+            test=/src/server/frdp/test/TestFreeRDPFrdpSharedBuffer.c
+            inc="-I/src/server/frdp -I/src/server/frdp/graphics-control"
+            cc -O1 -g -Wall -Wextra -Werror -DFRDP_SHARED_BUFFER_STANDALONE $inc "$test" /control/shared-buffer.c -o /tmp/pool-before
+            old=0
+            /tmp/pool-before >/tmp/before.log 2>&1 || old=$?
+            cat /tmp/before.log
+            test "$old" -eq 255
+            grep -q "accounting.buffer_count == 0" /tmp/before.log
+            echo EXPECTED_PRE_FIX_REGRESSION_REPRODUCED
+            cc -O1 -g -Wall -Wextra -Werror -DFRDP_SHARED_BUFFER_STANDALONE $inc "$test" /src/server/frdp/graphics-control/shared-buffer.c -o /tmp/pool-fixed
+            /tmp/pool-fixed
+            echo FIXED_POOL_TESTS_PASS
+            cc -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -DFRDP_SHARED_BUFFER_STANDALONE $inc "$test" /src/server/frdp/graphics-control/shared-buffer.c -o /tmp/pool-sanitized
+            ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 /tmp/pool-sanitized
+            echo SANITIZED_POOL_TESTS_PASS
+          ' >"$root/red-green.log" 2>&1 || rc=$?
+          echo "proof=$rc" >>"$root/status.txt"
+      - name: Real native agent regression and offline local-PAM component test
+        run: |
+          root="$RUNNER_TEMP/pool-private"
+          if [ ! -f "$root/image-ready" ]; then exit 0; fi
+          rc=0
+          docker run --rm --network none --entrypoint bash frdpd-pool:fixed -lc 'cmake --build /opt/freerdp-build --parallel 2 && ctest --test-dir /opt/freerdp-build --output-on-failure -R "^(TestFreeRDPFrdpSharedBuffer|TestFreeRDPFrdpAgentStop|TestFreeRDPFrdpAgentNativeTopology|TestFreeRDPFrdpRemoteAppContract|TestFreeRDPFrdpGraphicsAdapter|TestFreeRDPFrdpDisplayControl)$"' >"$root/native-tests.log" 2>&1 || rc=$?
+          echo "native=$rc" >>"$root/status.txt"
+          rc=0
+          docker run --rm --network none --entrypoint bash frdpd-pool:fixed -lc 'printf "NSS fixture before:\n"; grep -E "^(passwd|group|shadow):" /etc/nsswitch.conf; sed -i -E "s/^(passwd|group|shadow):.*/\1: files/" /etc/nsswitch.conf; printf "NSS fixture after:\n"; grep -E "^(passwd|group|shadow):" /etc/nsswitch.conf; ctest --test-dir /opt/freerdp-build --output-on-failure -R "^TestFreeRDPFrdpServiceIpc$"' >"$root/local-pam.log" 2>&1 || rc=$?
+          echo "local_pam=$rc" >>"$root/status.txt"
+      - name: Recheck full native and dummy RemoteApp/classic presentation profiles
+        if: always()
+        run: |
+          root="$RUNNER_TEMP/pool-private"
+          if [ ! -f "$root/image-ready" ]; then exit 0; fi
+          for backend in xorg-dummy xorg-native; do
+            rc=0
+            FRDP_E2E_NO_BUILD=1 FRDP_E2E_IMAGE=frdpd-pool:fixed FRDP_LAYERED_DISPLAY_BACKEND="$backend" FRDP_E2E_PROFILE_TIMEOUT=600 FRDP_E2E_ARTIFACTS="$root/e2e-$backend" COMPOSE_PROJECT_NAME="frdpd-pool-${backend}-${GITHUB_RUN_ID}" bash "$root/source/server/frdp/test/e2e/run-layered.sh" >"$root/e2e-$backend.log" 2>&1 || rc=$?
+            echo "$backend=$rc" >>"$root/status.txt"
+          done
+      - name: Encrypt diagnostic evidence and checksummed patch
+        if: always()
+        run: |
+          python - <<'PY'
+          import os,tarfile
+          from pathlib import Path
+          from secure_release.crypto import encrypt_file
+          root=Path(os.environ['RUNNER_TEMP']);private=root/'pool-private';archive=root/'pool.tar.gz'
+          with tarfile.open(archive,'w:gz') as tar:
+              for p in sorted(private.iterdir()):
+                  if p.name not in ('source','askpass'): tar.add(p,arcname=p.name)
+          encrypt_file(archive,root/'pool-cipher'/'pool.enc',os.environ['ARTIFACT_ENCRYPTION_PUBLIC_KEY'],{'purpose':'frdpd-103-pool','run_id':os.environ['GITHUB_RUN_ID'],'source_sha':'0e665b8dda40cc8a3fb597e94013495fd66ec0c3'})
+          archive.unlink()
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: encrypted-pool-${{ github.run_id }}
+          path: ${{ runner.temp }}/pool-cipher/pool.enc
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - name: Report real outcome and remove job-local plaintext
+        if: always()
+        run: |
+          python - <<'PY'
+          import os,shutil
+          from pathlib import Path
+          root=Path(os.environ['RUNNER_TEMP']);p=root/'pool-private'/'status.txt'
+          statuses=dict(line.split('=',1) for line in p.read_text().splitlines()) if p.exists() else {}
+          passed=all(statuses.get(k)=='0' for k in ('build','proof','native','local_pam','xorg-dummy','xorg-native'))
+          shutil.rmtree(root/'pool-private',ignore_errors=True);shutil.rmtree(root/'pool-cipher',ignore_errors=True)
+          raise SystemExit(0 if passed else 1)
+          PY
