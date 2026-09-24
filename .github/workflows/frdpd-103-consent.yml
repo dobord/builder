@@ -1,0 +1,50 @@
+name: Disposable mstsc consent preflight
+on:
+  push:
+    branches: [investigate/frdpd-103-mstsc-20260924]
+    paths: ['.github/workflows/frdpd-103-consent.yml', 'investigations/frdpd-103/native_consent.py']
+permissions:
+  contents: read
+jobs:
+  preflight:
+    runs-on: windows-2022
+    timeout-minutes: 5
+    env:
+      ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.13'
+      - name: Install pinned cryptography
+        run: |
+          python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r requirements.lock
+      - name: Verify owned process educational consent
+        shell: pwsh
+        run: |
+          python investigations/frdpd-103/native_consent.py
+      - name: Encrypt diagnostic control metadata
+        if: always()
+        shell: pwsh
+        run: |
+          @'
+          import os,tarfile
+          from pathlib import Path
+          from secure_release.crypto import encrypt_file
+          root=Path(os.environ['RUNNER_TEMP']); private=root/'consent-private'
+          archive=root/'consent.tar.gz'
+          with tarfile.open(archive,'w:gz') as out:
+              if private.exists(): out.add(private,arcname='consent')
+          encrypt_file(archive,root/'consent.enc',os.environ['ARTIFACT_ENCRYPTION_PUBLIC_KEY'],{'purpose':'frdpd-103-consent','run_id':os.environ['GITHUB_RUN_ID']})
+          archive.unlink()
+          '@ | python -
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: encrypted-consent-${{ github.run_id }}
+          path: ${{ runner.temp }}/consent.enc
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
