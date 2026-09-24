@@ -61,7 +61,8 @@ class NativeLinkTransformTests(unittest.TestCase):
 class NativeLinkInstallTests(unittest.TestCase):
     def test_install_validates_both_files_before_writing_and_is_idempotent(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            # Windows TEMP can use an 8.3 alias; install() resolves repository roots.
+            root = Path(directory).resolve(strict=True)
             recipe_repo = root / "cef"
             recipe = recipe_repo / "vcpkg/ports/cef-static/source_build.py"
             source = root / "chromium"
@@ -75,12 +76,13 @@ class NativeLinkInstallTests(unittest.TestCase):
             recipe.write_bytes(recipe_original)
             expat.write_bytes(expat_original)
 
-            def head(path):
-                return native.CEF_RECIPE if Path(path) == recipe_repo else native.CHROMIUM
+            # An unexpected repository must fail the test, not receive Chromium's pin.
+            heads = {recipe_repo.resolve(strict=True): native.CEF_RECIPE,
+                     source.resolve(strict=True): native.CHROMIUM}
 
             with mock.patch.object(native, "RECIPE_BLOB", native.git_blob(recipe_original)), \
                  mock.patch.object(native, "EXPAT_BLOB", native.git_blob(expat_original)), \
-                 mock.patch.object(native, "_head", side_effect=head):
+                 mock.patch.object(native, "_head", side_effect=heads.__getitem__):
                 first = native.install(recipe, source)
                 recipe_mtime = recipe.stat().st_mtime_ns
                 expat_mtime = expat.stat().st_mtime_ns
@@ -95,7 +97,8 @@ class NativeLinkInstallTests(unittest.TestCase):
 
     def test_unknown_expat_fails_before_recipe_write(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            # Windows TEMP can use an 8.3 alias; install() resolves repository roots.
+            root = Path(directory).resolve(strict=True)
             recipe_repo = root / "cef"
             recipe = recipe_repo / "vcpkg/ports/cef-static/source_build.py"
             source = root / "chromium"
@@ -106,15 +109,69 @@ class NativeLinkInstallTests(unittest.TestCase):
             recipe.write_bytes(recipe_original)
             expat.write_text("unknown\n")
 
-            def head(path):
-                return native.CEF_RECIPE if Path(path) == recipe_repo else native.CHROMIUM
+            # An unexpected repository must fail the test, not receive Chromium's pin.
+            heads = {recipe_repo.resolve(strict=True): native.CEF_RECIPE,
+                     source.resolve(strict=True): native.CHROMIUM}
 
             with mock.patch.object(native, "RECIPE_BLOB", native.git_blob(recipe_original)), \
                  mock.patch.object(native, "EXPAT_BLOB", "0" * 40), \
-                 mock.patch.object(native, "_head", side_effect=head):
-                with self.assertRaises(ValueError):
+                 mock.patch.object(native, "_head", side_effect=heads.__getitem__):
+                with self.assertRaisesRegex(
+                    ValueError, "Unreviewed or partially patched Chromium Expat source"
+                ):
                     native.install(recipe, source)
             self.assertEqual(recipe.read_bytes(), recipe_original)
+
+
+    def test_noncanonical_temp_path_reproduces_old_mock_error(self):
+        # Unlike a symlink/junction, this spelling requires no Windows privilege.
+        # It recreates the distinction between a TEMP alias and install's resolved
+        # repository path on every OS; real Windows CI additionally covers 8.3 TEMP.
+        with tempfile.TemporaryDirectory() as directory:
+            canonical = Path(directory).resolve(strict=True)
+            traversal = canonical / "path-spelling"
+            traversal.mkdir()
+            root = traversal / ".."
+            recipe_repo = root / "cef"
+            recipe = recipe_repo / "vcpkg/ports/cef-static/source_build.py"
+            source = root / "chromium"
+            expat = source / "third_party/expat/BUILD.gn"
+            recipe.parent.mkdir(parents=True)
+            expat.parent.mkdir(parents=True)
+            recipe_original = ("prefix\n" + native._RECIPE_OLD + "suffix\n").encode()
+            expat_original = (native._EXPAT_IMPORT_OLD + native._EXPAT_OLD).encode()
+            recipe.write_bytes(recipe_original)
+            expat.write_bytes(expat_original)
+            self.assertNotEqual(recipe_repo, recipe_repo.resolve(strict=True))
+
+            def old_head(path):
+                return native.CEF_RECIPE if Path(path) == recipe_repo else native.CHROMIUM
+
+            heads = {recipe_repo.resolve(strict=True): native.CEF_RECIPE,
+                     source.resolve(strict=True): native.CHROMIUM}
+            with mock.patch.object(native, "RECIPE_BLOB", native.git_blob(recipe_original)), \
+                 mock.patch.object(native, "EXPAT_BLOB", native.git_blob(expat_original)):
+                with mock.patch.object(native, "_head", side_effect=old_head):
+                    with self.assertRaisesRegex(ValueError, "source revision changed"):
+                        native.install(recipe, source)
+                self.assertEqual(recipe.read_bytes(), recipe_original)
+                self.assertEqual(expat.read_bytes(), expat_original)
+
+                with mock.patch.object(native, "_head", side_effect=heads.__getitem__) as head:
+                    result = native.install(recipe, source)
+                self.assertEqual(head.call_args_list, [
+                    mock.call(recipe_repo.resolve(strict=True)),
+                    mock.call(source.resolve(strict=True)),
+                ])
+                self.assertEqual(result["changed_files"], 2)
+                self.assertFalse(result["runtime_verified"])
+
+                # Correcting test path spelling must not bypass revision checks.
+                wrong_heads = dict(heads)
+                wrong_heads[recipe_repo.resolve(strict=True)] = "0" * 40
+                with mock.patch.object(native, "_head", side_effect=wrong_heads.__getitem__):
+                    with self.assertRaisesRegex(ValueError, "source revision changed"):
+                        native.install(recipe, source)
 
 
 if __name__ == "__main__":
