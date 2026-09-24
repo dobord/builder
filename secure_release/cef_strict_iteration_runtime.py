@@ -1,10 +1,9 @@
 """Diagnostic entrypoint delegating to the unchanged strict iteration worker.
 
-Install the reviewed static X11 binding immediately BEFORE GN validation, then
-install reference-app instrumentation AFTER the successful source/GN check and
-BEFORE its compilation slice. The original driver, checkpoint identity,
-encryption and success gates remain authoritative. The X11 repair removes a
-proved host-shared-library path without widening the runtime allowlist.
+Install reviewed static native-link and X11 bindings immediately BEFORE GN
+validation, then install reference-app instrumentation AFTER the successful
+source/GN check and BEFORE its compilation slice. The original driver,
+checkpoint identity, encryption and success gates remain authoritative.
 """
 from __future__ import annotations
 
@@ -12,7 +11,7 @@ from contextlib import contextmanager
 import os
 from pathlib import Path
 
-from . import cef_elf_evidence, cef_smoke_progress, cef_x11_static
+from . import cef_elf_evidence, cef_native_link_static, cef_smoke_progress, cef_x11_static
 from . import cef_strict_iteration as worker
 
 
@@ -25,6 +24,7 @@ def observed_runtime(module, workspace: Path, temp: Path):
     progress = logs / "runtime-progress"
     previous = os.environ.get("CEF_STATIC_SMOKE_PROGRESS_DIR")
     smoke_identity = {}
+    native_link_identity = {}
     x11_identity = {}
     elf_identity = {}
 
@@ -37,7 +37,10 @@ def observed_runtime(module, workspace: Path, temp: Path):
                 sha_index = args.index("--platform-sha256")
                 expected = args[sha_index + 1]
             except (ValueError, IndexError) as error:
-                raise ValueError("Static X11 repair requires the exact platform identity") from error
+                raise ValueError("Static native-link repair requires the exact platform identity") from error
+            native_link_identity.update(cef_native_link_static.install(
+                recipe / "source_build.py", source
+            ))
             x11_identity.update(cef_x11_static.install(
                 source,
                 temp / "cef-strict-engine-work/platform-inputs.json",
@@ -80,6 +83,10 @@ def observed_runtime(module, workspace: Path, temp: Path):
     def classify(actual_logs):
         value = original_classify(actual_logs)
         value.update(elf_identity)
+        if native_link_identity:
+            value["runtime_expat_backend"] = native_link_identity["expat_backend"]
+            value["runtime_unwind_backend"] = native_link_identity["unwind_backend"]
+            value["runtime_native_link_source_files_verified"] = native_link_identity["verified_files"]
         if elf_identity and not elf_identity["runtime_native_elf_verified"]:
             value["runtime_failure_category"] = "non-os-elf-dependencies"
         if Path(actual_logs) != logs:
