@@ -6,6 +6,7 @@ PATCHES = [
     (['3aa1b7616408578e744eef392b76d4e1dce63a42','a84a7c44eac503a9577c998eae84bffdcd95ae58','db9acfb2bee5df1564c1bef7a2034cd2b70a82fb'], 'c22a17d5ce448b68308ba58ee6236a10d71e785e2d61fe5fb4f9792dc4744c62'),
     (['62643949fe2408b7646cc1a861a8eee8825223bd'], '225cb7f9c6dd79a3f7196aeb233b461a4fdba8fc81fad63eec9dded48053893a'),
     (['ff339cc88c78cdb4ea2839e5a4e9390c1a09f77f'], 'dcc6540708028400a0dc8898f197dd7e2f0f90daecd7e1f05f4d83aeedbd4e87'),
+    (['c35e390bcf367d87b812f5cc9c935292ae28df2e'], 'e78fff635ae5abce8a4f28bb5873981bafffa2149bf8a7237daa227c62d6606e'),
 ]
 root = Path(os.environ['RUNNER_TEMP'])/'frdpd-private'
 source = root/'source'
