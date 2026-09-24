@@ -87,11 +87,18 @@ try:
     command=[str(qemu),'-accel','tcg,thread=multi','-machine','q35','-cpu','max','-smp','2','-m','4096','-drive',f'file={disk},if=virtio,format=qcow2','-display','none','-monitor','none','-serial','file:'+str(serial),'-netdev','user,id=n0,hostfwd=tcp:127.0.0.1:3222-:22,hostfwd=tcp:127.0.0.1:3390-:3389','-device','virtio-net-pci,netdev=n0','-smbios','type=1,serial=ds=nocloud;s=http://10.0.2.2:8000/']
     vm=subprocess.Popen(command,stdout=LOG,stderr=LOG,env=ENV); PROCS.append(vm)
     deadline=time.monotonic()+900
+    REPORT['ssh_bootstrap_timeouts']=0
     while time.monotonic()<deadline:
         if vm.poll() is not None: raise RuntimeError('QEMU exited during guest startup')
-        result=run(SSH+['true'],check=False,timeout=10)
-        if not result.returncode: break
-        time.sleep(3)
+        # QEMU's TCP forwarding exists before sshd can complete its banner/KEX.
+        # An individual probe timeout is not a guest failure. subprocess.run
+        # kills/reaps that probe; the monotonic global deadline remains fixed.
+        try:
+            result=run(SSH+['true'],check=False,timeout=min(15,max(1,deadline-time.monotonic())))
+            if not result.returncode: break
+        except subprocess.TimeoutExpired:
+            REPORT['ssh_bootstrap_timeouts']+=1
+        time.sleep(min(3,max(0,deadline-time.monotonic())))
     else: raise RuntimeError('SSH bootstrap timeout')
     shell('sudo cloud-init status --wait; sudo docker info >/dev/null\n',timeout=900); http.shutdown()
     REPORT['stage']='docker-runtime-import'; image=ROOT/'native-rootfs.tar.gz'
