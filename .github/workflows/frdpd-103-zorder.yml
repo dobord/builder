@@ -9,9 +9,9 @@ concurrency:
   group: frdpd-103-zorder-${{ github.ref }}
   cancel-in-progress: true
 env:
-  SOURCE_SHA: 1914d5c4ea7db7f8b3bf67b1a35118644d4fb582
-  CANDIDATE_SHA: 1914d5c4ea7db7f8b3bf67b1a35118644d4fb582
-  CANDIDATE_TREE: dfcd3d3d3db662aed13a56522d2171e287147510
+  SOURCE_SHA: ad4b27d5eeeccd3123a4407465e255a313767c72
+  CANDIDATE_SHA: ad4b27d5eeeccd3123a4407465e255a313767c72
+  CANDIDATE_TREE: f984223aa38e75d254c2b6ca64711d4f4d73a90b
   ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
 jobs:
   build:
@@ -167,7 +167,7 @@ jobs:
           for old,new in [
               ('time.monotonic()-stable_since>=10','time.monotonic()-stable_since>=30'),
               ("REPORT.get('stable_window_seconds',0)>=10", "REPORT.get('stable_window_seconds',0)>=30"),
-              ("    data=shell('sudo docker logs server 2>&1\\n',capture=True,check=False).stdout;", "    import runpy\n    runpy.run_path(str(Path(__file__).with_name('native-interaction.py')))['exercise'](globals(),client.pid)\n    data=shell('sudo docker logs server 2>&1\\n',capture=True,check=False).stdout;")]:
+              ("    data=shell('sudo docker logs server 2>&1\\n',capture=True,check=False).stdout;", "    import runpy\n    try:\n        runpy.run_path(str(Path(__file__).with_name('native-interaction.py')))['exercise'](globals(),client.pid)\n    finally:\n        screenshot('native-interaction-final.png')\n    data=shell('sudo docker logs server 2>&1\\n',capture=True,check=False).stdout;")]:
               assert s.count(old)==1, 'Native fixture hook changed'
               s=s.replace(old,new,1)
           p.write_text(s)
