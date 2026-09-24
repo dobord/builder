@@ -8,7 +8,7 @@ permissions:
   contents: read
 concurrency:
   group: frdpd-103-client-matrix-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 env:
   SOURCE_SHA: 3637007a36881a460693be50d66079291c1f4d33
   CANDIDATE_SHA: 3637007a36881a460693be50d66079291c1f4d33
@@ -202,7 +202,6 @@ jobs:
           ctx={'purpose':'frdpd-103-client-matrix','run_id':os.environ['GITHUB_RUN_ID'],'source_sha':os.environ['SOURCE_SHA'],'tree_sha':os.environ['CANDIDATE_TREE'],'os':os.environ['MATRIX_OS'],'backend':os.environ['MATRIX_BACKEND'],'width':os.environ['MATRIX_WIDTH']}
           encrypt_file(archive,root/'native.enc',os.environ['ARTIFACT_ENCRYPTION_PUBLIC_KEY'],ctx)
           archive.unlink()
-          PY_PLACEHOLDER
           '@ | python -
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
