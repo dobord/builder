@@ -7,7 +7,7 @@ permissions:
   contents: read
 concurrency:
   group: frdpd-103-capture-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 env:
   SOURCE_SHA: d2dc6b6d7b0d5e7ded35f5ca24d760f5d33a9596
   CANDIDATE_SHA: d2dc6b6d7b0d5e7ded35f5ca24d760f5d33a9596
@@ -16,7 +16,7 @@ env:
 jobs:
   build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -50,19 +50,29 @@ jobs:
                   (root/'provenance.json').write_text(json.dumps({'commit':os.environ['SOURCE_SHA'],'tree':tree,'source_edits':False}))
           finally:ask.unlink(missing_ok=True)
           PY
-      - name: Build the persisted unmodified candidate and run pixel and protocol regressions
+      - name: Build the persisted unmodified candidate
+        timeout-minutes: 12
         run: |
           set -euo pipefail
           root="$RUNNER_TEMP/capture-private"
           docker build --build-arg FRDP_BUILD_COMPONENT_TESTS=ON -f "$root/source/server/frdp/test/e2e/Dockerfile" -t frdpd-capture:fixed "$root/source" >"$root/build.log" 2>&1
-          docker run --rm --network none --entrypoint bash frdpd-capture:fixed -lc 'ctest --test-dir /opt/freerdp-build --output-on-failure --no-tests=error -R "TestFreeRDPFrdp(X11WindowCapture.*|RemoteAppContract|GraphicsAdapter|GfxPolicy|ListenerPolicyBoundary|AgentStop|AgentNativeTopology|SharedBuffer)$"' >"$root/focused.log" 2>&1
-          docker run --rm --network none --entrypoint bash frdpd-capture:fixed -lc 'cc -std=c11 -g -O1 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -I/src/server/frdp /src/server/frdp/frdp-session-agent/x11_window_capture.c /src/server/frdp/test/TestFreeRDPFrdpX11WindowCapture.c -lX11 -lXcomposite -o /tmp/capture-sanitized && ASAN_OPTIONS=detect_leaks=1 xvfb-run -a -s "-screen 0 1024x768x24 -nolisten tcp" /tmp/capture-sanitized' >"$root/sanitizer.log" 2>&1
+      - name: Run bounded pixel, lifecycle and protocol tests with a reaping init
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          docker run --rm --init --network none --entrypoint bash frdpd-capture:fixed -lc 'ctest --test-dir /opt/freerdp-build --timeout 120 --output-on-failure --no-tests=error -R "TestFreeRDPFrdp(X11WindowCapture.*|RemoteAppContract|GraphicsAdapter|GfxPolicy|ListenerPolicyBoundary|AgentStop|AgentNativeTopology|SharedBuffer)$"' >"$RUNNER_TEMP/capture-private/focused.log" 2>&1
+      - name: Check independent capture under AddressSanitizer and UndefinedBehaviorSanitizer
+        timeout-minutes: 3
+        run: |
+          set -euo pipefail
+          docker run --rm --init --network none --entrypoint bash frdpd-capture:fixed -lc 'cc -std=c11 -g -O1 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -I/src/server/frdp /src/server/frdp/frdp-session-agent/x11_window_capture.c /src/server/frdp/test/TestFreeRDPFrdpX11WindowCapture.c -lX11 -lXcomposite -o /tmp/capture-sanitized && ASAN_OPTIONS=detect_leaks=1 timeout -k 5 120 xvfb-run -a -s "-screen 0 1024x768x24 -nolisten tcp" /tmp/capture-sanitized' >"$RUNNER_TEMP/capture-private/sanitizer.log" 2>&1
       - name: Exercise independent pristine FreeRDP clients on both Xorg backends
+        timeout-minutes: 12
         run: |
           set -euo pipefail
           root="$RUNNER_TEMP/capture-private"
           for backend in xorg-dummy xorg-native; do
-            FRDP_E2E_NO_BUILD=1 FRDP_E2E_IMAGE=frdpd-capture:fixed FRDP_LAYERED_DISPLAY_BACKEND="$backend" FRDP_E2E_PROFILE_TIMEOUT=600 FRDP_E2E_ARTIFACTS="$root/e2e-$backend" COMPOSE_PROJECT_NAME="capture-${backend}-${GITHUB_RUN_ID}" bash "$root/source/server/frdp/test/e2e/run-layered.sh" >"$root/e2e-$backend.log" 2>&1
+            FRDP_E2E_NO_BUILD=1 FRDP_E2E_IMAGE=frdpd-capture:fixed FRDP_LAYERED_DISPLAY_BACKEND="$backend" FRDP_E2E_PROFILE_TIMEOUT=300 FRDP_E2E_ARTIFACTS="$root/e2e-$backend" COMPOSE_PROJECT_NAME="capture-${backend}-${GITHUB_RUN_ID}" bash "$root/source/server/frdp/test/e2e/run-layered.sh" >"$root/e2e-$backend.log" 2>&1
           done
       - name: Export private runtime without sources or source credentials
         run: |
