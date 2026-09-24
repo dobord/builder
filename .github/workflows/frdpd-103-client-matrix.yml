@@ -1,0 +1,222 @@
+name: PR103 native client differential
+on:
+  push:
+    branches: [investigate/frdpd-103-client-matrix]
+    paths: ['.github/workflows/frdpd-103-client-matrix.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: frdpd-103-client-matrix-${{ github.ref }}
+  cancel-in-progress: false
+env:
+  SOURCE_SHA: 3637007a36881a460693be50d66079291c1f4d33
+  CANDIDATE_SHA: 3637007a36881a460693be50d66079291c1f4d33
+  CANDIDATE_TREE: ffa3bd512e739cc396ec56431f0759e501d9c359
+  ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.13'
+      - name: Prepare encryption and private workspace
+        run: |
+          python -m pip install --require-hashes --only-binary=:all: -r requirements.lock
+          mkdir -m 700 "$RUNNER_TEMP/matrix-private"
+      - name: Read exact authorized sources without executing them
+        env:
+          SOURCE_READ_TOKEN: ${{ secrets.SOURCE_READ_TOKEN }}
+        run: |
+          python - <<'PY'
+          import os,subprocess,json
+          from pathlib import Path
+          root=Path(os.environ['RUNNER_TEMP'])/'matrix-private';source=root/'source';ask=root/'askpass'
+          ask.write_text('#!/bin/sh\ncase "$1" in *Username*) echo x-access-token ;; *) printf "%s\\n" "$SOURCE_READ_TOKEN" ;; esac\n');ask.chmod(0o700)
+          try:
+              env=dict(os.environ,GIT_ASKPASS=str(ask),GIT_TERMINAL_PROMPT='0')
+              with (root/'fetch.log').open('w') as log:
+                  def git(*args): subprocess.run(['git',*args],env=env,stdout=log,stderr=log,timeout=600,check=True)
+                  git('init',str(source));git('-C',str(source),'remote','add','origin','https://github.com/dobord/frdpd.git')
+                  git('-C',str(source),'fetch','--depth=1','origin',os.environ['SOURCE_SHA']);git('-C',str(source),'checkout','--detach','FETCH_HEAD')
+                  tree=subprocess.check_output(['git','-C',str(source),'rev-parse','HEAD^{tree}'],text=True).strip()
+                  assert tree==os.environ['CANDIDATE_TREE']
+                  git('-C',str(source),'-c','url.https://github.com/.insteadOf=git@github.com:','submodule','update','--init','--recursive','--depth=1')
+                  (root/'provenance.json').write_text(json.dumps({'commit':os.environ['SOURCE_SHA'],'tree':tree,'product_source_edits':False}))
+          finally: ask.unlink(missing_ok=True)
+          PY
+      - name: Build and export unchanged runtime in Docker
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/matrix-private"
+          docker build --build-arg FRDP_BUILD_COMPONENT_TESTS=ON -f "$root/source/server/frdp/test/e2e/Dockerfile" -t frdpd-matrix:baseline "$root/source" >"$root/build.log" 2>&1
+          docker run --rm --init --network none --entrypoint bash frdpd-matrix:baseline -lc 'ctest --test-dir /opt/freerdp-build --timeout 120 --output-on-failure --no-tests=error -R "TestFreeRDPFrdp(RemoteAppContract|GfxPolicy|GraphicsAdapter|SessionResources)$"' >"$root/focused.log" 2>&1
+          docker run --name matrix-export --network none --entrypoint bash frdpd-matrix:baseline -lc 'rm -rf /src /opt/freerdp-pristine-source /opt/freerdp-pristine-build; find /opt/freerdp-build -type d -name CMakeFiles -prune -exec rm -rf {} +; rm -rf /opt/freerdp-build/Testing; apt-get clean' >"$root/export.log" 2>&1
+          docker export matrix-export | gzip -1 > "$root/native-rootfs.tar.gz"
+          docker rm matrix-export >>"$root/export.log"
+      - name: Encrypt runtime for isolated Windows runners
+        env:
+          BUILDER_INPUT_PRIVATE_KEY: ${{ secrets.BUILDER_INPUT_PRIVATE_KEY }}
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from secure_release.crypto import encrypt_file,public_text
+          root=Path(os.environ['RUNNER_TEMP'])
+          encrypt_file(root/'matrix-private/native-rootfs.tar.gz',root/'native.enc',public_text(os.environ['BUILDER_INPUT_PRIVATE_KEY']),{'purpose':'frdpd-103-native-input','run_id':os.environ['GITHUB_RUN_ID'],'source_sha':os.environ['SOURCE_SHA']})
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: matrix-native-input-${{ github.run_id }}
+          path: ${{ runner.temp }}/native.enc
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - name: Encrypt build evidence
+        if: always()
+        run: |
+          python - <<'PY'
+          import os,tarfile
+          from pathlib import Path
+          from secure_release.crypto import encrypt_file
+          root=Path(os.environ['RUNNER_TEMP']);archive=root/'build-evidence.tar.gz'
+          with tarfile.open(archive,'w:gz') as out:
+              for p in (root/'matrix-private').glob('*'):
+                  if p.is_file() and p.suffix in ('.json','.log'):out.add(p,arcname=p.name)
+          encrypt_file(archive,root/'build.enc',os.environ['ARTIFACT_ENCRYPTION_PUBLIC_KEY'],{'purpose':'frdpd-103-client-build','run_id':os.environ['GITHUB_RUN_ID'],'source_sha':os.environ['SOURCE_SHA'],'tree_sha':os.environ['CANDIDATE_TREE']})
+          archive.unlink()
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: encrypted-matrix-build-${{ github.run_id }}
+          path: ${{ runner.temp }}/build.enc
+          compression-level: 0
+          retention-days: 1
+      - if: always()
+        run: rm -rf "$RUNNER_TEMP/matrix-private" "$RUNNER_TEMP/native.enc" "$RUNNER_TEMP/build.enc"
+  native:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            backend: xorg-native
+            width: 1024
+            height: 768
+          - os: windows-2022
+            backend: xorg-native
+            width: 2560
+            height: 1440
+          - os: windows-2025
+            backend: xorg-native
+            width: 2560
+            height: 1440
+          - os: windows-2025
+            backend: xorg-dummy
+            width: 2560
+            height: 1440
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    env:
+      SOURCE_RUN: ${{ github.run_id }}
+      MATRIX_OS: ${{ matrix.os }}
+      MATRIX_BACKEND: ${{ matrix.backend }}
+      MATRIX_WIDTH: ${{ matrix.width }}
+      MATRIX_HEIGHT: ${{ matrix.height }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.13'
+      - run: |
+          python -m pip install --require-hashes --only-binary=:all: -r requirements.lock
+      - name: Handle only fixture first-use consent
+        shell: pwsh
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File investigations/frdpd-103/native-preflight.ps1
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: matrix-native-input-${{ github.run_id }}
+          path: ${{ runner.temp }}/native-cipher
+      - name: Decrypt exact input without source token
+        env:
+          BUILDER_INPUT_PRIVATE_KEY: ${{ secrets.BUILDER_INPUT_PRIVATE_KEY }}
+        shell: pwsh
+        run: |
+          @'
+          import os
+          from pathlib import Path
+          from secure_release.crypto import decrypt_file
+          root=Path(os.environ['RUNNER_TEMP']);(root/'native-private').mkdir(exist_ok=True)
+          decrypt_file(root/'native-cipher/native.enc',root/'native-private/native-rootfs.tar.gz',os.environ['BUILDER_INPUT_PRIVATE_KEY'],{'purpose':'frdpd-103-native-input','run_id':os.environ['SOURCE_RUN'],'source_sha':os.environ['SOURCE_SHA']})
+          '@ | python -
+      - name: Record graphics and session environment, run strict native baseline
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $e=@{os=(Get-CimInstance Win32_OperatingSystem | Select Caption,Version,BuildNumber);display=(Get-CimInstance Win32_VideoController | Select Name,DriverVersion);session=(Get-Process -Id $PID).SessionId;desktop=(Get-Process dwm,explorer -ErrorAction SilentlyContinue | Select ProcessName,Id,SessionId)}
+          $e | ConvertTo-Json -Depth 5 | Set-Content "$env:RUNNER_TEMP/native-private/graphics-environment.json"
+          @'
+          import hashlib,os
+          from pathlib import Path
+          p=Path('investigations/frdpd-103/native.py');blob=p.read_bytes()
+          assert hashlib.sha1(b'blob '+str(len(blob)).encode()+b'\0'+blob).hexdigest()=='aaccff9fc516437479ba9cfb53e8440d065e2eb6'
+          s=blob.decode()
+          pairs=[
+              ('time.monotonic()-stable_since>=10','time.monotonic()-stable_since>=30'),
+              ("REPORT.get('stable_window_seconds',0)>=10","REPORT.get('stable_window_seconds',0)>=30"),
+              ('FRDP_DISPLAY_BACKEND=xorg-dummy\\n', 'FRDP_DISPLAY_BACKEND='+os.environ['MATRIX_BACKEND']+'\\nWLOG_FILTER=com.freerdp.server.frdpd:DEBUG,com.freerdp.channels.rdpgfx.server:DEBUG\\n'),
+              ('full address:s:localhost:3390\\n','full address:s:localhost:3390\\ndesktopwidth:i:'+os.environ['MATRIX_WIDTH']+'\\ndesktopheight:i:'+os.environ['MATRIX_HEIGHT']+'\\nsession bpp:i:32\\n')]
+          for old,new in pairs:
+              assert s.count(old)==1, 'Fixture source changed'
+              s=s.replace(old,new,1)
+          s=s.replace("REPORT={'native_pass':False,", "REPORT={'matrix':{k:os.environ[k] for k in ('MATRIX_OS','MATRIX_BACKEND','MATRIX_WIDTH','MATRIX_HEIGHT')},'native_pass':False,",1)
+          p.write_text(s)
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
+          python investigations/frdpd-103/native.py
+          Set-Content "$env:RUNNER_TEMP/native-exit" $LASTEXITCODE
+          exit 0
+      - name: Encrypt all native evidence
+        if: always()
+        shell: pwsh
+        run: |
+          @'
+          import os,tarfile
+          from pathlib import Path
+          from secure_release.crypto import encrypt_file
+          root=Path(os.environ['RUNNER_TEMP']);archive=root/'native-diagnostics.tar.gz'
+          with tarfile.open(archive,'w:gz') as out:
+              for p in (root/'native-private').glob('*'):
+                  if p.is_file() and p.suffix in ('.log','.json','.png','.txt'):out.add(p,arcname=p.name)
+          ctx={'purpose':'frdpd-103-client-matrix','run_id':os.environ['GITHUB_RUN_ID'],'source_sha':os.environ['SOURCE_SHA'],'tree_sha':os.environ['CANDIDATE_TREE'],'os':os.environ['MATRIX_OS'],'backend':os.environ['MATRIX_BACKEND'],'width':os.environ['MATRIX_WIDTH']}
+          encrypt_file(archive,root/'native.enc',os.environ['ARTIFACT_ENCRYPTION_PUBLIC_KEY'],ctx)
+          archive.unlink()
+          PY_PLACEHOLDER
+          '@ | python -
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: encrypted-matrix-${{ matrix.os }}-${{ matrix.backend }}-${{ matrix.width }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/native.enc
+          compression-level: 0
+          retention-days: 1
+      - name: Cleanup and truthful result
+        if: always()
+        shell: pwsh
+        run: |
+          Get-Process qemu-system-x86_64 -ErrorAction SilentlyContinue | Stop-Process -Force
+          $rc=1
+          if (Test-Path "$env:RUNNER_TEMP/native-exit") {$rc=[int](Get-Content "$env:RUNNER_TEMP/native-exit")}
+          Remove-Item -Recurse -Force "$env:RUNNER_TEMP/native-private","$env:RUNNER_TEMP/native-cipher" -ErrorAction SilentlyContinue
+          exit $rc
