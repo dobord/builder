@@ -19,7 +19,7 @@ def run(args, *, data=None, timeout=180, check=True, capture=False):
 def shell(code, **kw):
     return run(SSH+['bash','-se'],data=code.encode(),**kw)
 def ps(code, **kw):
-    return run(['pwsh','-NoProfile','-NonInteractive','-Command',code],**kw)
+    return run(['pwsh','-NoProfile','-NonInteractive','-Command',"$ErrorActionPreference='Stop'; $ConfirmPreference='None'; "+code],**kw)
 def download(url, path, expected=None, algorithm='sha256'):
     with urllib.request.urlopen(url,timeout=120) as response, path.open('wb') as output:
         shutil.copyfileobj(response, output, 1024*1024)
@@ -31,19 +31,57 @@ def screenshot(name):
        "$r=[Windows.Forms.SystemInformation]::VirtualScreen; $b=New-Object Drawing.Bitmap($r.Width,$r.Height); "
        "$g=[Drawing.Graphics]::FromImage($b); $g.CopyFromScreen($r.Left,$r.Top,0,0,$b.Size); "
        f"$b.Save('{ROOT / name}',[Drawing.Imaging.ImageFormat]::Png); $g.Dispose(); $b.Dispose()",check=False)
-def windows():
+def windows(parent=None):
     u = ctypes.windll.user32
     result=[]
+    u.GetWindowTextLengthW.argtypes=[W.HWND]
+    u.GetWindowTextW.argtypes=[W.HWND,W.LPWSTR,ctypes.c_int]
+    u.GetClassNameW.argtypes=[W.HWND,W.LPWSTR,ctypes.c_int]
+    u.GetWindowThreadProcessId.argtypes=[W.HWND,ctypes.POINTER(W.DWORD)]
+    u.IsWindowVisible.argtypes=[W.HWND]
     cbtype=ctypes.WINFUNCTYPE(W.BOOL,W.HWND,W.LPARAM)
     @cbtype
     def visit(hwnd,_):
         if u.IsWindowVisible(hwnd):
             n=u.GetWindowTextLengthW(hwnd)
             title=ctypes.create_unicode_buffer(n+1); u.GetWindowTextW(hwnd,title,n+1)
-            if title.value: result.append({'hwnd':int(hwnd),'title':title.value})
+            kind=ctypes.create_unicode_buffer(256); u.GetClassNameW(hwnd,kind,256)
+            pid=W.DWORD(); u.GetWindowThreadProcessId(hwnd,ctypes.byref(pid))
+            result.append({'hwnd':int(hwnd),'title':title.value,'class':kind.value,'pid':pid.value})
         return True
-    u.EnumWindows(visit,0)
+    if parent:
+        u.EnumChildWindows.argtypes=[W.HWND,cbtype,W.LPARAM]
+        u.EnumChildWindows(parent,visit,0)
+    else:
+        u.EnumWindows(visit,0)
     return result
+
+def consent_fixture_dialogs(current, client_pid):
+    # Only the disposable runner and this generated localhost RDP file are authorized.
+    # No registry changes, no certificate-error bypass, no generic click-through.
+    u=ctypes.windll.user32
+    u.PostMessageW.argtypes=[W.HWND,W.UINT,W.WPARAM,W.LPARAM]
+    u.IsWindowEnabled.argtypes=[W.HWND]
+    for window in current:
+        if window['pid']!=client_pid or window['class']!='#32770': continue
+        controls=windows(window['hwnd'])
+        text='\n'.join(c['title'] for c in controls)
+        buttons={c['title'].replace('&',''):c for c in controls if c['class']=='Button'}
+        education='I understand and allow RDP files to open on this device for my account'
+        if education in buttons:
+            u.PostMessageW(buttons[education]['hwnd'],0x00F5,0,0)
+            time.sleep(0.2)
+            if 'OK' in buttons and u.IsWindowEnabled(buttons['OK']['hwnd']):
+                u.PostMessageW(buttons['OK']['hwnd'],0x00F5,0,0)
+                REPORT['fixture_rdp_consent']=True
+        elif 'Disposable RemoteApp test' in text and 'localhost' in text:
+            for label in ('Connect','Continue'):
+                if label in buttons and u.IsWindowEnabled(buttons[label]['hwnd']):
+                    u.PostMessageW(buttons[label]['hwnd'],0x00F5,0,0)
+                    REPORT['fixture_publisher_consent']=True
+                    break
+        # Keep full control metadata encrypted so a new prompt is diagnosable.
+        (ROOT/'last-dialog.json').write_text(json.dumps(controls,indent=2))
 class Credential(ctypes.Structure):
     _fields_=[('Flags',W.DWORD),('Type',W.DWORD),('TargetName',W.LPWSTR),('Comment',W.LPWSTR),('LastWritten',W.FILETIME),('CredentialBlobSize',W.DWORD),('CredentialBlob',ctypes.POINTER(ctypes.c_ubyte)),('Persist',W.DWORD),('AttributeCount',W.DWORD),('Attributes',ctypes.c_void_p),('TargetAlias',W.LPWSTR),('UserName',W.LPWSTR)]
 def credential(target,password=None,user='rdpuser'):
@@ -108,22 +146,23 @@ try:
     shell('for i in $(seq 1 120); do if sudo docker exec server bash /opt/frdp-e2e/scripts/frdpd-healthcheck.sh; then exit 0; fi; sleep 1; done; exit 1\n',timeout=240)
     cert=shell('sudo docker exec server cat /etc/frdpd/tls.crt\n',capture=True).stdout
     (ROOT/'server.crt').write_bytes(cert)
-    ps(f"$c=Import-Certificate -FilePath '{ROOT/'server.crt'}' -CertStoreLocation Cert:\\CurrentUser\\Root; $c.Thumbprint | Set-Content '{ROOT/'server-thumb.txt'}'")
+    ps(f"$c=Import-Certificate -FilePath '{ROOT/'server.crt'}' -CertStoreLocation Cert:\\LocalMachine\\Root; $c.Thumbprint | Set-Content '{ROOT/'server-thumb.txt'}'")
     credential('TERMSRV/localhost',password); credential('TERMSRV/localhost:3390',password)
     del password,envfile
     REPORT['stage']='native-client'
     rdp=ROOT/'remoteapp.rdp'
     rdp.write_text('full address:s:localhost:3390\nusername:s:rdpuser\nremoteapplicationmode:i:1\nremoteapplicationprogram:s:||xcalc\nremoteapplicationname:s:FRDP xcalc\nalternate shell:s:||xcalc\nprompt for credentials:i:0\nauthentication level:i:2\nenablecredsspsupport:i:1\nredirectclipboard:i:0\nredirectprinters:i:0\nredirectcomports:i:0\nredirectsmartcards:i:0\naudiomode:i:2\nremoteapplicationexpandcmdline:i:0\nremoteapplicationexpandworkingdir:i:0\ndisableconnectionsharing:i:1\n',encoding='utf-16')
-    ps(f"$c=New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=Disposable RemoteApp test' -CertStoreLocation Cert:\\CurrentUser\\My; Export-Certificate -Cert $c -FilePath '{ROOT/'signer.cer'}' | Out-Null; Import-Certificate -FilePath '{ROOT/'signer.cer'}' -CertStoreLocation Cert:\\CurrentUser\\Root | Out-Null; Import-Certificate -FilePath '{ROOT/'signer.cer'}' -CertStoreLocation Cert:\\CurrentUser\\TrustedPublisher | Out-Null; $c.Thumbprint | Set-Content '{ROOT/'signer-thumb.txt'}'; & rdpsign /sha256 $c.Thumbprint '{rdp}'; if ($LASTEXITCODE -ne 0) {{exit $LASTEXITCODE}}")
+    ps(f"$c=New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=Disposable RemoteApp test' -CertStoreLocation Cert:\\CurrentUser\\My; Export-Certificate -Cert $c -FilePath '{ROOT/'signer.cer'}' | Out-Null; Import-Certificate -FilePath '{ROOT/'signer.cer'}' -CertStoreLocation Cert:\\LocalMachine\\Root | Out-Null; Import-Certificate -FilePath '{ROOT/'signer.cer'}' -CertStoreLocation Cert:\\LocalMachine\\TrustedPublisher | Out-Null; $c.Thumbprint | Set-Content '{ROOT/'signer-thumb.txt'}'; & rdpsign /sha256 $c.Thumbprint '{rdp}'; if ($LASTEXITCODE -ne 0) {{exit $LASTEXITCODE}}")
     ps("wevtutil sl Microsoft-Windows-TerminalServices-RDPClient/Operational /e:true",check=False)
     before=windows(); (ROOT/'windows-before.json').write_text(json.dumps(before))
     client=subprocess.Popen([str(Path(os.environ['WINDIR'])/'System32'/'mstsc.exe'),str(rdp)],env=ENV); PROCS.append(client)
     seen=[]
-    for tick in range(30):
+    for tick in range(60):
         time.sleep(2)
         current=windows(); seen.append({'seconds':2*(tick+1),'windows':current})
+        consent_fixture_dialogs(current,client.pid)
         if tick in (1,4,9,19,29): screenshot(f'native-{tick}.png')
-        matches=[w for w in current if 'FRDP xcalc' in w['title'] or w['title'].lower()=='xcalc']
+        matches=[w for w in current if w['class'].startswith('RAIL') and ('FRDP xcalc' in w['title'] or w['title'].lower()=='xcalc')]
         if matches:
             REPORT['remoteapp_window']=matches[0]
             screenshot('native-remoteapp.png')
@@ -153,7 +192,7 @@ finally:
             if file.exists():
                 thumb=file.read_text(encoding='utf-8-sig').strip()
                 if all(c in '0123456789ABCDEFabcdef' for c in thumb):
-                    ps(f"foreach($s in @('Root','My','TrustedPublisher')) {{Remove-Item ('Cert:\\CurrentUser\\'+$s+'\\{thumb}') -ErrorAction SilentlyContinue}}",check=False)
+                    ps(f"foreach($scope in @('CurrentUser','LocalMachine')) {{foreach($s in @('Root','My','TrustedPublisher')) {{Remove-Item ('Cert:\\'+$scope+'\\'+$s+'\\{thumb}') -Force -Confirm:$false -ErrorAction SilentlyContinue}}}}",check=False)
         credential('TERMSRV/localhost'); credential('TERMSRV/localhost:3390')
     except Exception: pass
     for proc in reversed(PROCS):
