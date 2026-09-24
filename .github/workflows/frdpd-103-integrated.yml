@@ -9,8 +9,8 @@ concurrency:
   group: frdpd-103-integrated-${{ github.ref }}
   cancel-in-progress: true
 env:
-  CANDIDATE_SHA: b44f42b665adaeb4c3ebe9e9b36be7c92cfa52b8
-  CANDIDATE_TREE: a408421cc667e371f8aa443bd8d13d0af7c3745d
+  CANDIDATE_SHA: 5319395a5a7da8e5fce6672a4a76720fd2ab11e5
+  CANDIDATE_TREE: 4163b761fd5e368432c2dc3e08466d597c586512
   ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
 jobs:
   verify:
@@ -28,13 +28,13 @@ jobs:
           python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r requirements.lock
           mkdir -p "$RUNNER_TEMP/integrated-private" "$RUNNER_TEMP/integrated-cipher"
           chmod 700 "$RUNNER_TEMP/integrated-private"
-      - name: Read the persisted private source without running it
+      - name: Read persisted source and verify test-only diagnostics without execution
         env:
           SOURCE_READ_TOKEN: ${{ secrets.SOURCE_READ_TOKEN }}
         run: |
           umask 077
           python - <<'PY'
-          import os,subprocess,json
+          import os,subprocess,json,hashlib,base64,urllib.request
           from pathlib import Path
           root=Path(os.environ['RUNNER_TEMP'])/'integrated-private'; source=root/'source'; ask=root/'askpass'
           ask.write_text('#!/bin/sh\ncase "$1" in *Username*) echo x-access-token ;; *) printf "%s\\n" "$SOURCE_READ_TOKEN" ;; esac\n');ask.chmod(0o700)
@@ -47,10 +47,19 @@ jobs:
                   tree=subprocess.check_output(['git','-C',str(source),'rev-parse','HEAD^{tree}'],text=True).strip()
                   assert tree==os.environ['CANDIDATE_TREE']
                   git('-C',str(source),'-c','url.https://github.com/.insteadOf=git@github.com:','submodule','update','--init','--recursive','--depth=1')
-                  (root/'provenance.json').write_text(json.dumps({'commit':os.environ['CANDIDATE_SHA'],'tree':tree,'source_changes':False,'local_test_nss':'files','unwrapped_test_pam':'deny','positive_pam':'per-test explicit pam_wrapper or common-session-noninteractive'}))
+                  request=urllib.request.Request('https://api.github.com/repos/dobord/frdpd/git/blobs/841a50fd5dda0000125ce3316d04a1b68eaceaf7',headers={'Authorization':'Bearer '+os.environ['SOURCE_READ_TOKEN'],'Accept':'application/vnd.github+json'})
+                  with urllib.request.urlopen(request,timeout=60) as response: blob=json.load(response)
+                  patch=base64.b64decode(blob['content'])
+                  assert hashlib.sha256(patch).hexdigest()=='52ee119e6e6eeee775ffe5c06a137efd11aec367c5207df7803e583221472544'
+                  (root/'test-diagnostics.patch').write_bytes(patch)
+                  git('-C',str(source),'apply','--index',str(root/'test-diagnostics.patch'))
+                  git('-C',str(source),'diff','--cached','--check')
+                  tested_tree=subprocess.check_output(['git','-C',str(source),'write-tree'],text=True).strip()
+                  assert tested_tree=='1bea26a662e65a703373900b69ab136fa6ff4f5f'
+                  (root/'provenance.json').write_text(json.dumps({'commit':os.environ['CANDIDATE_SHA'],'tree':tree,'tested_tree':tested_tree,'production_source_changes':False,'test_diagnostic_blob':'841a50fd5dda0000125ce3316d04a1b68eaceaf7','local_test_nss':'files','unwrapped_test_pam':'deny'}))
           finally: ask.unlink(missing_ok=True)
           PY
-      - name: Build unchanged persisted source in Docker
+      - name: Build persisted production source and instrumented tests in Docker
         run: |
           root="$RUNNER_TEMP/integrated-private"
           rc=0
@@ -76,7 +85,7 @@ jobs:
             exit "$result"
           ' >"$root/full-init.log" 2>&1 || rc=$?
           echo "full_init=$rc" >>"$root/status.txt"
-      - name: Full wrapper under real systemd with pam_systemd and executable test tmpfs
+      - name: Full wrapper under real systemd with executable test mounts and bounded capabilities
         if: always()
         run: |
           set -uo pipefail
@@ -86,7 +95,7 @@ jobs:
           printf 'FROM frdpd-integrated:fixed\nRUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends systemd systemd-sysv libpam-systemd dbus dbus-user-session && apt-get clean\n' >"$root/Systemd.Dockerfile"
           docker build -t frdpd-integrated:systemd -f "$root/Systemd.Dockerfile" "$root" >"$root/systemd-build.log" 2>&1 || rc=$?
           if [ "$rc" -eq 0 ]; then
-            docker run -d --name frdpd-integrated-systemd --privileged --cgroupns=private --network none --tmpfs /run --tmpfs /run/lock --tmpfs /tmp:exec,mode=1777 --entrypoint /sbin/init frdpd-integrated:systemd >"$root/systemd-start.log" 2>&1 || rc=$?
+            docker run -d --name frdpd-integrated-systemd --privileged --cgroupns=private --network none --tmpfs /run:exec,mode=755 --tmpfs /run/lock --tmpfs /tmp:exec,mode=1777 --tmpfs /dev/dri:mode=755 --entrypoint /sbin/init frdpd-integrated:systemd >"$root/systemd-start.log" 2>&1 || rc=$?
             if [ "$rc" -eq 0 ]; then
               ready=0
               for i in $(seq 1 30); do
@@ -94,9 +103,9 @@ jobs:
                 sleep 1
               done
               if [ "$ready" -eq 1 ]; then
-                docker exec frdpd-integrated-systemd bash -lc '
+                docker exec frdpd-integrated-systemd setpriv --bounding-set=-ipc_lock bash -lc '
                   sed -i -E "s/^(passwd|group|shadow):.*/\1: files/" /etc/nsswitch.conf
-                  echo "Fixture: systemd PID 1; executable test tmpfs; local NSS; explicit negative default PAM"
+                  echo "Fixture: systemd PID 1; executable test mounts; no physical DRM; local NSS; negative default PAM; no IPC_LOCK bypass"
                   for service in frdpd frdpd-password; do
                     printf "%s\n" "auth required pam_deny.so" "account required pam_deny.so" "session required pam_deny.so" "password required pam_deny.so" >"/etc/pam.d/$service"
                   done
@@ -107,7 +116,7 @@ jobs:
                 ' >"$root/full-systemd.log" 2>&1 || rc=$?
               else rc=125; fi
               docker logs frdpd-integrated-systemd >"$root/systemd-boot.log" 2>&1
-              docker exec frdpd-integrated-systemd journalctl --no-pager -n 350 >"$root/systemd-journal.log" 2>&1 || true
+              docker exec frdpd-integrated-systemd journalctl --no-pager -n 4000 >"$root/systemd-journal.log" 2>&1 || true
             fi
           fi
           echo "full_systemd=$rc" >>"$root/status.txt"
@@ -123,7 +132,7 @@ jobs:
           with tarfile.open(archive,'w:gz') as tar:
               for p in sorted(private.iterdir()):
                   if p.name not in ('source','askpass'): tar.add(p,arcname=p.name)
-          encrypt_file(archive,root/'integrated-cipher'/'integrated.enc',os.environ['ARTIFACT_ENCRYPTION_PUBLIC_KEY'],{'purpose':'frdpd-103-integrated','run_id':os.environ['GITHUB_RUN_ID'],'source_sha':os.environ['CANDIDATE_SHA'],'tree_sha':os.environ['CANDIDATE_TREE']})
+          encrypt_file(archive,root/'integrated-cipher'/'integrated.enc',os.environ['ARTIFACT_ENCRYPTION_PUBLIC_KEY'],{'purpose':'frdpd-103-integrated','run_id':os.environ['GITHUB_RUN_ID'],'source_sha':os.environ['CANDIDATE_SHA'],'tree_sha':os.environ['CANDIDATE_TREE'],'test_diagnostic_sha':'841a50fd5dda0000125ce3316d04a1b68eaceaf7'})
           archive.unlink()
           PY
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -134,7 +143,7 @@ jobs:
           compression-level: 0
           retention-days: 1
           if-no-files-found: error
-      - name: Report actual full-systemd outcome and clean plaintext
+      - name: Report actual outcomes and clean plaintext
         if: always()
         run: |
           python - <<'PY'
@@ -142,7 +151,7 @@ jobs:
           from pathlib import Path
           root=Path(os.environ['RUNNER_TEMP']);p=root/'integrated-private'/'status.txt'
           statuses=dict(line.split('=',1) for line in p.read_text().splitlines()) if p.exists() else {}
-          passed=all(statuses.get(k)=='0' for k in ('build','full_systemd'))
+          passed=all(statuses.get(k)=='0' for k in ('build','full_init','full_systemd'))
           shutil.rmtree(root/'integrated-private',ignore_errors=True);shutil.rmtree(root/'integrated-cipher',ignore_errors=True)
           raise SystemExit(0 if passed else 1)
           PY
