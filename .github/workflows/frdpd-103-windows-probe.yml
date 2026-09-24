@@ -1,0 +1,35 @@
+name: Isolated native Windows RemoteApp prerequisites
+on:
+  push:
+    branches: [investigate/frdpd-103-mstsc-20260924]
+    paths: ['.github/workflows/frdpd-103-windows-probe.yml']
+permissions:
+  contents: read
+jobs:
+  windows-prerequisites:
+    if: github.ref == 'refs/heads/investigate/frdpd-103-mstsc-20260924'
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - name: Inspect disposable runner client and interactive desktop
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $r = [ordered]@{}
+          $r.mstsc = (Get-Item "$env:WINDIR\System32\mstsc.exe").VersionInfo.FileVersion
+          $r.mstscax = (Get-Item "$env:WINDIR\System32\mstscax.dll").VersionInfo.FileVersion
+          $r.session = (Get-Process -Id $PID).SessionId
+          $r.interactive = [Environment]::UserInteractive
+          $r.qemu = @(Get-Command qemu-system-x86_64 -ErrorAction SilentlyContinue | ForEach-Object Source)
+          $r.ssh = @(Get-Command ssh -ErrorAction SilentlyContinue | ForEach-Object Source)
+          $r.choco = @(Get-Command choco -ErrorAction SilentlyContinue | ForEach-Object Source)
+          $r.virtualization = @(Get-CimInstance Win32_Processor | Select-Object VMMonitorModeExtensions,VirtualizationFirmwareEnabled,SecondLevelAddressTranslationExtensions)
+          Add-Type -AssemblyName System.Windows.Forms
+          $r.display = [System.Windows.Forms.SystemInformation]::VirtualScreen.ToString()
+          $r | ConvertTo-Json -Depth 5 | Set-Content "$env:RUNNER_TEMP\windows-prerequisites.json"
+          Get-Content "$env:RUNNER_TEMP\windows-prerequisites.json"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: public-windows-prerequisites-${{ github.run_id }}
+          path: ${{ runner.temp }}/windows-prerequisites.json
+          retention-days: 1
