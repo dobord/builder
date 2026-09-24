@@ -1,0 +1,103 @@
+name: Isolated frdpd PR 103 investigation
+on:
+  push:
+    branches: [investigate/frdpd-103-mstsc-20260924]
+    paths: ['.github/workflows/frdpd-103-investigation.yml', 'investigations/frdpd-103/**']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: frdpd-103-isolated-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  protocol-baseline:
+    if: github.ref == 'refs/heads/investigate/frdpd-103-mstsc-20260924'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: dobord/frdpd
+          ref: 642e9f0e372dfe1e3b74bd735878318988e58e91
+          path: frdpd-source
+          submodules: recursive
+          persist-credentials: false
+      - name: Package public pinned source for offline protocol review
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/frdpd-public"
+          tar --exclude=.git -czf "$RUNNER_TEMP/frdpd-public/sources.tar.gz" -C frdpd-source .
+          git -C frdpd-source rev-parse HEAD > "$RUNNER_TEMP/frdpd-public/revisions.txt"
+          git -C frdpd-source/freerdp rev-parse HEAD >> "$RUNNER_TEMP/frdpd-public/revisions.txt"
+          sha256sum "$RUNNER_TEMP/frdpd-public/sources.tar.gz" >> "$RUNNER_TEMP/frdpd-public/revisions.txt"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: frdpd-103-public-source-${{ github.run_id }}
+          path: ${{ runner.temp }}/frdpd-public/*
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.12'
+      - name: Install hash-pinned encryption libraries
+        run: python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r requirements.lock
+      - name: Build and run focused tests only inside Docker
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p "$RUNNER_TEMP/frdpd-private"
+          log="$RUNNER_TEMP/frdpd-private/baseline.log"
+          rc=0
+          docker build --build-arg FRDP_BUILD_COMPONENT_TESTS=ON -f frdpd-source/server/frdp/test/e2e/Dockerfile -t frdpd-103:baseline frdpd-source >"$log" 2>&1 || rc=$?
+          printf 'docker_build_exit=%s\n' "$rc" > "$RUNNER_TEMP/frdpd-private/status.txt"
+          if [ "$rc" -eq 0 ]; then
+            docker run --rm --network none --entrypoint bash frdpd-103:baseline -lc 'cmake --build /opt/freerdp-build --parallel 2 && ctest --test-dir /opt/freerdp-build --output-on-failure -R "TestFreeRDPFrdp(GfxPolicy|GraphicsAdapter|DisplayControl|E2EScripts)|TestFreeRDPCodecZGfx|TestServerChannels"' >>"$log" 2>&1 || rc=$?
+            printf 'focused_tests_exit=%s\n' "$rc" >> "$RUNNER_TEMP/frdpd-private/status.txt"
+          fi
+          printf '%s\n' "$rc" > "$RUNNER_TEMP/frdpd-private/exit-code"
+          echo "Diagnostic execution finished; detailed output is encrypted."
+      - name: Encrypt diagnostics with the existing public recipient key
+        if: always()
+        shell: bash
+        env:
+          ARTIFACT_ENCRYPTION_PUBLIC_KEY: ${{ secrets.ARTIFACT_ENCRYPTION_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p "$RUNNER_TEMP/frdpd-private" "$RUNNER_TEMP/frdpd-encrypted"
+          python - <<'PY'
+          import os, tarfile
+          from pathlib import Path
+          from secure_release.crypto import encrypt_file
+          root = Path(os.environ['RUNNER_TEMP'])
+          archive = root / 'frdpd-diagnostics.tar.gz'
+          with tarfile.open(archive, 'w:gz') as out:
+              out.add(root / 'frdpd-private', arcname='diagnostics')
+          encrypt_file(archive, root / 'frdpd-encrypted' / 'diagnostics.enc',
+                       os.environ['ARTIFACT_ENCRYPTION_PUBLIC_KEY'],
+                       {'purpose':'frdpd-103-mstsc-baseline','run_id':os.environ['GITHUB_RUN_ID'],
+                        'source_sha':'642e9f0e372dfe1e3b74bd735878318988e58e91'})
+          archive.unlink()
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: frdpd-103-encrypted-diagnostics-${{ github.run_id }}
+          path: ${{ runner.temp }}/frdpd-encrypted/diagnostics.enc
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+      - name: Report test status and remove temporary diagnostics
+        if: always()
+        shell: bash
+        run: |
+          rc=1
+          if [ -f "$RUNNER_TEMP/frdpd-private/exit-code" ]; then rc=$(cat "$RUNNER_TEMP/frdpd-private/exit-code"); fi
+          rm -rf "$RUNNER_TEMP/frdpd-private" "$RUNNER_TEMP/frdpd-encrypted" "$RUNNER_TEMP/frdpd-public"
+          exit "$rc"
