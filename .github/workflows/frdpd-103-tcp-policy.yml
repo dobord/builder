@@ -47,7 +47,7 @@ jobs:
                   (root/'provenance.json').write_text(json.dumps({'commit':os.environ['SOURCE_SHA'],'tree':os.environ['CANDIDATE_TREE'],'source_edits':False}))
           finally:ask.unlink(missing_ok=True)
           PY
-      - name: Build unchanged product and execute actual transport-policy tests
+      - name: Build unchanged product and execute transport-policy tests
         run: |
           set -euo pipefail
           root="$RUNNER_TEMP/tcp-private"
@@ -131,15 +131,11 @@ jobs:
       - run: |
           python -m pip install --require-hashes --only-binary=:all: -r requirements.lock
           New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/native-private" | Out-Null
-      - name: Native ARM64 VM host packages
+      - name: Install authenticated ARM64 VM dependencies
         if: matrix.os == 'windows-11-arm'
         id: msys
-        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884
-        with:
-          msystem: CLANGARM64
-          update: true
-          cache: false
-          install: mingw-w64-clang-aarch64-qemu mingw-w64-clang-aarch64-qemu-image-util
+        run: |
+          & ./investigations/frdpd-103/install-arm-vm.ps1
       - name: ARM platform verification before loading runtime
         if: matrix.os == 'windows-11-arm'
         env:
