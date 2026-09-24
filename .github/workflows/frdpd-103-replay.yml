@@ -1,0 +1,195 @@
+name: Instrumented native RemoteApp replay
+on:
+  push:
+    branches: [investigate/frdpd-103-mstsc-20260924]
+    paths: ['.github/workflows/frdpd-103-replay.yml']
+permissions:
+  contents: read
+concurrency:
+  group: frdpd-103-replay-${{ github.ref }}
+  cancel-in-progress: false
+env:
+  SOURCE_SHA: 667a859f7b733b77ec1b9a138743f26e7c1dfb4f
+  CANDIDATE_SHA: 667a859f7b733b77ec1b9a138743f26e7c1dfb4f
+  ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    outputs:
+      tree: ${{ steps.prepare.outputs.tree }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.13'
+      - name: Prepare encrypted workspace
+        run: |
+          python -m pip install --require-hashes --only-binary=:all: -r requirements.lock
+          mkdir -m 700 "$RUNNER_TEMP/replay-private"
+      - name: Fetch fixed authorized source as data
+        env:
+          SOURCE_READ_TOKEN: ${{ secrets.SOURCE_READ_TOKEN }}
+        run: |
+          python - <<'PY'
+          import os,subprocess
+          from pathlib import Path
+          root=Path(os.environ['RUNNER_TEMP'])/'replay-private';ask=root/'askpass';source=root/'source'
+          ask.write_text('#!/bin/sh\ncase "$1" in *Username*) echo x-access-token ;; *) printf "%s\\n" "$SOURCE_READ_TOKEN" ;; esac\n');ask.chmod(0o700)
+          try:
+              env=dict(os.environ,GIT_ASKPASS=str(ask),GIT_TERMINAL_PROMPT='0')
+              with (root/'fetch.log').open('w') as log:
+                  def git(*args):subprocess.run(['git',*args],env=env,stdout=log,stderr=log,timeout=600,check=True)
+                  git('init',str(source));git('-C',str(source),'remote','add','origin','https://github.com/dobord/frdpd.git')
+                  git('-C',str(source),'fetch','--depth=1','origin',os.environ['SOURCE_SHA']);git('-C',str(source),'checkout','--detach','FETCH_HEAD')
+                  git('-C',str(source),'-c','url.https://github.com/.insteadOf=git@github.com:','submodule','update','--init','--recursive','--depth=1')
+          finally:ask.unlink(missing_ok=True)
+          PY
+      - name: Apply test-only observability and record exact tree
+        id: prepare
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/replay-private"
+          python "$root/source/scripts/diagnose-peer-exit.py" >"$root/edit.log" 2>&1
+          git -C "$root/source" diff --check >>"$root/edit.log" 2>&1
+          git -C "$root/source" diff >"$root/probe.patch"
+          git -C "$root/source" add server/frdp/frdpd/frdpd.c
+          tree=$(git -C "$root/source" write-tree)
+          echo "tree=$tree" >> "$GITHUB_OUTPUT"
+          printf '{"commit":"%s","tree":"%s","test_only_probe":true}\n' "$SOURCE_SHA" "$tree" > "$root/provenance.json"
+      - name: Build and run focused tests inside Docker
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/replay-private"
+          docker build --build-arg FRDP_BUILD_COMPONENT_TESTS=ON -f "$root/source/server/frdp/test/e2e/Dockerfile" -t frdpd-replay:probe "$root/source" >"$root/build.log" 2>&1
+          docker run --rm --network none --entrypoint bash frdpd-replay:probe -lc 'ctest --test-dir /opt/freerdp-build --output-on-failure --no-tests=error -R "TestFreeRDPFrdp(RemoteAppContract|GraphicsAdapter|GfxPolicy|ListenerPolicyBoundary)$"' >"$root/focused.log" 2>&1
+          docker run --name replay-export --network none --entrypoint bash frdpd-replay:probe -lc 'rm -rf /src /opt/freerdp-pristine-source /opt/freerdp-pristine-build; find /opt/freerdp-build -type d -name CMakeFiles -prune -exec rm -rf {} +; rm -rf /opt/freerdp-build/Testing; apt-get clean' >"$root/export.log" 2>&1
+          docker export replay-export | gzip -1 > "$root/native-rootfs.tar.gz"
+          docker rm replay-export >>"$root/export.log"
+      - name: Encrypt runner-to-runner native input
+        env:
+          BUILDER_INPUT_PRIVATE_KEY: ${{ secrets.BUILDER_INPUT_PRIVATE_KEY }}
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from secure_release.crypto import encrypt_file,public_text
+          root=Path(os.environ['RUNNER_TEMP'])
+          encrypt_file(root/'replay-private'/'native-rootfs.tar.gz',root/'native.enc',public_text(os.environ['BUILDER_INPUT_PRIVATE_KEY']),{'purpose':'frdpd-103-native-input','run_id':os.environ['GITHUB_RUN_ID'],'source_sha':os.environ['SOURCE_SHA']})
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: replay-native-input-${{ github.run_id }}
+          path: ${{ runner.temp }}/native.enc
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - name: Encrypt build evidence
+        if: always()
+        run: |
+          python - <<'PY'
+          import os,tarfile
+          from pathlib import Path
+          from secure_release.crypto import encrypt_file
+          root=Path(os.environ['RUNNER_TEMP']);archive=root/'build-evidence.tar.gz'
+          with tarfile.open(archive,'w:gz') as out:
+              for p in (root/'replay-private').glob('*'):
+                  if p.is_file() and p.suffix in ('.log','.json','.patch'):out.add(p,arcname=p.name)
+          encrypt_file(archive,root/'build-evidence.enc',os.environ['ARTIFACT_ENCRYPTION_PUBLIC_KEY'],{'purpose':'frdpd-103-build-probe','run_id':os.environ['GITHUB_RUN_ID'],'source_sha':os.environ['SOURCE_SHA']})
+          archive.unlink()
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: encrypted-replay-build-${{ github.run_id }}
+          path: ${{ runner.temp }}/build-evidence.enc
+          compression-level: 0
+          retention-days: 1
+      - if: always()
+        run: |
+          rm -rf "$RUNNER_TEMP/replay-private" "$RUNNER_TEMP/native.enc" "$RUNNER_TEMP/build-evidence.enc"
+  native:
+    needs: build
+    runs-on: windows-2022
+    timeout-minutes: 35
+    env:
+      SOURCE_RUN: ${{ github.run_id }}
+      CANDIDATE_TREE: ${{ needs.build.outputs.tree }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.13'
+      - run: |
+          python -m pip install --require-hashes --only-binary=:all: -r requirements.lock
+      - name: Close only the disposable fixture first-use dialog
+        shell: pwsh
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File investigations/frdpd-103/native-preflight.ps1
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: replay-native-input-${{ github.run_id }}
+          path: ${{ runner.temp }}/native-cipher
+      - name: Authenticate and decrypt native input
+        env:
+          BUILDER_INPUT_PRIVATE_KEY: ${{ secrets.BUILDER_INPUT_PRIVATE_KEY }}
+        shell: pwsh
+        run: |
+          @'
+          import os
+          from pathlib import Path
+          from secure_release.crypto import decrypt_file
+          root=Path(os.environ['RUNNER_TEMP']);(root/'native-private').mkdir(exist_ok=True)
+          decrypt_file(root/'native-cipher'/'native.enc',root/'native-private'/'native-rootfs.tar.gz',os.environ['BUILDER_INPUT_PRIVATE_KEY'],{'purpose':'frdpd-103-native-input','run_id':os.environ['SOURCE_RUN'],'source_sha':os.environ['SOURCE_SHA']})
+          '@ | python -
+      - name: Exercise mstsc with the unchanged credential and security policy
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+          p=Path('investigations/frdpd-103/native.py')
+          s=p.read_text()
+          s=s.replace("stable_since=stable_since or time.monotonic()", "if stable_since is None: screenshot('native-first-window.png')\n            stable_since=stable_since or time.monotonic()")
+          s=s.replace('time.monotonic()-stable_since>=10','time.monotonic()-stable_since>=30')
+          s=s.replace("REPORT.get('stable_window_seconds',0)>=10", "REPORT.get('stable_window_seconds',0)>=30")
+          p.write_text(s)
+          '@ | python -
+          python investigations/frdpd-103/native.py
+          Set-Content "$env:RUNNER_TEMP/native-exit" $LASTEXITCODE
+          exit 0
+      - name: Encrypt native evidence
+        if: always()
+        shell: pwsh
+        run: |
+          @'
+          import os,tarfile
+          from pathlib import Path
+          from secure_release.crypto import encrypt_file
+          root=Path(os.environ['RUNNER_TEMP']);archive=root/'native-diagnostics.tar.gz'
+          with tarfile.open(archive,'w:gz') as out:
+              for p in (root/'native-private').glob('*'):
+                  if p.is_file() and p.suffix in ('.log','.json','.png','.txt'):out.add(p,arcname=p.name)
+          encrypt_file(archive,root/'native-diagnostics.enc',os.environ['ARTIFACT_ENCRYPTION_PUBLIC_KEY'],{'purpose':'frdpd-103-native','run_id':os.environ['GITHUB_RUN_ID'],'source_sha':os.environ['SOURCE_SHA'],'tree_sha':os.environ['CANDIDATE_TREE']})
+          archive.unlink()
+          '@ | python -
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: encrypted-replay-native-${{ github.run_id }}
+          path: ${{ runner.temp }}/native-diagnostics.enc
+          compression-level: 0
+          retention-days: 1
+      - name: Clean disposable guest and report actual status
+        if: always()
+        shell: pwsh
+        run: |
+          Get-Process qemu-system-x86_64 -ErrorAction SilentlyContinue | Stop-Process -Force
+          $rc=1
+          if (Test-Path "$env:RUNNER_TEMP/native-exit") {$rc=[int](Get-Content "$env:RUNNER_TEMP/native-exit")}
+          Remove-Item -Recurse -Force "$env:RUNNER_TEMP/native-private","$env:RUNNER_TEMP/native-cipher" -ErrorAction SilentlyContinue
+          exit $rc
