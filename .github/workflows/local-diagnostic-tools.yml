@@ -1,6 +1,6 @@
 name: Offline local diagnostic tools
 # No private inputs or decryption in Actions. Public source fixtures only.
-# Include the exact HarfBuzz source archive for public ABI boundary regression.
+# Reconcile the uploaded whole-archive/C++ boundary patch with the active #72 source.
 on:
   push:
     branches: [feature/cef-static-integration]
