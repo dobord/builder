@@ -11,6 +11,7 @@ on:
       - secure_release/cef_harfbuzz_boundary.py
       - ci/cef-harfbuzz-interface.json
       - tests/test_cef_harfbuzz_boundary.py
+      - tests/test_cef_harfbuzz_c_api.py
       - tests/test_cef_harfbuzz_uploaded_proof.py
       - tests/test_cef_harfbuzz_metadata_alias.py
       - tests/test_cef_harfbuzz_archive_alias.py
@@ -156,6 +157,7 @@ jobs:
           mkdir "$RUNNER_TEMP/cef-harfbuzz-source"
           tar -xzf "$archive" -C "$RUNNER_TEMP/cef-harfbuzz-source"
           python -m unittest discover -s tests -p test_cef_harfbuzz_boundary.py -v
+          python -m unittest discover -s tests -p test_cef_harfbuzz_c_api.py -v
           python -m unittest discover -s tests -p test_cef_harfbuzz_uploaded_proof.py -v
           python -m unittest discover -s tests -p test_cef_harfbuzz_metadata_alias.py -v
           python -m unittest discover -s tests -p test_cef_harfbuzz_archive_alias.py -v

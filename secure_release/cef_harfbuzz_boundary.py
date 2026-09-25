@@ -178,6 +178,40 @@ def interface(package: Path, prefix: Path, inventory: dict) -> set[str]:
     return api
 
 
+# HarfBuzz 14.2.1 src/hb-unicode.hh (Git blob
+# 485f3f527380c1e0253acf2d9d1d13d2a8612aec) declares this extern "C"
+# with HB_INTERNAL. It is NOT in installed public headers. It must remain
+# defined in BOTH whole archives, with identical strong hidden FUNC binding.
+# This is a common-definition classification, NEVER a delta/drop exemption.
+INTERNAL_C_DEFINITIONS = {
+    'hb_ucd_get_unicode_funcs': {('FUNC', 'GLOBAL', 'HIDDEN')},
+}
+
+
+def public_c_api(built: dict, frozen: dict, declared: set[str]) -> set[str]:
+    """Separate the one source-bound internal C name from the public C API.
+
+    A name prefix does not imply a public declaration. Still reject every
+    missing/new C name, unknown undeclared name and any ELF-attribute change.
+    The internal provider remains subject to whole-core and incoming link proof.
+    """
+    bn = {n for n in built if n.startswith('hb_')}
+    fn = {n for n in frozen if n.startswith('hb_')}
+    require(bn == fn and bn, 'HarfBuzz C API definitions changed')
+    internal = set(INTERNAL_C_DEFINITIONS) & bn
+    for name in internal:
+        require(name not in declared and
+                built[name] == frozen[name] == INTERNAL_C_DEFINITIONS[name],
+                'HarfBuzz internal C definition or binding changed')
+    public = bn - internal
+    require(public and public <= declared,
+            'HarfBuzz C API definitions or declarations changed')
+    for name in public:
+        require(built[name] == frozen[name] == {('FUNC','GLOBAL','DEFAULT')},
+                'HarfBuzz C entry-point binding changed')
+    return public
+
+
 def closed_difference(built: Path, frozen: Path, declared: set[str],
                       others: list[Path]) -> tuple[set[str],dict]:
     """Lower-level proof; callers MUST establish the exact source/feature scope."""
@@ -199,13 +233,7 @@ def closed_difference(built: Path, frozen: Path, declared: set[str],
     require(len(names) == len(delta) and all('::' in n and not n.startswith('_Z')
             and 'hb::' not in n and 'std::' not in n for n in names),
             'HarfBuzz difference overlaps public C++ wrappers or unclassified symbols')
-    c_b = {n for n in bn if n.startswith('hb_')}
-    c_f = {n for n in fn if n.startswith('hb_')}
-    require(c_b == c_f and c_b <= declared and c_b,
-            'HarfBuzz C API definitions changed')
-    for name in c_b:
-        require(b[name] == f[name] == {('FUNC','GLOBAL','DEFAULT')},
-                'HarfBuzz C entry-point binding changed')
+    c_b = public_c_api(b, f, declared)
     # Differences in common non-public records are not silently accepted either.
     require(all(b[n] == f[n] for n in bn & fn), 'HarfBuzz common ELF binding changed')
     # Whole-archive replacement drops the rebuilt objects AND their references.
@@ -553,9 +581,13 @@ def _verify(spec: dict, value: dict, package: Path, port: str, features: str,
         replay.checked(replay.member(prefix, n), record)
         if n.endswith(".h"):
             declarations.update(API.findall((package / n).read_text()))
-    api = {n for n in built if n.startswith("hb_")}
-    reviewed_require(api and api <= frozen and api <= declarations,
-            "public C ABI definitions or declarations changed")
+    # The uploaded proof uses the same source-bound distinction. Do not ask a
+    # public-header consumer to name HB_INTERNAL's non-public UCD provider.
+    built_elf, _ = symbols(target)
+    frozen_elf, _ = symbols(source)
+    reviewed_require(set(built_elf) == built and set(frozen_elf) == frozen,
+                     "HarfBuzz ELF inventories changed during proof")
+    api = public_c_api(built_elf, frozen_elf, declarations)
     built_public = replay.elf_details(target, api)
     reviewed_require(built_public == replay.elf_details(source, api), "public ELF ABI attributes changed")
     incoming = reference_inputs([prefix, package, installed], {source, target}, value)
