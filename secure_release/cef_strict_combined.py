@@ -22,7 +22,7 @@ from . import (
     build_support, cef_build, cef_contract, cef_native_link_static,
     cef_nss_isolation, cef_unwind_backtrace, cef_x11_static, crypto, safeio,
 )
-from . import cef_strict_iteration
+from . import cef_combined_identity, cef_strict_iteration
 
 ENGINE_VCPKG = "b4bb281192ea8bb004542012ac804b988a4ff403"
 SDK_VCPKG = "936bbb0e7cb7d6d10f8f5ef5874521466278c799"
@@ -432,8 +432,12 @@ def main() -> None:
         "runtime_verified": False,
         "target_archives_static": False,
     }
-    stage = "checkpoint-restore"
+    stage = "checkpoint-host-identity"
     try:
+        recipe_env = cef_combined_identity.prepare_environment(
+            selected, clean_environment(), summary
+        )
+        stage = "checkpoint-restore"
         restored_package = root / "restored-checkpoint"
         cef_strict_iteration.restore_checkpoint(
             selected, restored_package, build_key,
@@ -451,7 +455,6 @@ def main() -> None:
             )
         summary["checkpoint_recipe_profile"] = restore_profile["profile"]
         driver = recipe / "vcpkg/integration/driver.py"
-        recipe_env = clean_environment()
         recipe_env.update({
             "GITHUB_SHA": CEF,
             "CEF_STATIC_STRICT_THIRD_PARTY": "1",

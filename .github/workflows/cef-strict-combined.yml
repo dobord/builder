@@ -7,6 +7,8 @@ on:
     paths:
       - .github/workflows/cef-strict-combined.yml
       - secure_release/cef_strict_combined.py
+      - secure_release/cef_combined_identity.py
+      - tests/test_cef_combined_identity.py
       - secure_release/cef_nss_isolation.py
       - secure_release/cef_native_link_static.py
       - secure_release/cef_x11_static.py
@@ -107,7 +109,11 @@ jobs:
           sudo apt-get install -y gcc-14 g++-14 autoconf autoconf-archive automake libtool pkg-config ninja-build gperf flex bison nasm gettext texinfo libltdl-dev xvfb xauth fonts-dejavu-core ccache openssl
           df -h /
       - name: Validate final combined helper syntax
-        run: python -m py_compile secure_release/cef_strict_combined.py secure_release/cef_nss_isolation.py secure_release/cef_native_link_static.py secure_release/cef_x11_static.py secure_release/cef_unwind_backtrace.py
+        run: python -m py_compile secure_release/cef_strict_combined.py secure_release/cef_combined_identity.py secure_release/cef_nss_isolation.py secure_release/cef_native_link_static.py secure_release/cef_x11_static.py secure_release/cef_unwind_backtrace.py
+      - name: Verify combined host identity with the pinned checkpoint codec
+        env:
+          REQUIRE_CEF_COMBINED_IDENTITY_FIXTURE: '1'
+        run: python -m unittest discover -s tests -p test_cef_combined_identity.py -v
       - name: Verify exact engine profile adapters before combined restore
         run: |
           python -m unittest discover -s tests -p test_cef_native_link_static.py -v
