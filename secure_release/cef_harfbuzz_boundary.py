@@ -218,7 +218,280 @@ def verify(*, package: Path, prefix: Path, inventory: dict, version: str,
              'hb_ft_face_create','hb_version_string'} <= api,
             'HarfBuzz declared core/FreeType feature API is missing')
     link_probe(prefix,inventory,api,output)
+    # The user-supplied patch adds the exact observed delta and whole-core/C++
+    # proof. Require it IN ADDITION to the existing interface and receipt gates.
+    reviewed_verify(
+        {"prefix": str(prefix), "installed": str(installed)}, inventory,
+        package, "harfbuzz", features, version, ARCHIVE,
+        set(symbols(built)[0]), set(symbols(frozen)[0]),
+        diagnostics=output / "reviewed-whole-boundary",
+    )
     return {'schema':1,'kind':'harfbuzz-14.2.1-closed-c-boundary',
             **proof,'public_link_verified':True,'runtime_verified':False,
             'built_sha256':digest(built),'frozen_sha256':digest(frozen),
             'interface_sha256':INTERFACE_SHA256,'policy_sha256':digest(Path(__file__))}
+
+
+# Additional whole-archive/C++ proof reconciled from the supplied patch.
+"""Prove the reviewed HarfBuzz private-template boundary, not a visibility waiver.
+
+Only the exact 14.2.1 core/freetype C-linker profile and the reviewed two symbol
+set differences qualify. Hidden/weak/C++ alone never authorizes substitution.
+Require identical installed public headers (including C++ convenience wrappers),
+all public C entry points, no incoming reference from any current consumer, a
+complete static re-link of the frozen core, and a native C/C++ API execution.
+The parent replay still installs the original authenticated archive byte-for-byte.
+No diagnostic symbol names are emitted or retained in the installed receipt.
+"""
+
+import hashlib
+import contextvars
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import tempfile
+
+# Reviewed against the SHA512-pinned 14.2.1 source acquired by the unchanged port.
+# src/gen-def.py derives the C ABI from declarations; src/check-symbols.py rejects
+# internal names in the shared ABI. Static archives additionally need the incoming
+# reference checks below: hidden visibility alone does NOT prevent static use.
+REVIEW = {
+    "archive_sha256": "e9eb491b3f73d575a6c7e0f10089c29439ecc973317e8312d202459032ea9a65",
+    "headers_sha256": "361c5a5ee4279aaee47eee2c1a33b0d9fb46aad627dd0ca85b815141cd1cc882",
+    "built_only_sha256": "e921ec8012e6b522be5e16a4dc0e14e30783ac6a4e5d12721750e215df35c63d",
+    "frozen_only_sha256": "8da3c4bbcd0817f254429d4e557ffe995b9974df7a8376c1c10b184d62e62cb6",
+    "built_only_count": 25, "frozen_only_count": 43,
+}
+PROFILE = "harfbuzz-14.2.1-c-linker-core-freetype-boundary-v1"
+_TRACE = contextvars.ContextVar("harfbuzz_boundary_trace", default=None)
+API = re.compile(r"^hb_\w+(?= \()", re.M)
+SYMBOL = re.compile(r"[A-Za-z_.$][A-Za-z0-9_.$@]*\Z")
+
+
+def reviewed_require(ok: bool, message: str) -> None:
+    if not ok:
+        raise ValueError("HarfBuzz boundary: " + message)
+
+
+def digest_names(names: set[str]) -> str:
+    return hashlib.sha256(("\n".join(sorted(names)) + "\n").encode()).hexdigest()
+
+
+def command(args: list, *, cwd: Path | None = None, timeout: int = 120) -> str:
+    result = subprocess.run([str(a) for a in args], cwd=cwd, capture_output=True,
+                            text=True, timeout=timeout, env=dict(os.environ, LC_ALL="C"))
+    if result.returncode or len(result.stdout) > 128 * 1024**2:
+        trace = _TRACE.get()
+        if trace is not None:
+            trace.append({"program": Path(str(args[0])).name,
+                          "exit_code": result.returncode,
+                          "stdout_tail": result.stdout[-256 * 1024:],
+                          "stderr_tail": result.stderr[-256 * 1024:]})
+        raise ValueError("HarfBuzz boundary: native proof command failed")
+    return result.stdout
+
+
+def undefined(path: Path) -> set[str]:
+    text = command(["nm", "-P", "-g", "--undefined-only", path])
+    names = set()
+    for line in text.splitlines():
+        if not line.strip() or line.endswith(":"):
+            continue
+        fields = line.split()
+        reviewed_require(len(fields) >= 2 and SYMBOL.fullmatch(fields[0]) is not None,
+                "unrecognized reference")
+        names.add(fields[0])
+    return names
+
+
+def reference_inputs(roots: list[Path], excluded: set[Path]) -> list[Path]:
+    """Read-only consumer inventory; reject ambiguous/redirection-based graphs."""
+    from . import cef_frozen_dependencies as replay
+    paths = set()
+    for root in roots:
+        replay.clean_path(root)
+        reviewed_require(root.is_dir(), "consumer root missing")
+        for path in root.rglob("*"):
+            # Do not silently follow symlink directories or redirected inputs.
+            reviewed_require(not path.is_symlink(), "redirected consumer inventory")
+            if path.is_file() and path.suffix in {".a", ".o", ".obj", ".so"}:
+                if path not in excluded:
+                    paths.add(path)
+    reviewed_require(len(paths) <= 4096, "consumer inventory too large")
+    return sorted(paths)
+
+
+def audit_incoming(paths: list[Path], forbidden: set[str]) -> int:
+    from . import cef_frozen_dependencies as replay
+    for path in paths:
+        if path.suffix == ".a":
+            with path.open("rb") as stream:
+                reviewed_require(stream.read(8) == b"!<arch>\n", "nonregular consumer archive")
+        # A companion archive may define its own COMDAT template. Only its
+        # unresolved boundary references can demand a definition from this core.
+        reviewed_require(not ((undefined(path) - replay.exports(path)) & forbidden),
+                "another consumer requires a discarded private definition")
+    return len(paths)
+
+
+def native_probe(folder: Path, prefix: Path, package: Path, manifest: dict,
+                 api: set[str], absent: set[str], target: Path) -> int:
+    """Link ALL frozen core objects, not just the few objects reached by a smoke."""
+    from . import cef_frozen_dependencies as replay
+    from .cef_x11_static import OS_NEEDED
+    cc = shutil.which("gcc-14") or shutil.which("cc")
+    cxx = shutil.which("g++-14") or shutil.which("c++")
+    reviewed_require(bool(cc and cxx and shutil.which("ld")), "native toolchain unavailable")
+    core = prefix / "lib/libharfbuzz.a"
+    # The native linker resolves intra-archive references using the full frozen
+    # implementation; it must not introduce any unresolved HarfBuzz internals.
+    aggregate = folder / "core.o"
+    command(["ld", "-r", "--whole-archive", core, "--no-whole-archive", "-o", aggregate])
+    unresolved = undefined(aggregate)
+    reviewed_require(not (unresolved & absent) and not any(
+        n.startswith(("hb_", "_hb_")) for n in unresolved), "frozen core is not closed")
+
+    headers = sorted(p.name for p in (package / "include/harfbuzz").glob("*.h"))
+    declarations = '#define HB_NO_SINGLE_HEADER_ERROR 1\n' + ''.join(
+        '#include <harfbuzz/' + n + '>\n' for n in headers)
+    # All core public functions are address-taken so --gc-sections cannot silently
+    # reduce this ABI test to the subset used by the runtime exercise.
+    slots = ',\n'.join('(void (*)(void))&' + n for n in sorted(api))
+    c = folder / "api.c"
+    c.write_text(declarations + '\nvoid (*volatile api[])(void) = {\n' + slots + '\n};\n' + r'''
+extern int cpp_api_probe(void);
+int main(void) {
+  unsigned major = 0, minor = 0, micro = 0;
+  hb_version(&major, &minor, &micro);
+  if (major != 14 || minor != 2 || micro != 1 || !api[0]) return 1;
+  hb_buffer_t *b = hb_buffer_create();
+  if (!b || !hb_buffer_allocation_successful(b)) return 2;
+  hb_buffer_add_utf8(b, "abc", 3, 0, 3);
+  hb_buffer_guess_segment_properties(b);
+  hb_shape(hb_font_get_empty(), b, 0, 0);
+  unsigned count = 0;
+  const hb_glyph_info_t *info = hb_buffer_get_glyph_infos(b, &count);
+  int valid = info && count == 3 && hb_buffer_get_length(b) == 3;
+  hb_buffer_destroy(b);
+  return valid ? cpp_api_probe() : 3;
+}
+''', encoding="utf-8")
+    cpp = folder / "api.cc"
+    cpp.write_text(r'''#include <harfbuzz/hb-cplusplus.hh>
+extern "C" int cpp_api_probe(void) {
+  hb::shared_ptr<hb_buffer_t> a(hb_buffer_create());
+  hb::shared_ptr<hb_buffer_t> b(a);
+  hb::unique_ptr<hb_buffer_t> c(hb_buffer_create());
+  return !a || !b || !c || a.get() != b.get();
+}
+''', encoding="utf-8")
+    includes = ["-I" + str(package / "include"), "-I" + str(prefix / "include"),
+                "-I" + str(prefix / "include/freetype2")]
+    command([cc, "-O2", *includes, "-c", c, "-o", folder / "api.o"])
+    command([cxx, "-std=c++17", "-O2", "-fno-exceptions", "-fno-rtti", *includes,
+             "-c", cpp, "-o", folder / "cpp.o"])
+    audit_incoming([folder / "api.o", folder / "cpp.o"], absent)
+    module = manifest["modules"]["harfbuzz"]
+    libraries = module["libraries"]
+    reviewed_require(libraries[0] == "lib/libharfbuzz.a" and module["link_options"] == ["-pthread"],
+            "unreviewed core link interface")
+    dependencies = []
+    for name in libraries[1:]:
+        if name == "m":
+            dependencies.append("-lm")
+        else:
+            reviewed_require(name in manifest["archive_objects"], "unbound external archive")
+            path = replay.member(prefix, name)
+            replay.checked(path, manifest["files"][name])
+            dependencies.append(str(path))
+    executable = folder / "boundary-proof"
+    command([cc, folder / "api.o", folder / "cpp.o", "-Wl,--start-group",
+             "-Wl,--whole-archive", core, "-Wl,--no-whole-archive", *dependencies,
+             "-Wl,--end-group", "-pthread", "-o", executable], timeout=180)
+    needed = re.findall(r"\(NEEDED\).*?Shared library:\s*\[([^\]]+)\]",
+                        command(["readelf", "-d", executable]))
+    reviewed_require(not (set(needed) - OS_NEEDED), "native ABI probe imports a non-OS library")
+    command([executable], timeout=30)
+    return len(api)
+
+
+def _verify(spec: dict, value: dict, package: Path, port: str, features: str,
+           version: str, name: str, built: set[str], frozen: set[str]) -> dict:
+    from . import cef_frozen_dependencies as replay
+    reviewed_require(port == "harfbuzz" and name == "lib/libharfbuzz.a" and version == "14.2.1"
+            and features.split(";") and set(features.split(";")) == {"core", "c-linker", "freetype"},
+            "unreviewed package profile")
+    prefix = Path(spec["prefix"])
+    installed = Path(spec.get("installed", ""))
+    reviewed_require(installed.is_absolute(), "bound installed consumer root required")
+    source, target = replay.member(prefix, name), replay.member(package, name)
+    reviewed_require(replay.sha(source) == REVIEW["archive_sha256"], "unreviewed frozen core")
+    missing, extra = built - frozen, frozen - built
+    for label, names in (("built_only", missing), ("frozen_only", extra)):
+        reviewed_require(len(names) == REVIEW[label + "_count"] and
+                digest_names(names) == REVIEW[label + "_sha256"], "unreviewed symbol difference")
+        details = replay.elf_details(target if label == "built_only" else source, names)
+        reviewed_require(all(n.startswith("_Z") and entries == [
+            {"type": "FUNC", "binding": "WEAK", "visibility": "HIDDEN"}]
+            for n, entries in details.items()), "difference is not the reviewed private implementation")
+    headers = {n: r for n, r in value["files"].items() if n.startswith("include/harfbuzz/")}
+    reviewed_require(hashlib.sha256(replay.canonical(headers)).hexdigest() == REVIEW["headers_sha256"],
+            "unreviewed public header inventory")
+    present = {p.relative_to(package).as_posix() for p in
+               (package / "include/harfbuzz").rglob("*") if p.is_file()}
+    reviewed_require(present == set(headers), "installed public boundary changed")
+    declarations = set()
+    for n, record in headers.items():
+        replay.checked(replay.member(package, n), record)
+        replay.checked(replay.member(prefix, n), record)
+        if n.endswith(".h"):
+            declarations.update(API.findall((package / n).read_text()))
+    api = {n for n in built if n.startswith("hb_")}
+    reviewed_require(api and api <= frozen and api <= declarations,
+            "public C ABI definitions or declarations changed")
+    built_public = replay.elf_details(target, api)
+    reviewed_require(built_public == replay.elf_details(source, api), "public ELF ABI attributes changed")
+    incoming = reference_inputs([prefix, package, installed], {source, target})
+    count = audit_incoming(incoming, missing)
+    # Nothing is installed until every proof succeeds. Compiler outputs and native
+    # executables are private temporary scratch, not package or frozen contents.
+    with tempfile.TemporaryDirectory(prefix="cef-hb-boundary-") as directory:
+        public_count = native_probe(Path(directory), prefix, package, value, api, missing, target)
+    return {"profile": PROFILE, "policy_sha256": replay.sha(Path(__file__)),
+            "archive_sha256": replay.sha(source), "public_api_count": public_count,
+            "private_definitions_reviewed": len(missing), "incoming_inputs_checked": count,
+            "public_headers_verified": len(headers), "static_link_and_api_verified": True}
+
+
+def reviewed_verify(spec: dict, value: dict, package: Path, port: str, features: str,
+           version: str, name: str, built: set[str], frozen: set[str],
+           *, diagnostics: Path | None = None) -> dict:
+    """Detailed failed native proofs stay in the encrypted-only diagnostic tree."""
+    from . import cef_frozen_dependencies as replay
+    trace: list[dict] = []
+    token = _TRACE.set(trace)
+    try:
+        return _verify(spec, value, package, port, features, version, name, built, frozen)
+    except (ValueError, OSError, subprocess.SubprocessError) as error:
+        if diagnostics is not None:
+            diagnostics = replay.clean_path(diagnostics)
+            for key in ("prefix", "packages", "installed"):
+                if key in spec:
+                    root = Path(spec[key])
+                    reviewed_require(not diagnostics.is_relative_to(root)
+                            and not root.is_relative_to(diagnostics), "unsafe diagnostic destination")
+            diagnostics.mkdir(mode=0o700, parents=True, exist_ok=True)
+            payload = {"schema": 1, "kind": "harfbuzz-boundary-failure",
+                       "profile": PROFILE, "error_type": type(error).__name__,
+                       "reason": str(error) if isinstance(error, ValueError) else "native-command-exception",
+                       "commands": trace, "runtime_verified": False}
+            fd = os.open(diagnostics / "harfbuzz.json", os.O_WRONLY | os.O_CREAT | os.O_EXCL |
+                         getattr(os, "O_NOFOLLOW", 0), 0o600)
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(replay.canonical(payload))
+        raise
+    finally:
+        _TRACE.reset(token)
