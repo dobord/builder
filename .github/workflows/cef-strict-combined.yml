@@ -8,7 +8,9 @@ on:
       - secure_release/cef_strict_combined.py
       - secure_release/cef_freerdp_profile.py
       - secure_release/cef_frozen_dependencies.py
+      - secure_release/cef_frozen_evidence.py
       - tests/test_cef_frozen_dependencies.py
+      - tests/test_cef_frozen_evidence.py
       - tests/fixtures/cef-frozen-dependencies/**
       - triplets/x64-linux-static-release.cmake
       - tests/test_cef_freerdp_profile.py
@@ -138,7 +140,9 @@ jobs:
         env:
           CEF_FROZEN_VCPKG_ROOT: ${{ github.workspace }}/private-vcpkg/.full-upstream
           REQUIRE_CEF_FROZEN_VCPKG: '1'
-        run: python -m unittest discover -s tests -p test_cef_frozen_dependencies.py -v
+        run: |
+          python -m unittest discover -s tests -p test_cef_frozen_dependencies.py -v
+          python -m unittest discover -s tests -p test_cef_frozen_evidence.py -v
       - name: Verify declared FreeRDP features with hostile host libva before restore
         run: python -m unittest discover -s tests -p test_cef_freerdp_profile.py -v
       - name: Verify exact engine profile adapters before combined restore
@@ -148,10 +152,14 @@ jobs:
           python -m unittest discover -s tests -p test_cef_unwind_backtrace.py -v
           python -m unittest discover -s tests -p test_cef_qualification_workflows.py -v
       - name: Run checkpoint-resumed final combined SDK qualification
+        id: combined
         env:
           BUILDER_INPUT_PRIVATE_KEY: ${{ secrets.BUILDER_INPUT_PRIVATE_KEY }}
           GITHUB_TOKEN: ${{ github.token }}
         run: python -m secure_release.cef_strict_combined
+      - name: Summarize rejected symbol coverage without exposing diagnostics
+        if: ${{ failure() && steps.combined.outcome == 'failure' }}
+        run: python -m secure_release.cef_frozen_evidence
       - name: Upload non-sensitive combined qualification summary
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a

@@ -124,7 +124,139 @@ def exports(path: Path) -> set[str]:
     return names
 
 
-def replay(spec_path: Path, spec_sha: str, package: Path, port: str, triplet: str) -> dict:
+# Failure evidence is outside the package/prefix. It is collected only by the
+# existing encrypted diagnostic collector, NEVER installed/exported or printed.
+SYMBOL_EVIDENCE = "symbol-evidence"
+EVIDENCE_LIMIT = 16 * 1024**2
+_SYMBOL = re.compile(r"[A-Za-z_.$][A-Za-z0-9_.$@]*\Z")
+
+
+def elf_details(archive: Path, names: set[str]) -> dict:
+    """Describe a rejected difference; visibility never authorizes a replay."""
+    result = subprocess.run(["readelf", "--wide", "--symbols", str(archive)],
+                            capture_output=True, text=True, timeout=120,
+                            env=dict(os.environ, LC_ALL="C"))
+    require(result.returncode == 0 and len(result.stdout) <= 128 * 1024**2,
+            "Cannot inspect rejected frozen symbol metadata")
+    details: dict[str, set[tuple[str, str, str]]] = {n: set() for n in names}
+    for line in result.stdout.splitlines():
+        fields = line.split()
+        if (len(fields) == 8 and fields[0].endswith(":")
+                and fields[0][:-1].isdigit() and fields[-1] in names
+                and fields[6] != "UND"):
+            kind, binding, visibility = fields[3:6]
+            require(all(re.fullmatch(r"[A-Z0-9_]+", f) for f in (kind, binding, visibility)),
+                    "Unknown rejected ELF symbol metadata")
+            details[fields[-1]].add((kind, binding, visibility))
+    return {name: [{"type": t, "binding": b, "visibility": v}
+                   for t, b, v in sorted(entries)] for name, entries in sorted(details.items())}
+
+
+def record_mismatch(spec_path: Path, spec: dict, port: str, archives: list[dict],
+                    headers: int, features: str, version: str) -> None:
+    """Write exact differences before failing, without replacing any archive."""
+    require(len(features) <= 4096 and (not features or re.fullmatch(
+        r"[a-z0-9-]+(?:;[a-z0-9-]+)*", features)), "Invalid replay feature evidence")
+    require(len(version) <= 128 and (not version or re.fullmatch(
+        r"[A-Za-z0-9_.+:#-]+", version)), "Invalid replay version evidence")
+    directory = clean_path(spec_path.parent / SYMBOL_EVIDENCE)
+    for field in ("prefix", "packages"):
+        other = Path(spec[field])
+        require(not directory.is_relative_to(other) and not other.is_relative_to(directory),
+                "Symbol evidence overlaps protected inputs")
+    value = {"schema": 1, "kind": "cef-frozen-symbol-mismatch", "port": port,
+             "triplet": TRIPLET, "platform_sha256": spec["platform_sha256"],
+             "spec_sha256": sha(spec_path), "policy_sha256": sha(Path(__file__)),
+             "headers_verified": headers, "features": sorted(set(features.split(";"))) if features else [],
+             "version": version, "archives": archives, "runtime_verified": False}
+    data = canonical(value)
+    require(len(data) <= EVIDENCE_LIMIT, "Oversized frozen symbol evidence")
+    directory.mkdir(mode=0o700, exist_ok=True)
+    target = member(directory, port + ".json")
+    fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL |
+                 getattr(os, "O_NOFOLLOW", 0), 0o600)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+    except BaseException:
+        target.unlink(missing_ok=True)
+        raise
+
+
+def mismatch_summary(overlay: Path, platform_sha: str) -> dict:
+    """Release only fixed counters/validated package labels, never symbol names."""
+    directory = clean_path(overlay / SYMBOL_EVIDENCE)
+    if not directory.exists():
+        return {}
+    require(directory.is_dir(), "Invalid frozen symbol evidence directory")
+    spec_path = clean_path(overlay / "frozen-dependencies.json")
+    spec_sha = sha(spec_path)
+    spec, inventory = read_spec(spec_path, spec_sha)
+    require(spec["platform_sha256"] == platform_sha, "Frozen evidence platform changed")
+    paths = sorted(directory.iterdir())
+    require(0 < len(paths) <= 256, "Invalid frozen symbol report count")
+    reports, archive_count, candidate_count = [], 0, 0
+    weak_count, hidden_count, visible_count, cpp_count = 0, 0, 0, 0
+    complete = True
+    first_archive = None
+    for path in paths:
+        clean_path(path)
+        require(path.is_file() and path.stat().st_size <= EVIDENCE_LIMIT,
+                "Invalid frozen symbol evidence file")
+        value = json.loads(path.read_bytes())
+        require(isinstance(value, dict) and value.get("schema") == 1
+                and value.get("kind") == "cef-frozen-symbol-mismatch"
+                and value.get("platform_sha256") == platform_sha
+                and value.get("policy_sha256") == sha(Path(__file__))
+                and value.get("spec_sha256") == spec_sha
+                and value.get("runtime_verified") is False and value.get("triplet") == TRIPLET
+                and len(str(value.get("port"))) <= 128
+                and re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", str(value.get("port")))
+                and path.name == value["port"] + ".json"
+                and isinstance(value.get("archives"), list) and value["archives"],
+                "Unbound frozen symbol evidence")
+        reports.append(value["port"])
+        for record in value["archives"]:
+            name = record.get("archive", "")
+            member(directory, name)
+            require(name in inventory["archive_objects"] and len(Path(name).name) <= 128
+                    and record.get("frozen_sha256") == inventory["files"][name]["sha256"]
+                    and re.fullmatch(r"[A-Za-z0-9_.+-]+", Path(name).name)
+                    and all(re.fullmatch(r"[0-9a-f]{64}", str(record.get(k)))
+                            for k in ("built_sha256", "frozen_sha256"))
+                    and isinstance(record.get("built_only"), dict) and record["built_only"],
+                    "Invalid frozen archive symbol evidence")
+            first_archive = first_archive or Path(name).name
+            archive_count += 1
+            for symbol, entries in record["built_only"].items():
+                require(_SYMBOL.fullmatch(symbol) and isinstance(entries, list),
+                        "Invalid frozen symbol evidence record")
+                candidate_count += 1
+                cpp_count += int(symbol.startswith("_Z"))
+                complete &= bool(entries)
+                for entry in entries:
+                    require(isinstance(entry, dict) and set(entry) == {"type", "binding", "visibility"}
+                            and all(isinstance(v, str) and re.fullmatch(r"[A-Z0-9_]+", v)
+                                    for v in entry.values()), "Invalid ELF evidence fields")
+                weak_count += int(any(e["binding"] == "WEAK" for e in entries))
+                hidden_count += int(any(e["visibility"] in {"HIDDEN", "INTERNAL"} for e in entries))
+                visible_count += int(any(e["binding"] == "GLOBAL" and e["visibility"] in
+                                         {"DEFAULT", "PROTECTED"} for e in entries))
+    return {"frozen_symbol_evidence_verified": True,
+            "frozen_symbol_failure_category": "unproven-symbol-coverage",
+            "frozen_symbol_first_port": reports[0], "frozen_symbol_first_archive": first_archive,
+            "frozen_symbol_mismatched_archives": archive_count,
+            "frozen_symbol_built_only_count": candidate_count,
+            "frozen_symbol_weak_count": weak_count, "frozen_symbol_hidden_count": hidden_count,
+            "frozen_symbol_visible_global_count": visible_count,
+            "frozen_symbol_cpp_mangled_count": cpp_count,
+            "frozen_symbol_elf_metadata_complete": complete}
+
+
+def replay(spec_path: Path, spec_sha: str, package: Path, port: str, triplet: str,
+           *, features: str = "", version: str = "") -> dict:
     spec, value = read_spec(spec_path, spec_sha)
     require(re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", port) is not None
             and triplet == spec["triplet"], "Invalid frozen replay package identity")
@@ -145,7 +277,7 @@ def replay(spec_path: Path, spec_sha: str, package: Path, port: str, triplet: st
             checked(candidate, record)
             checked(member(prefix, name), record)
             headers.append(name)
-    records, staged = {}, []
+    records, staged, mismatches = {}, [], []
     receipt = member(package, "share/" + port + "/" + RECEIPT)
     require(not receipt.exists(), "Package already contains a frozen replay receipt")
     for name in selected:
@@ -157,9 +289,20 @@ def replay(spec_path: Path, spec_sha: str, package: Path, port: str, triplet: st
             require(stream.read(8) == b"!<arch>\n", "Frozen dependency is not a regular archive")
         with target.open("rb") as stream:
             require(stream.read(8) == b"!<arch>\n", "Built dependency is not a regular archive")
-        require(exports(target) <= exports(source),
-                "Frozen dependency would lose a built feature symbol: " + target.name)
+        built_names, frozen_names = exports(target), exports(source)
         records[name] = {"sha256": value["files"][name]["sha256"], "built_sha256": sha(target)}
+        if not built_names <= frozen_names:
+            mismatches.append({"archive": name, "built_sha256": records[name]["built_sha256"],
+                "frozen_sha256": records[name]["sha256"],
+                "built_export_count": len(built_names), "frozen_export_count": len(frozen_names),
+                "built_only": elf_details(target, built_names - frozen_names),
+                "frozen_only": elf_details(source, frozen_names - built_names)})
+    if mismatches:
+        record_mismatch(spec_path, spec, port, mismatches, len(headers), features, version)
+        # Preserve the original fail-closed symbol-superset rule. In particular,
+        # weak/hidden/C++ symbols are NOT automatically waived by diagnostics.
+        raise ValueError("Frozen dependency would lose a built feature symbol: "
+                         + Path(mismatches[0]["archive"]).name)
     # Validate all selected bytes and headers before the first replacement.
     # vcpkg has not installed or recorded ownership of this staging tree yet.
     try:
@@ -225,6 +368,7 @@ def materialize(destination: Path, base_triplet: Path, manifest: Path, prefix: P
         f'execute_process(COMMAND {_quote(Path(sys.executable))} {_quote(policy)}\n'
         f'  --spec {_quote(spec_path)} --sha256 "{hashlib.sha256(data).hexdigest()}"\n'
         '  --package "${CURRENT_PACKAGES_DIR}" --port "${PORT}" --triplet "${TARGET_TRIPLET}"\n'
+        '  --features "${FEATURES}" --version "${VERSION}"\n'
         '  COMMAND_ERROR_IS_FATAL ANY)\n', encoding="utf-8", newline="\n")
     triplet = destination / base_triplet.name
     triplet.write_text(
@@ -285,8 +429,11 @@ def main() -> None:
     parser.add_argument("--package", type=Path, required=True)
     parser.add_argument("--port", required=True)
     parser.add_argument("--triplet", required=True)
+    parser.add_argument("--features", default="")
+    parser.add_argument("--version", default="")
     args = parser.parse_args()
-    result = replay(args.spec, args.sha256, args.package, args.port, args.triplet)
+    result = replay(args.spec, args.sha256, args.package, args.port, args.triplet,
+                    features=args.features, version=args.version)
     if result["archives"]:
         print("CEF_FROZEN_DEPENDENCY_REPLAY " + json.dumps(result, sort_keys=True))
 
