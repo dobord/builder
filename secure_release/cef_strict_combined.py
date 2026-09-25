@@ -18,7 +18,10 @@ import subprocess
 import sys
 import time
 
-from . import build_support, cef_build, cef_contract, cef_nss_isolation, crypto, safeio
+from . import (
+    build_support, cef_build, cef_contract, cef_native_link_static,
+    cef_nss_isolation, cef_unwind_backtrace, cef_x11_static, crypto, safeio,
+)
 from . import cef_strict_iteration
 
 ENGINE_VCPKG = "b4bb281192ea8bb004542012ac804b988a4ff403"
@@ -305,24 +308,59 @@ def archive_checkout(source: Path, revision: str, target: Path) -> None:
         raise RuntimeError("Exact private source archive creation failed")
 
 
-def reviewed_cache_args(temp: Path) -> list[str]:
-    result = ["--binarysource=clear"]
-    seen = set()
-    for name in (
+def source_fresh_binary_args() -> list[str]:
+    """Final SDK graph must be reproducible without producer binary caches."""
+    cache_env = (
         "CEF_STRICT_BINARY_CACHE_CORE",
         "CEF_STRICT_BINARY_CACHE_CUPS",
         "CEF_STRICT_BINARY_CACHE_GBM",
-    ):
-        raw = os.environ.get(name)
-        if not raw:
-            raise ValueError("Missing reviewed strict binary cache")
-        path = Path(raw).resolve(strict=True)
-        if (not path.is_dir() or path.is_symlink()
-                or not path.is_relative_to(temp) or path in seen):
-            raise ValueError("Invalid reviewed strict binary cache")
-        seen.add(path)
-        result.append("--binarysource=files," + str(path) + ",read")
-    return result
+    )
+    if any(os.environ.get(name) for name in cache_env):
+        raise ValueError("Final combined SDK must not consume producer binary caches")
+    return ["--binarysource=clear"]
+
+
+ISOLATED_RUNTIME_SYMBOLS = frozenset({
+    "CEF_NSS_SHA256_Update",
+    "CEF_GTK_CODEC_jpeg_std_error",
+    "CEF_GTK_CODEC_TIFFOpen",
+})
+
+
+def verify_isolated_runtime_symbols(executable: Path) -> int:
+    """Prove relocated re-link consumed derived NSS/JPEG/TIFF providers."""
+    if not executable.is_file() or executable.is_symlink():
+        raise RuntimeError("Relocated CEF smoke executable is missing")
+    nm = shutil.which("nm")
+    if not nm:
+        raise RuntimeError("nm is required for relocated isolation verification")
+    result = subprocess.run(
+        [nm, "-a", "--defined-only", str(executable)],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, timeout=180,
+    )
+    if result.returncode or len(result.stdout) > 64 * 1024**2:
+        raise RuntimeError("Cannot inspect relocated CEF isolation symbols")
+    names = {
+        fields[-1]
+        for line in result.stdout.splitlines()
+        if (fields := line.split())
+    }
+    if ISOLATED_RUNTIME_SYMBOLS - names:
+        raise RuntimeError("Relocated CEF executable lost isolated static providers")
+    return len(ISOLATED_RUNTIME_SYMBOLS)
+
+
+def verify_os_only_elf(executable: Path) -> int:
+    dynamic = subprocess.check_output(
+        ["readelf", "-d", str(executable)], text=True, timeout=120
+    )
+    needed = re.findall(
+        r"\(NEEDED\).*?Shared library:\s*\[([^\]]+)\]", dynamic
+    )
+    if set(needed) - cef_x11_static.OS_NEEDED:
+        raise RuntimeError("Relocated CEF smoke imports non-OS shared libraries")
+    return len(needed)
 
 
 def main() -> None:
@@ -375,11 +413,9 @@ def main() -> None:
     if engine_work.exists():
         raise ValueError("Strict combined SDK requires a fresh restored engine path")
     engine_logs = root / "engine-logs"
-    recipe = root / "cef-recipe"
-    shutil.copytree(
-        recipe_checkout / "vcpkg", recipe / "vcpkg",
-        symlinks=False,
-    )
+    # Keep Git provenance available for exact checkpoint-recipe reconstruction.
+    # Later git archive reads the pinned revision, not reviewed worktree edits.
+    recipe = recipe_checkout
 
     summary_path = temp / "cef-strict-combined-summary.json"
     summary = {
@@ -404,6 +440,16 @@ def main() -> None:
             os.environ["BUILDER_INPUT_PRIVATE_KEY"],
             allow_resumable=False,
         )
+        restore_profile = cef_native_link_static.prepare_restore(
+            recipe / "vcpkg/ports/cef-static/source_build.py",
+            restored_package,
+        )
+        if (restore_profile.get("profile") != "native-link-v1"
+                or restore_profile.get("recorded_recipe_matched") is not True):
+            raise RuntimeError(
+                "Combined checkpoint recipe profile is not the qualified native-link state"
+            )
+        summary["checkpoint_recipe_profile"] = restore_profile["profile"]
         driver = recipe / "vcpkg/integration/driver.py"
         recipe_env = clean_environment()
         recipe_env.update({
@@ -462,6 +508,35 @@ def main() -> None:
             platform_sha,
             summary,
         )
+        source = engine_work / "download/chromium/src"
+        native_link = cef_native_link_static.install(source_build, source)
+        backtrace = cef_unwind_backtrace.install(source)
+        x11 = cef_x11_static.install(
+            source,
+            engine_work / "platform-inputs.json",
+            engine_work / "target-prefix",
+            platform_sha,
+        )
+        if (native_link.get("expat_backend") != "frozen-static-expat"
+                or native_link.get("unwind_backend") != "chromium-libunwind"
+                or backtrace.get("backend") != "in-tree-unwind-backtrace"
+                or x11.get("webrtc_x11_static") is not True
+                or x11.get("gtk_rendering") != "cairo-software"):
+            raise RuntimeError("Combined engine profile differs from qualified engine #83")
+        prebuild_elf = cef_x11_static.audit_native(source)
+        if prebuild_elf.get("runtime_native_elf_verified") is not True:
+            raise RuntimeError("Restored qualified engine no longer has an OS-only ELF")
+        summary.update({
+            "runtime_expat_backend": native_link["expat_backend"],
+            "runtime_unwind_backend": native_link["unwind_backend"],
+            "runtime_backtrace_backend": backtrace["backend"],
+            "runtime_x11_backend": "static-x11",
+            "runtime_webrtc_x11_static": True,
+            "runtime_gtk_rendering": x11["gtk_rendering"],
+            "runtime_native_elf_prebuild_verified": True,
+            "runtime_native_elf_prebuild_needed_count":
+                prebuild_elf["runtime_native_elf_needed_count"],
+        })
         stage = "engine-runtime"
         run(
             [sys.executable, source_build, "build",
@@ -471,6 +546,13 @@ def main() -> None:
              "--platform-sha256", platform_sha],
             cwd=recipe, env=recipe_env,
             log=root / "engine-runtime.log", timeout=21600,
+        )
+        postbuild_elf = cef_x11_static.audit_native(source)
+        if postbuild_elf.get("runtime_native_elf_verified") is not True:
+            raise RuntimeError("Combined engine runtime changed its OS-only ELF")
+        summary["runtime_native_elf_verified"] = True
+        summary["runtime_native_elf_needed_count"] = (
+            postbuild_elf["runtime_native_elf_needed_count"]
         )
         cef_nss_isolation.record_receipt(
             engine_work / "download/chromium/src", summary, required=True
@@ -559,7 +641,7 @@ def main() -> None:
             str(upstream / "vcpkg"), "install",
             *plan["platforms"]["linux"]["packages"],
             *install_args,
-            *reviewed_cache_args(temp),
+            *source_fresh_binary_args(),
             "--clean-buildtrees-after-build",
             "--clean-packages-after-build",
         ]
@@ -627,6 +709,20 @@ def main() -> None:
             cwd=root, env=build_env,
             log=root / "consumer-build.log", timeout=3600,
         )
+        relocated_smokes = [
+            path for path in smoke_build.rglob("cef_static_smoke")
+            if path.is_file() and not path.is_symlink()
+        ]
+        if len(relocated_smokes) != 1:
+            raise RuntimeError("Relocated SDK CEF smoke executable is missing")
+        summary["relocated_engine_isolation_symbol_count"] = (
+            verify_isolated_runtime_symbols(relocated_smokes[0])
+        )
+        summary["relocated_engine_isolation_symbols_verified"] = True
+        summary["relocated_engine_os_needed_count"] = verify_os_only_elf(
+            relocated_smokes[0]
+        )
+        summary["relocated_engine_os_only_elf_verified"] = True
         run(
             ["ctest", "--test-dir", smoke_build, "-C", "Release",
              "--output-on-failure", "--timeout", "120"],
