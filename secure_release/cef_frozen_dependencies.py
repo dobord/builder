@@ -416,11 +416,17 @@ def verify_installed(prefix: Path, manifest: Path, expected: str) -> dict:
     value = manifest_at(manifest, expected)
     clean_path(prefix)
     # Revalidate the source-defined metadata alias after install and relocation.
-    # The archive/header rules below still prohibit all redirected link inputs.
+    # The archive/header rules below still prohibit unknown redirected inputs.
     alias = prefix / "lib/pkgconfig/libcrypt.pc"
     if alias.is_symlink():
         require(cef_harfbuzz_boundary.verified_metadata_alias(alias, prefix, value),
                 "Installed libxcrypt metadata alias changed")
+    archive_aliases = {}
+    png_alias = prefix / "lib/libpng.a"
+    if png_alias.exists() or png_alias.is_symlink():
+        target = cef_harfbuzz_boundary.verified_archive_alias(png_alias, prefix, value)
+        require(target is not None, "Installed libpng archive alias changed")
+        archive_aliases["lib/libpng.a"] = target.relative_to(prefix).as_posix()
     owners = {}
     boundary_fields = {}
     for receipt in sorted((prefix / "share").glob("*/" + RECEIPT)):
@@ -464,16 +470,25 @@ def verify_installed(prefix: Path, manifest: Path, expected: str) -> dict:
     # The actual vcpkg file lists, not merely our receipts, establish ownership.
     lists = list((prefix.parent / "vcpkg/info").glob("*_" + TRIPLET + ".list"))
     listed = {}
+    alias_owners = {}
     for path in lists:
         clean_path(path)
         port = path.name.split("_", 1)[0]
         for name in path.read_text().splitlines():
+            if name.startswith(TRIPLET + "/") and name[len(TRIPLET) + 1:] in archive_aliases:
+                relative = name[len(TRIPLET) + 1:]
+                require(relative not in alias_owners, "Duplicate vcpkg archive alias owner")
+                alias_owners[relative] = port
             if name.startswith(TRIPLET + "/") and name[len(TRIPLET) + 1:] in owners:
                 relative = name[len(TRIPLET) + 1:]
                 require(relative not in listed, "Duplicate vcpkg dependency owner")
                 listed[relative] = port
     require(listed == owners, "Frozen dependencies lost vcpkg package ownership")
-    return {"frozen_dependency_archives_verified": len(owners),
+    require(alias_owners == {name: "libpng" for name in archive_aliases}
+            and all(owners.get(target) == "libpng" for target in archive_aliases.values()),
+            "libpng archive alias lost its canonical package ownership")
+    return {"frozen_dependency_archive_aliases_verified": len(archive_aliases),
+            "frozen_dependency_archives_verified": len(owners),
             "frozen_dependency_owners_verified": len(set(owners.values())), **boundary_fields}
 
 

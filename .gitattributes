@@ -16,3 +16,6 @@ tests/fixtures/cef-qualified-export/portfile.cmake text eol=lf
 
 # Byte-bound public HarfBuzz interface inventory.
 /ci/cef-harfbuzz-interface.json text eol=lf
+
+# Exact public libpng CMake alias fixture.
+/tests/fixtures/cef-libpng-alias/** text eol=lf

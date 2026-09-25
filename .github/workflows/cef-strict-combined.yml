@@ -13,6 +13,8 @@ on:
       - tests/test_cef_harfbuzz_boundary.py
       - tests/test_cef_harfbuzz_uploaded_proof.py
       - tests/test_cef_harfbuzz_metadata_alias.py
+      - tests/test_cef_harfbuzz_archive_alias.py
+      - tests/fixtures/cef-libpng-alias/**
       - secure_release/cef_frozen_evidence.py
       - tests/test_cef_frozen_dependencies.py
       - tests/test_cef_frozen_evidence.py
@@ -156,6 +158,7 @@ jobs:
           python -m unittest discover -s tests -p test_cef_harfbuzz_boundary.py -v
           python -m unittest discover -s tests -p test_cef_harfbuzz_uploaded_proof.py -v
           python -m unittest discover -s tests -p test_cef_harfbuzz_metadata_alias.py -v
+          python -m unittest discover -s tests -p test_cef_harfbuzz_archive_alias.py -v
       - name: Verify frozen archive ownership with native vcpkg before restore
         env:
           CEF_FROZEN_VCPKG_ROOT: ${{ github.workspace }}/private-vcpkg/.full-upstream

@@ -82,6 +82,46 @@ def verified_metadata_alias(path: Path, root: Path, inventory: dict) -> bool:
     return True
 
 
+def verified_archive_alias(path: Path, root: Path, inventory: dict) -> Path | None:
+    """Resolve libpng's source-defined alias to an authenticated link input.
+
+    Pinned libpng 1.6.58 CMakeLists.txt installs libpng.a -> libpng16.a
+    (upstream blob 69042960ffab9473270aa5434f2cf44ba21fb4aa). Unlike the
+    libxcrypt metadata alias, this MUST remain in both incoming-reference
+    audits. Accept only the literal same-directory target with exact frozen
+    archive bytes (or the identical regular copy used when links are copied).
+    Never resolve arbitrary library or directory symlinks.
+    """
+    alias, member = 'lib/libpng.a', 'lib/libpng16.a'
+    if path != root / alias or not (path.is_symlink() or path.is_file()):
+        return None
+    require(root.is_absolute() and root.is_dir(), 'Invalid libpng alias root')
+    if path.is_symlink():
+        require(os.readlink(path) == 'libpng16.a', 'Redirected libpng archive alias')
+    files = inventory.get('files', {})
+    record = files.get(member)
+    count = inventory.get('archive_objects', {}).get(member)
+    require(isinstance(record, dict) and set(record) == {'size', 'sha256'}
+            and type(record['size']) is int and record['size'] > 8
+            and isinstance(record['sha256'], str)
+            and re.fullmatch(r'[0-9a-f]{64}', record['sha256']) is not None
+            and type(count) is int and count > 0
+            and (alias not in files or files[alias] == record),
+            'Unbound libpng archive alias')
+    target = root / member
+    regular(target)  # No chained target or redirected parents.
+    require(target.stat().st_size == record['size']
+            and digest(target) == record['sha256'],
+            'libpng archive alias target differs from qualified bytes')
+    with target.open('rb') as stream:
+        require(stream.read(8) == b'!<arch>\n', 'libpng alias target is not a regular archive')
+    if not path.is_symlink():
+        regular(path)
+        require(path.stat().st_size == record['size'] and digest(path) == record['sha256'],
+                'Copied libpng alias differs from qualified bytes')
+    return target
+
+
 def symbols(archive: Path) -> tuple[dict[str, set[tuple[str,str,str]]], set[str]]:
     """Read all ELF definitions and references, not nm's lossy visibility view."""
     regular(archive)
@@ -242,9 +282,13 @@ def verify(*, package: Path, prefix: Path, inventory: dict, version: str,
     for root in (package/'lib',installed/'lib'):
         for path in root.rglob('*'):
             if path.is_symlink():
-                require(verified_metadata_alias(path, root.parent, inventory),
+                if verified_metadata_alias(path, root.parent, inventory):
+                    continue  # Metadata is not an ELF reference input.
+                target = verified_archive_alias(path, root.parent, inventory)
+                require(target is not None,
                         'Redirected surviving HarfBuzz consumer: ' + path.relative_to(root).as_posix())
-                continue  # Validated metadata only; not an ELF reference input.
+                others.append(target)  # Audit the actual qualified archive, never skip it.
+                continue
             if path.is_file() and path.suffix in {'.a','.o'}:
                 require(path.suffix == '.a','Unreviewed loose object in HarfBuzz consumers')
                 others.append(path)
@@ -354,11 +398,16 @@ def reference_inputs(roots: list[Path], excluded: set[Path],
         replay.clean_path(root)
         reviewed_require(root.is_dir(), "consumer root missing")
         for path in root.rglob("*"):
-            # This whole-root scan uses the SAME narrowly bound metadata rule.
-            # Never follow directory links or accept symbolic ELF inputs.
+            # Both proof stages resolve only the same source-defined aliases.
+            # Unknown symlinks remain fatal; a library alias remains a link input.
             if path.is_symlink():
-                reviewed_require(verified_metadata_alias(path, root, inventory or {}),
+                if verified_metadata_alias(path, root, inventory or {}):
+                    continue
+                target = verified_archive_alias(path, root, inventory or {})
+                reviewed_require(target is not None,
                                  "redirected consumer inventory: " + path.relative_to(root).as_posix())
+                if target not in excluded:
+                    paths.add(target)
                 continue
             if path.is_file() and path.suffix in {".a", ".o", ".obj", ".so"}:
                 if path not in excluded:
