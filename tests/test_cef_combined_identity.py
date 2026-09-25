@@ -145,7 +145,7 @@ class EnvironmentTests(unittest.TestCase):
 
 
 class CombinedOrchestrationTests(unittest.TestCase):
-    def exercise(self, incompatible=False):
+    def exercise(self, incompatible=False, source_unavailable=False):
         api = SummaryAPI()
         with tempfile.TemporaryDirectory() as folder, ExitStack() as stack:
             root = Path(folder).resolve()
@@ -186,6 +186,17 @@ class CombinedOrchestrationTests(unittest.TestCase):
                 events.append("host")
                 return current
             stack.enter_context(mock.patch.object(engine, "critical_host_fingerprint", side_effect=fingerprint))
+            def prefetch(actual_registry, upstream, root, env, summary):
+                self.assertEqual(actual_registry, registry)
+                self.assertEqual(upstream, registry / ".full-upstream")
+                self.assertEqual(env["ImageVersion"], ACTUAL)
+                self.assertNotIn("GITHUB_TOKEN", env)
+                self.assertNotIn("BUILDER_INPUT_PRIVATE_KEY", env)
+                events.append("source-prefetch")
+                if source_unavailable:
+                    raise RuntimeError("fixture source transport unavailable")
+            fetch = stack.enter_context(mock.patch.object(
+                combined.cef_dependency_source, "prefetch", side_effect=prefetch))
             def unseal(selected, package, build_key, key, *, allow_resumable):
                 self.assertIs(allow_resumable, False)
                 self.assertEqual(selected, api.selected)
@@ -213,12 +224,18 @@ class CombinedOrchestrationTests(unittest.TestCase):
             self.assertEqual(value["status"], "failed")
             self.assertIs(value["runtime_verified"], False)
             if incompatible:
+                fetch.assert_not_called()
                 transport.assert_not_called()
                 step.assert_not_called()
                 self.assertEqual(events, ["host"])
                 self.assertEqual(value["failure_stage"], "checkpoint-host-identity")
+            elif source_unavailable:
+                transport.assert_not_called()
+                step.assert_not_called()
+                self.assertEqual(events, ["host", "source-prefetch"])
+                self.assertEqual(value["failure_stage"], "dependency-source-prefetch")
             else:
-                self.assertEqual(events, ["host", "authenticated-transport", "recipe", "unchanged-driver"])
+                self.assertEqual(events, ["host", "source-prefetch", "authenticated-transport", "recipe", "unchanged-driver"])
                 self.assertEqual(value["failure_stage"], "checkpoint-restore")
                 self.assertEqual(value["runner_image_actual"], ACTUAL)
                 self.assertEqual(value["checkpoint_image_identity"], LOGICAL)
@@ -229,6 +246,9 @@ class CombinedOrchestrationTests(unittest.TestCase):
 
     def test_actual_main_rejects_host_before_large_download(self):
         self.exercise(incompatible=True)
+
+    def test_actual_main_rejects_unavailable_source_before_large_download(self):
+        self.exercise(source_unavailable=True)
 
 
 def _codec_roundtrip(snapshot: Path):
