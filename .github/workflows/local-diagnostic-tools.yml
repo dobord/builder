@@ -1,6 +1,6 @@
 name: Offline local diagnostic tools
 # No private inputs or decryption in Actions. Public source fixtures only.
-# Include the combined identity baseline for offline source/port regression.
+# Include the qualified export baseline for the combined #67 regression.
 on:
   push:
     branches: [feature/cef-static-integration]
