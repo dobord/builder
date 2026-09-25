@@ -1,6 +1,6 @@
 name: Offline local diagnostic tools
 # No private inputs or decryption in Actions. Public source fixtures only.
-# Include the pinned FreeRDP options/codec discovery for combined #68 regression.
+# Include current combined dependency ownership and pinned vcpkg packaging hooks.
 on:
   push:
     branches: [feature/cef-static-integration]
@@ -31,6 +31,8 @@ jobs:
           git rev-parse 'HEAD^{tree}' > "$kit/source-tree.txt"
           curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o "$kit/upstream/cef-source.tar.gz" https://github.com/dobord/cef/archive/2aff22e09daaa5c28780c5766a70ee13e61c93b6.tar.gz
           curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o "$kit/upstream/freerdp-source.tar.gz" https://github.com/FreeRDP/FreeRDP/archive/63b948ca5cb94307fd5444ee6e73927a41ccdab4.tar.gz
+          mkdir -p "$kit/upstream/vcpkg/scripts"
+          curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o "$kit/upstream/vcpkg/scripts/ports.cmake" https://raw.githubusercontent.com/microsoft/vcpkg/9e593bb18ea69cc5095e012465dcd675a822ed0d/scripts/ports.cmake
           for path in base/BUILD.gn base/debug/stack_trace_posix.cc base/debug/stack_trace_android.cc base/debug/debug.gni build/config/c++/c++.gni ui/gfx/x/BUILD.gn ui/gfx/x/xlib_support.cc ui/gfx/x/xlib.h ui/gfx/x/xlib_support.h ui/gfx/x/xlib_xcb.h ui/gtk/gtk_ui.cc third_party/expat/BUILD.gn tools/generate_library_loader/generate_library_loader.gni tools/generate_library_loader/generate_library_loader.py; do
             mkdir -p "$kit/upstream/$(dirname "$path")"
             curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o "$kit/upstream/$path" "https://raw.githubusercontent.com/chromium/chromium/79460ebecaa5625e57a5fb679a735659e73dc687/$path"
