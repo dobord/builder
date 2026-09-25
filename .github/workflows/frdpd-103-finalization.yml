@@ -93,7 +93,7 @@ jobs:
         run: |
           set -euo pipefail
           root="$RUNNER_TEMP/finalization-private"
-          FRDP_E2E_NO_BUILD=1 FRDP_E2E_IMAGE=frdpd-finalization:fixed FRDP_E2E_PROFILE_TIMEOUT=420 FRDP_E2E_ARTIFACTS="$root/local-e2e" COMPOSE_PROJECT_NAME="finalization-local-${GITHUB_RUN_ID}" bash "$root/source/server/frdp/test/e2e/run.sh" local >"$root/local-e2e.log" 2>&1
+          FRDP_E2E_NO_BUILD=1 FRDP_E2E_IMAGE=frdpd-finalization:fixed FRDP_E2E_PROFILE_TIMEOUT=420 FRDP_E2E_ARTIFACTS="$root/local-e2e/artifacts" COMPOSE_PROJECT_NAME="finalization-local-${GITHUB_RUN_ID}" bash "$root/source/server/frdp/test/e2e/run.sh" local >"$root/local-e2e.log" 2>&1
       - name: Encrypt all detailed evidence
         if: always()
         run: |
