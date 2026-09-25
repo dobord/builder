@@ -19,6 +19,7 @@ import sys
 import time
 
 from . import build_support, cef_build, cef_contract, cef_nss_isolation, crypto, safeio
+from . import cef_elf_evidence, cef_native_link_static, cef_smoke_progress, cef_unwind_backtrace, cef_x11_static
 from . import cef_strict_iteration
 
 ENGINE_VCPKG = "b4bb281192ea8bb004542012ac804b988a4ff403"
@@ -242,6 +243,280 @@ index 3a7f5aa..4bc04cf 100644
         raise ValueError("Unexpected lfc-ui versions registry delta")
 
 
+
+EXPORT_ISOLATION_MARKER = "# CEF_STATIC_EXPORT_ISOLATION_V1"
+EXPORT_ISOLATION_SOURCES = {
+    "lib/cef-nss/libcef_nss.a",
+    "lib/libgdk_pixbuf-2.0.a",
+    "lib/libjpeg.a",
+    "lib/libtiff.a",
+}
+
+
+def _replace_once(text: str, before: str, after: str, label: str) -> str:
+    if text.count(before) != 1:
+        raise ValueError("Pinned combined export anchor changed: " + label)
+    return text.replace(before, after, 1)
+
+
+def _patch_exporter(text: str) -> str:
+    """Make the final SDK preserve the four strict derived platform archives."""
+    if EXPORT_ISOLATION_MARKER in text:
+        raise ValueError("Pinned CEF exporter is already or partially patched")
+    helper_anchor = "def run(args: list[str | Path], cwd: Path, *, stdin: str | None = None) -> str:\n"
+    helper = r'''# CEF_STATIC_EXPORT_ISOLATION_V1
+def isolated_platform_replacements(out: Path, platform) -> dict[Path, dict]:
+    if platform is None:
+        return {}
+
+    def load(path: Path) -> dict:
+        if (not path.is_file() or path.is_symlink()
+                or path.stat().st_size > 4 * 1024 * 1024):
+            raise RuntimeError("Missing or unsafe static isolation receipt")
+        value = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(value, dict) or value.get("schema") != 1:
+            raise RuntimeError("Invalid static isolation receipt")
+        return value
+
+    def bind(kind: str, source_name: str, target: Path,
+             source_hash: str, derived_hash: str) -> tuple[Path, dict]:
+        record = platform.value.get("files", {}).get(source_name)
+        if (not isinstance(record, dict)
+                or record.get("sha256") != source_hash
+                or source_name not in platform.archives):
+            raise RuntimeError("Isolation source is outside the verified platform graph")
+        if (not target.is_file() or target.is_symlink()
+                or not target.resolve().is_relative_to(out.resolve())
+                or sha256(target) != derived_hash):
+            raise RuntimeError("Derived static isolation archive changed")
+        return target.resolve(), {
+            "kind": kind,
+            "platform_source": source_name,
+            "source_sha256": source_hash,
+            "derived_sha256": derived_hash,
+        }
+
+    result = {}
+    nss_root = out / ".cef-nss-isolation"
+    nss = load(nss_root / "receipt.json")
+    if (nss.get("kind") != "cef-nss-boringssl-symbol-isolation"
+            or not isinstance(nss.get("source_sha256"), str)
+            or not isinstance(nss.get("derived_sha256"), str)
+            or not isinstance(nss.get("redefined_symbols"), list)
+            or len(nss["redefined_symbols"]) != 10):
+        raise RuntimeError("Unexpected NSS isolation receipt")
+    path, record = bind(
+        "nss-boringssl", "lib/cef-nss/libcef_nss.a",
+        nss_root / "libcef_nss_isolated.a",
+        nss["source_sha256"], nss["derived_sha256"])
+    result[path] = record
+
+    codec_root = out / ".cef-gtk-codecs-v1"
+    codec = load(codec_root / "receipt.json")
+    expected = {"lib/libgdk_pixbuf-2.0.a", "lib/libjpeg.a", "lib/libtiff.a"}
+    archives = codec.get("archives")
+    if (codec.get("kind") != "cef-static-gtk-codec-namespace"
+            or not isinstance(archives, dict) or set(archives) != expected
+            or type(codec.get("renamed_symbols")) is not int
+            or codec["renamed_symbols"] <= 0):
+        raise RuntimeError("Unexpected GTK codec isolation receipt")
+    for source_name in sorted(archives):
+        item = archives[source_name]
+        if (not isinstance(item, dict)
+                or set(item) != {"file", "source_sha256", "sha256"}
+                or not isinstance(item["file"], str)
+                or "/" in item["file"] or "\\" in item["file"]):
+            raise RuntimeError("Malformed GTK codec isolation archive record")
+        path, record = bind(
+            "gtk-codec", source_name, codec_root / item["file"],
+            item["source_sha256"], item["sha256"])
+        if path in result:
+            raise RuntimeError("Duplicate derived static isolation archive")
+        result[path] = record
+    if {item["platform_source"] for item in result.values()} != {
+            "lib/cef-nss/libcef_nss.a", "lib/libgdk_pixbuf-2.0.a",
+            "lib/libjpeg.a", "lib/libtiff.a"}:
+        raise RuntimeError("Incomplete strict platform isolation replacement set")
+    return result
+
+
+'''
+    text = _replace_once(text, helper_anchor, helper + helper_anchor, "export helper")
+    text = _replace_once(
+        text,
+        '''    files = query_link_inputs(query)
+    objects, archives, resources, system_libs, manifest = [], [], [], [], []
+''',
+        '''    files = query_link_inputs(query)
+    replacements = isolated_platform_replacements(out, platform)
+    replaced_platform = {item["platform_source"] for item in replacements.values()}
+    linked_replacements: set[Path] = set()
+    objects, archives, resources, system_libs, manifest = [], [], [], [], []
+''',
+        "export query")
+    text = _replace_once(
+        text,
+        '''        path = raw.resolve()
+        if platform is not None and path.is_relative_to(platform.prefix):
+            # Reject aliases even if their destination is a captured archive.
+            if any(p.is_symlink() for p in (raw, *raw.parents)):
+                raise RuntimeError('Redirected external native link input: '+value)
+            platform.owns(path)
+            return
+''',
+        '''        path = raw.resolve()
+        if path in replacements:
+            linked_replacements.add(path)
+        if platform is not None and path.is_relative_to(platform.prefix):
+            # Reject aliases even if their destination is a captured archive.
+            if any(p.is_symlink() for p in (raw, *raw.parents)):
+                raise RuntimeError('Redirected external native link input: '+value)
+            platform_name = path.relative_to(platform.prefix).as_posix()
+            if platform_name in replaced_platform:
+                raise RuntimeError("Native link mixes original and isolated platform archive")
+            platform.owns(path)
+            return
+''',
+        "export platform input")
+    text = _replace_once(
+        text,
+        '''    if len(excluded_smoke) != 1 or not archives:
+        raise RuntimeError('Cannot isolate exactly one reference app object and a nonempty engine closure')
+''',
+        '''    if replacements:
+        if linked_replacements != set(replacements):
+            raise RuntimeError("Verified isolated archive is absent from the native link edge")
+        if platform is None or not replaced_platform.issubset(set(platform.archives)):
+            raise RuntimeError("Isolation replacement is absent from the verified GN platform graph")
+        if replaced_platform.intersection(platform.seen):
+            raise RuntimeError("Native edge retained unisolated platform archives")
+        platform.archives = [
+            name for name in platform.archives if name not in replaced_platform
+        ]
+    if len(excluded_smoke) != 1 or not archives:
+        raise RuntimeError('Cannot isolate exactly one reference app object and a nonempty engine closure')
+''',
+        "export edge guard")
+    text = _replace_once(
+        text,
+        '''    library_targets = []
+    windows_archive_names = []
+    for index, path in enumerate(archives):
+        name = f'cef_{index:04d}_'+hashlib.sha256(path.relative_to(source).as_posix().encode()).hexdigest()[:12]+suffix
+''',
+        '''    library_targets = []
+    windows_archive_names = []
+    isolation_exports = []
+    for index, path in enumerate(archives):
+        name = f'cef_{index:04d}_'+hashlib.sha256(path.relative_to(source).as_posix().encode()).hexdigest()[:12]+suffix
+        replacement = replacements.get(path.resolve())
+        if replacement is not None:
+            isolation_exports.append(dict(
+                replacement,
+                derived_input=path.relative_to(source).as_posix(),
+                sdk_archive=name,
+            ))
+''',
+        "export archive evidence")
+    text = _replace_once(
+        text,
+        '''    (share/'reference-build-receipt.json').write_text(json.dumps(receipt,indent=2)+'\\n')
+    inventory = {'schema':1,'cef_commit':CEF_COMMIT,'chromium_commit':CHROMIUM_COMMIT,
+''',
+        '''    (share/'reference-build-receipt.json').write_text(json.dumps(receipt,indent=2)+'\\n')
+    if len(isolation_exports) != len(replacements):
+        raise RuntimeError("Not every isolated platform archive was exported into the SDK")
+    inventory = {'schema':1,'cef_commit':CEF_COMMIT,'chromium_commit':CHROMIUM_COMMIT,
+''',
+        "export inventory guard")
+    text = _replace_once(
+        text,
+        '''                 'engine_linkage':'static','capi_only':True,
+                 'sdk_external_consumer_verified':False,
+                 'package_files':[{'path':p.relative_to(prefix).as_posix(),'sha256':sha256(p)}
+''',
+        '''                 'engine_linkage':'static','capi_only':True,
+                 'sdk_external_consumer_verified':False,
+                 'platform_isolation_replacements':sorted(
+                     isolation_exports, key=lambda item:item["platform_source"]),
+                 'package_files':[{'path':p.relative_to(prefix).as_posix(),'sha256':sha256(p)}
+''',
+        "export inventory evidence")
+    return text
+
+
+def prepare_cef_overlay(registry: Path, recipe_checkout: Path,
+                        root: Path, summary: dict) -> Path:
+    source_port = registry / "ports/cef-static"
+    overlay_root = root / "overlay-ports"
+    overlay = overlay_root / "cef-static"
+    if overlay_root.exists():
+        raise ValueError("Combined CEF overlay root already exists")
+    shutil.copytree(source_port, overlay, symlinks=False)
+
+    pristine = recipe_checkout / "vcpkg/ports/cef-static/export_static.py"
+    if not pristine.is_file() or pristine.is_symlink():
+        raise ValueError("Pinned CEF exporter is missing or redirected")
+    original = pristine.read_text(encoding="utf-8")
+    patched = _patch_exporter(original)
+    patched_path = overlay / "cef_export_static.py"
+    patched_path.write_text(patched, encoding="utf-8", newline="\n")
+
+    expected_original = crypto.digest(pristine)
+    expected_patched = crypto.digest(patched_path)
+    portfile = overlay / "portfile.cmake"
+    text = portfile.read_text(encoding="utf-8")
+    anchor = 'set(CEF_BUILD_CONTRACT_FILE "\${_contract_file}")\n'
+    hook = f'''file(SHA256 "\${{CEF_RECIPE_SOURCE}}/vcpkg/ports/cef-static/export_static.py" _cef_export_sha256)
+if(NOT _cef_export_sha256 STREQUAL "{expected_original}")
+    message(FATAL_ERROR "Pinned CEF exporter source changed before strict isolation overlay")
+endif()
+file(COPY_FILE "\${{CURRENT_PORT_DIR}}/cef_export_static.py"
+    "\${{CEF_RECIPE_SOURCE}}/vcpkg/ports/cef-static/export_static.py")
+file(SHA256 "\${{CEF_RECIPE_SOURCE}}/vcpkg/ports/cef-static/export_static.py" _cef_export_sha256)
+if(NOT _cef_export_sha256 STREQUAL "{expected_patched}")
+    message(FATAL_ERROR "Strict isolated CEF exporter bytes changed")
+endif()
+'''
+    portfile.write_text(
+        _replace_once(text, anchor, hook + anchor, "CEF overlay portfile"),
+        encoding="utf-8", newline="\n")
+    summary["cef_export_isolation_overlay_verified"] = True
+    summary["cef_export_isolation_policy_sha256"] = expected_patched
+    return overlay_root
+
+
+def verify_export_isolation(prefix: Path, summary: dict, label: str) -> None:
+    inventory_path = prefix / "share/cef-static/static-link-inventory.json"
+    if (not inventory_path.is_file() or inventory_path.is_symlink()
+            or inventory_path.stat().st_size > 64 * 1024**2):
+        raise RuntimeError("Final CEF static link inventory is missing")
+    value = json.loads(inventory_path.read_text(encoding="utf-8"))
+    replacements = value.get("platform_isolation_replacements")
+    if not isinstance(replacements, list) or len(replacements) != 4:
+        raise RuntimeError("Final CEF export lacks exact isolation replacements")
+    sources = {item.get("platform_source") for item in replacements if isinstance(item, dict)}
+    kinds = [item.get("kind") for item in replacements if isinstance(item, dict)]
+    if (sources != EXPORT_ISOLATION_SOURCES
+            or kinds.count("nss-boringssl") != 1
+            or kinds.count("gtk-codec") != 3
+            or any(not re.fullmatch(r"[0-9a-f]{64}", str(item.get("source_sha256")))
+                   or not re.fullmatch(r"[0-9a-f]{64}", str(item.get("derived_sha256")))
+                   or not re.fullmatch(r"cef_[0-9]{4}_[0-9a-f]{12}\\.a",
+                                       str(item.get("sdk_archive")))
+                   for item in replacements if isinstance(item, dict))):
+        raise RuntimeError("Final CEF isolation replacement inventory is malformed")
+    platform = value.get("platform")
+    if (not isinstance(platform, dict)
+            or not isinstance(platform.get("archives"), list)
+            or sources.intersection({
+                item.get("path") for item in platform["archives"] if isinstance(item, dict)
+            })):
+        raise RuntimeError("Final CEF metadata mixes isolated and original platform archives")
+    summary["cef_export_isolation_verified"] = True
+    summary["cef_export_isolation_replacement_count"] = 4
+    summary["cef_export_isolation_verified_at"] = label
+
 def clean_environment() -> dict[str, str]:
     return {
         key: value for key, value in os.environ.items()
@@ -306,23 +581,11 @@ def archive_checkout(source: Path, revision: str, target: Path) -> None:
 
 
 def reviewed_cache_args(temp: Path) -> list[str]:
-    result = ["--binarysource=clear"]
-    seen = set()
-    for name in (
-        "CEF_STRICT_BINARY_CACHE_CORE",
-        "CEF_STRICT_BINARY_CACHE_CUPS",
-        "CEF_STRICT_BINARY_CACHE_GBM",
-    ):
-        raw = os.environ.get(name)
-        if not raw:
-            raise ValueError("Missing reviewed strict binary cache")
-        path = Path(raw).resolve(strict=True)
-        if (not path.is_dir() or path.is_symlink()
-                or not path.is_relative_to(temp) or path in seen):
-            raise ValueError("Invalid reviewed strict binary cache")
-        seen.add(path)
-        result.append("--binarysource=files," + str(path) + ",read")
-    return result
+    # The previously reviewed external package-cache artifacts have expired.
+    # Do not substitute unreviewed bytes: the final SDK layer rebuilds its
+    # exact pinned vcpkg graph from source while the authenticated engine
+    # checkpoint supplies the qualified Chromium/platform workspace.
+    return ["--binarysource=clear"]
 
 
 def main() -> None:
@@ -404,6 +667,10 @@ def main() -> None:
             os.environ["BUILDER_INPUT_PRIVATE_KEY"],
             allow_resumable=False,
         )
+        source_build = recipe / "vcpkg/ports/cef-static/source_build.py"
+        restore_profile = cef_native_link_static.prepare_restore(
+            source_build, restored_package)
+        summary["native_link_restore_profile"] = restore_profile["profile"]
         driver = recipe / "vcpkg/integration/driver.py"
         recipe_env = clean_environment()
         recipe_env.update({
@@ -427,7 +694,6 @@ def main() -> None:
         shutil.rmtree(restored_package)
 
         stage = "engine-runtime"
-        source_build = recipe / "vcpkg/ports/cef-static/source_build.py"
         run(
             [sys.executable, source_build, "prepare",
              "--work", engine_work, "--logs", engine_logs, "--jobs", "2"],
@@ -462,6 +728,58 @@ def main() -> None:
             platform_sha,
             summary,
         )
+        source = engine_work / "download/chromium/src"
+        native_link = cef_native_link_static.install(source_build, source)
+        backtrace = cef_unwind_backtrace.install(source)
+        x11 = cef_x11_static.install(
+            source,
+            engine_work / "platform-inputs.json",
+            engine_work / "target-prefix",
+            platform_sha,
+        )
+        summary["runtime_expat_backend"] = native_link["expat_backend"]
+        summary["runtime_unwind_backend"] = native_link["unwind_backend"]
+        summary["runtime_backtrace_backend"] = backtrace["backend"]
+        summary["runtime_x11_backend"] = "static-x11"
+        summary["runtime_webrtc_x11_static"] = True
+        summary["runtime_x11_platform_archive_count"] = x11["platform_archives"]
+
+        run(
+            [sys.executable, source_build, "check",
+             "--work", engine_work, "--logs", engine_logs, "--jobs", "4",
+             "--platform-manifest", engine_work / "platform-inputs.json",
+             "--platform-prefix", engine_work / "target-prefix",
+             "--platform-sha256", platform_sha],
+            cwd=recipe, env=recipe_env,
+            log=root / "engine-gn-check.log", timeout=7200,
+        )
+        graph_receipt = json.loads(
+            (engine_logs / "platform-graph-receipt.json").read_text())
+        if (graph_receipt.get("schema") != 1
+                or graph_receipt.get("status") != "static-platform-graph-verified"
+                or graph_receipt.get("manifest_sha256") != platform_sha
+                or not isinstance(graph_receipt.get("archives"), list)
+                or not graph_receipt["archives"]):
+            raise RuntimeError("Combined engine GN graph qualification is incomplete")
+
+        smoke_identity = cef_smoke_progress.install(
+            source, recipe / "vcpkg/ports/cef-static/smoke.c")
+        progress = engine_logs / "runtime-progress"
+        progress.mkdir(mode=0o700, exist_ok=True)
+        progress.chmod(0o700)
+        recipe_env["CEF_STATIC_SMOKE_PROGRESS_DIR"] = str(progress)
+        summary["runtime_smoke_fixture_sha256"] = smoke_identity["patched_sha256"]
+
+        native_elf = cef_x11_static.audit_native(source)
+        summary.update(native_elf)
+        if not native_elf["runtime_native_elf_verified"]:
+            summary.update(cef_elf_evidence.inspect(
+                source,
+                expected_needed=native_elf["runtime_native_elf_needed_count"],
+                expected_unexpected=native_elf["runtime_native_elf_unexpected_count"],
+            ))
+            raise RuntimeError("Combined restored engine ELF imports non-OS libraries")
+
         stage = "engine-runtime"
         run(
             [sys.executable, source_build, "build",
@@ -472,9 +790,17 @@ def main() -> None:
             cwd=recipe, env=recipe_env,
             log=root / "engine-runtime.log", timeout=21600,
         )
-        cef_nss_isolation.record_receipt(
-            engine_work / "download/chromium/src", summary, required=True
-        )
+        summary.update(cef_smoke_progress.classify(engine_logs))
+        native_elf = cef_x11_static.audit_native(source)
+        summary.update(native_elf)
+        if not native_elf["runtime_native_elf_verified"]:
+            summary.update(cef_elf_evidence.inspect(
+                source,
+                expected_needed=native_elf["runtime_native_elf_needed_count"],
+                expected_unexpected=native_elf["runtime_native_elf_unexpected_count"],
+            ))
+            raise RuntimeError("Combined engine ELF changed during runtime verification")
+        cef_nss_isolation.record_receipt(source, summary, required=True)
         receipt = json.loads((engine_logs / "engine-build-receipt.json").read_text())
         if (receipt.get("source_build_verified") is not True
                 or receipt.get("engine_linkage") != "static"
@@ -527,6 +853,7 @@ def main() -> None:
         source_ports = list(plan["ports"]) + [{"name": "cef-static", "sha": CEF}]
         build_support.protect_source_archives(registry, downloads, source_ports)
         cef_build.materialize(registry, cfg, "linux", platform_sha)
+        overlay_ports = prepare_cef_overlay(registry, recipe_checkout, root, summary)
 
         stage = "vcpkg-install"
         build_env = build_support.build_environment(
@@ -551,6 +878,7 @@ def main() -> None:
         install_args = build_support.native_release_options([
             "--triplet=" + TRIPLET,
             "--host-triplet=" + TRIPLET,
+            "--overlay-ports=" + str(overlay_ports),
             "--overlay-ports=" + str(registry / "ports"),
             "--overlay-triplets=" + str(workspace / "triplets"),
             "--x-install-root=" + str(installed),
@@ -567,6 +895,9 @@ def main() -> None:
             command, cwd=upstream, env=build_env,
             log=root / "vcpkg-install.log", timeout=21600,
         )
+        summary["sdk_binary_cache_mode"] = "source-fresh-no-binary-cache"
+        verify_export_isolation(
+            installed / TRIPLET, summary, "installed-prefix")
 
         stage = "vcpkg-export"
         package_names = list(dict.fromkeys(
@@ -592,6 +923,9 @@ def main() -> None:
             consumer_sdk,
             [installed, sdk, upstream / "buildtrees", upstream / "packages"],
         )
+        verify_export_isolation(
+            consumer_sdk / "installed" / TRIPLET,
+            summary, "relocated-sdk")
         shutil.rmtree(installed)
         shutil.rmtree(export_root)
         if installed.exists() or export_root.exists():
