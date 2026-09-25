@@ -7,6 +7,9 @@ on:
       - .github/workflows/cef-strict-combined.yml
       - secure_release/cef_strict_combined.py
       - secure_release/cef_freerdp_profile.py
+      - secure_release/cef_frozen_dependencies.py
+      - tests/test_cef_frozen_dependencies.py
+      - tests/fixtures/cef-frozen-dependencies/**
       - triplets/x64-linux-static-release.cmake
       - tests/test_cef_freerdp_profile.py
       - tests/fixtures/freerdp-host-isolation/**
@@ -131,6 +134,11 @@ jobs:
         env:
           REQUIRE_CEF_COMBINED_PORT_FIXTURE: '1'
         run: python -m unittest discover -s tests -p test_cef_combined_port.py -v
+      - name: Verify frozen archive ownership with native vcpkg before restore
+        env:
+          CEF_FROZEN_VCPKG_ROOT: ${{ github.workspace }}/private-vcpkg/.full-upstream
+          REQUIRE_CEF_FROZEN_VCPKG: '1'
+        run: python -m unittest discover -s tests -p test_cef_frozen_dependencies.py -v
       - name: Verify declared FreeRDP features with hostile host libva before restore
         run: python -m unittest discover -s tests -p test_cef_freerdp_profile.py -v
       - name: Verify exact engine profile adapters before combined restore

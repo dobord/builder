@@ -10,3 +10,6 @@ tests/fixtures/cef-qualified-export/portfile.cmake text eol=lf
 
 # Public pinned FreeRDP regression inputs are byte-verified.
 /tests/fixtures/freerdp-host-isolation/** text eol=lf
+
+# The exact vcpkg package hook must remain byte-identical on all runners.
+/tests/fixtures/cef-frozen-dependencies/** text eol=lf

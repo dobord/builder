@@ -24,7 +24,7 @@ from . import (
 )
 from . import (
     cef_combined_identity, cef_combined_port, cef_dependency_source,
-    cef_freerdp_profile, cef_strict_iteration,
+    cef_freerdp_profile, cef_frozen_dependencies, cef_strict_iteration,
 )
 
 ENGINE_VCPKG = "b4bb281192ea8bb004542012ac804b988a4ff403"
@@ -653,11 +653,19 @@ def main() -> None:
             log=root / "vcpkg-bootstrap.log", timeout=600,
         )
         installed = root / "installed"
+        stage = "frozen-dependency-ownership"
+        replay_triplets = cef_frozen_dependencies.materialize(
+            root / "qualified-triplets", workspace / "triplets" / (TRIPLET + ".cmake"),
+            engine_work / "platform-inputs.json", engine_work / "target-prefix",
+            platform_sha, upstream / "packages", upstream / "scripts/ports.cmake",
+        )
+        summary["frozen_dependency_replay_abi_tracked"] = True
+        stage = "vcpkg-install"
         install_args = build_support.native_release_options([
             "--triplet=" + TRIPLET,
             "--host-triplet=" + TRIPLET,
             "--overlay-ports=" + str(registry / "ports"),
-            "--overlay-triplets=" + str(workspace / "triplets"),
+            "--overlay-triplets=" + str(replay_triplets),
             "--x-install-root=" + str(installed),
         ])
         command = [
@@ -673,6 +681,10 @@ def main() -> None:
             log=root / "vcpkg-install.log", timeout=21600,
         )
 
+        stage = "installed-frozen-dependencies"
+        summary.update(cef_frozen_dependencies.verify_installed(
+            installed / TRIPLET, engine_work / "platform-inputs.json", platform_sha
+        ))
         stage = "installed-freerdp-profile"
         summary.update(cef_freerdp_profile.verify(installed / TRIPLET))
 
@@ -722,6 +734,12 @@ def main() -> None:
                 or crypto.parse(contract_path.read_bytes()) != expected_contract):
             raise RuntimeError("Final SDK CEF build contract differs from the signed plan")
 
+        stage = "relocated-frozen-dependencies"
+        cef_frozen_dependencies.verify_installed(
+            consumer_sdk / "installed" / TRIPLET,
+            engine_work / "platform-inputs.json", platform_sha,
+        )
+        summary["relocated_frozen_dependencies_verified"] = True
         stage = "relocated-isolation-proof"
         summary["relocated_isolated_archive_count"] = cef_combined_port.verify_packaged_isolation(
             consumer_sdk / "installed" / TRIPLET,

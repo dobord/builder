@@ -1,0 +1,295 @@
+"""Replay exact qualified platform archives inside their owning vcpkg packages.
+
+A new source build is not guaranteed to reproduce the checkpoint's archive
+bytes. Never change the engine manifest or turn its SHA256 checks into ABI
+claims. An ABI-tracked post-portfile hook reuses the authenticated, requalified
+archives BEFORE vcpkg installs/owns the package. Built headers must match the
+frozen headers byte-for-byte; metadata and other package contents stay intact.
+No writes to the frozen prefix or to an already installed package are allowed.
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path, PurePosixPath
+import re
+import shutil
+import sys
+import subprocess
+import tempfile
+
+TRIPLET = "x64-linux-static-release"
+PORTS_BLOB = "244769fb406f1248c8d3b7cce0f8ff5075777d7f"
+RECEIPT = "cef-frozen-platform-replay.json"
+
+
+def require(ok: bool, message: str) -> None:
+    if not ok:
+        raise ValueError(message)
+
+
+def sha(path: Path) -> str:
+    with path.open("rb") as stream:
+        return hashlib.file_digest(stream, "sha256").hexdigest()
+
+
+def canonical(value: dict) -> bytes:
+    return (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode()
+
+
+def clean_path(path: Path) -> Path:
+    path = path.absolute()
+    require(not any(p.is_symlink() for p in (path, *path.parents)),
+            "Redirected frozen dependency path")
+    return path
+
+
+def member(root: Path, name: str) -> Path:
+    require(isinstance(name, str) and name == PurePosixPath(name).as_posix()
+            and not name.startswith("/") and "\\" not in name
+            and all(p not in ("", ".", "..") for p in name.split("/")),
+            "Invalid frozen dependency member")
+    path = clean_path(root / name)
+    require(path.is_relative_to(root.absolute()), "Escaped frozen dependency member")
+    return path
+
+
+def checked(path: Path, record: dict) -> None:
+    require(path.is_file() and not path.is_symlink()
+            and path.stat().st_size == record["size"] and sha(path) == record["sha256"],
+            "Frozen dependency bytes differ: " + path.name)
+
+
+def manifest_at(path: Path, expected: str) -> dict:
+    path = clean_path(path)
+    require(re.fullmatch(r"[0-9a-f]{64}", expected) is not None
+            and path.is_file() and path.stat().st_size <= 16 * 1024**2
+            and sha(path) == expected, "Frozen dependency manifest identity changed")
+    value = json.loads(path.read_bytes())
+    require(isinstance(value, dict) and value.get("schema") == 1
+            and value.get("kind") == "linux-x64-static-platform-build-inputs"
+            and value.get("runtime_verified") is False
+            and isinstance(value.get("files"), dict)
+            and isinstance(value.get("archive_objects"), dict)
+            and 0 < len(value["archive_objects"]) <= 256,
+            "Invalid frozen dependency inventory")
+    for name, record in value["files"].items():
+        member(path.parent, name)
+        require(isinstance(record, dict) and set(record) == {"sha256", "size"}
+                and isinstance(record["sha256"], str)
+                and re.fullmatch(r"[0-9a-f]{64}", record["sha256"]) is not None
+                and type(record["size"]) is int and record["size"] >= 0,
+                "Invalid frozen dependency file identity")
+    for name, count in value["archive_objects"].items():
+        require(name.startswith("lib/") and name.endswith(".a")
+                and name in value["files"] and type(count) is int and count > 0,
+                "Invalid frozen dependency archive identity")
+    return value
+
+
+def read_spec(path: Path, expected: str) -> tuple[dict, dict]:
+    path = clean_path(path)
+    require(path.is_file() and path.stat().st_size <= 65536 and sha(path) == expected,
+            "Frozen dependency replay specification changed")
+    spec = json.loads(path.read_bytes())
+    require(isinstance(spec, dict) and set(spec) == {
+        "schema", "kind", "manifest", "platform_sha256", "prefix", "packages", "triplet"
+    } and spec["schema"] == 1 and spec["kind"] == "cef-frozen-dependency-replay"
+        and spec["triplet"] == TRIPLET, "Invalid frozen replay specification")
+    for key in ("prefix", "packages", "manifest"):
+        require(isinstance(spec[key], str) and Path(spec[key]).is_absolute(),
+                "Nonabsolute frozen replay input")
+        clean_path(Path(spec[key]))
+    prefix, packages = Path(spec["prefix"]), Path(spec["packages"])
+    require(not prefix.is_relative_to(packages) and not packages.is_relative_to(prefix),
+            "Frozen and package roots overlap")
+    return spec, manifest_at(Path(spec["manifest"]), spec["platform_sha256"])
+
+
+def exports(path: Path) -> set[str]:
+    result = subprocess.run(["nm", "-P", "-g", "--defined-only", str(path)],
+                            capture_output=True, text=True, timeout=120)
+    require(result.returncode == 0 and len(result.stdout) <= 64 * 1024**2,
+            "Cannot verify frozen dependency symbol surface")
+    names = set()
+    for line in result.stdout.splitlines():
+        if not line.strip() or line.endswith(":"):
+            continue
+        fields = line.split()
+        require(len(fields) >= 2 and re.fullmatch(r"[A-Za-z_.$][A-Za-z0-9_.$@]*", fields[0])
+                is not None, "Unrecognized frozen dependency symbol")
+        names.add(fields[0])
+    return names
+
+
+def replay(spec_path: Path, spec_sha: str, package: Path, port: str, triplet: str) -> dict:
+    spec, value = read_spec(spec_path, spec_sha)
+    require(re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", port) is not None
+            and triplet == spec["triplet"], "Invalid frozen replay package identity")
+    package = clean_path(package)
+    require(package == Path(spec["packages"]) / (port + "_" + triplet)
+            and package.is_dir(), "Replay is only permitted in the owning package staging directory")
+    prefix = Path(spec["prefix"])
+    selected = [n for n in value["archive_objects"] if member(package, n).exists()]
+    if not selected:
+        return {"archives": 0, "replaced": 0, "headers": 0}
+    # Refuse a different ABI surface rather than transplanting headers too.
+    headers = []
+    for name, record in value["files"].items():
+        if name in value["archive_objects"] or name.endswith(".pc"):
+            continue
+        candidate = member(package, name)
+        if candidate.exists():
+            checked(candidate, record)
+            checked(member(prefix, name), record)
+            headers.append(name)
+    records, staged = {}, []
+    receipt = member(package, "share/" + port + "/" + RECEIPT)
+    require(not receipt.exists(), "Package already contains a frozen replay receipt")
+    for name in selected:
+        source, target = member(prefix, name), member(package, name)
+        checked(source, value["files"][name])
+        require(target.is_file() and target.stat().st_nlink == 1,
+                "Invalid built dependency archive")
+        with source.open("rb") as stream:
+            require(stream.read(8) == b"!<arch>\n", "Frozen dependency is not a regular archive")
+        with target.open("rb") as stream:
+            require(stream.read(8) == b"!<arch>\n", "Built dependency is not a regular archive")
+        require(exports(target) <= exports(source),
+                "Frozen dependency would lose a built feature symbol: " + target.name)
+        records[name] = {"sha256": value["files"][name]["sha256"], "built_sha256": sha(target)}
+    # Validate all selected bytes and headers before the first replacement.
+    # vcpkg has not installed or recorded ownership of this staging tree yet.
+    try:
+        for name in selected:
+            target = member(package, name)
+            if records[name]["built_sha256"] == records[name]["sha256"]:
+                continue
+            fd, filename = tempfile.mkstemp(prefix=".cef-frozen-", dir=target.parent)
+            os.close(fd)
+            temporary = Path(filename)
+            staged.append((target, temporary))
+            shutil.copyfile(member(prefix, name), temporary)
+            checked(temporary, value["files"][name])
+            temporary.chmod(target.stat().st_mode & 0o777)
+        for target, temporary in staged:
+            os.replace(temporary, target)
+        for name in selected:
+            checked(member(package, name), value["files"][name])
+        receipt.parent.mkdir(parents=True, exist_ok=True)
+        with receipt.open("xb") as stream:
+            stream.write(canonical({"schema": 1, "kind": "cef-frozen-dependency-replay",
+                "port": port, "triplet": triplet, "platform_sha256": spec["platform_sha256"],
+                "archives": records, "headers_verified": len(headers), "runtime_verified": False}))
+    finally:
+        for _, temporary in staged:
+            temporary.unlink(missing_ok=True)
+    return {"archives": len(selected), "replaced": len(staged), "headers": len(headers)}
+
+
+def _quote(path: Path) -> str:
+    value = path.absolute().as_posix()
+    require(not any(c in value for c in '\n\r";$'), "Unquotable replay path")
+    return '"' + value + '"'
+
+
+def materialize(destination: Path, base_triplet: Path, manifest: Path, prefix: Path,
+                expected: str, packages: Path, ports_script: Path) -> Path:
+    """Create a local, explicit ABI universe before any package ABI is computed."""
+    for path in (destination, base_triplet, prefix, packages, ports_script):
+        clean_path(path)
+    value = manifest_at(manifest, expected)
+    raw = ports_script.read_bytes()
+    require(hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest() == PORTS_BLOB,
+            "Pinned vcpkg post-portfile ordering changed")
+    require(base_triplet.name == TRIPLET + ".cmake" and base_triplet.is_file()
+            and not destination.exists(), "Invalid frozen replay triplet destination")
+    for name, record in value["files"].items():
+        checked(member(prefix, name), record)
+    spec = {"schema": 1, "kind": "cef-frozen-dependency-replay", "triplet": TRIPLET,
+            "manifest": str(manifest.absolute()), "platform_sha256": expected,
+            "prefix": str(prefix.absolute()), "packages": str(packages.absolute())}
+    destination.mkdir()
+    data = canonical(spec)
+    spec_path = destination / "frozen-dependencies.json"
+    spec_path.write_bytes(data)
+    policy = Path(__file__).resolve()
+    hook = destination / "frozen-dependencies.cmake"
+    hook.write_text(
+        '# Frozen archive reuse before vcpkg installs its owning package.\n'
+        f'file(SHA256 {_quote(policy)} _cef_policy_sha)\n'
+        f'if(NOT _cef_policy_sha STREQUAL "{sha(policy)}")\n'
+        '  message(FATAL_ERROR "Frozen replay policy changed")\nendif()\n'
+        f'execute_process(COMMAND {_quote(Path(sys.executable))} {_quote(policy)}\n'
+        f'  --spec {_quote(spec_path)} --sha256 "{hashlib.sha256(data).hexdigest()}"\n'
+        '  --package "${CURRENT_PACKAGES_DIR}" --port "${PORT}" --triplet "${TARGET_TRIPLET}"\n'
+        '  COMMAND_ERROR_IS_FATAL ANY)\n', encoding="utf-8", newline="\n")
+    triplet = destination / base_triplet.name
+    triplet.write_text(
+        '# ABI-tracked reuse of the runtime-qualified platform, not a binary cache.\n'
+        f'include({_quote(base_triplet)})\n'
+        f'list(APPEND VCPKG_POST_PORTFILE_INCLUDES {_quote(hook)})\n'
+        'list(APPEND VCPKG_HASH_ADDITIONAL_FILES\n' +
+        ''.join('  ' + _quote(p) + '\n' for p in (base_triplet, manifest, spec_path, policy, hook)) + ')\n',
+        encoding="utf-8", newline="\n")
+    return destination
+
+
+def verify_installed(prefix: Path, manifest: Path, expected: str) -> dict:
+    """Check exact archives, headers and owning-port receipts after installation/relocation."""
+    value = manifest_at(manifest, expected)
+    clean_path(prefix)
+    owners = {}
+    for receipt in sorted((prefix / "share").glob("*/" + RECEIPT)):
+        clean_path(receipt)
+        require(receipt.is_file() and receipt.stat().st_size <= 1024**2,
+                "Invalid packaged replay receipt")
+        record = json.loads(receipt.read_bytes())
+        port = receipt.parent.name
+        require(record.get("schema") == 1 and record.get("kind") == "cef-frozen-dependency-replay"
+                and record.get("platform_sha256") == expected and record.get("port") == port
+                and record.get("triplet") == TRIPLET and record.get("runtime_verified") is False
+                and isinstance(record.get("archives"), dict) and record["archives"],
+                "Packaged frozen replay identity changed")
+        for name, info in record["archives"].items():
+            require(name in value["archive_objects"] and name not in owners
+                    and info.get("sha256") == value["files"][name]["sha256"],
+                    "Duplicate or changed replay ownership")
+            owners[name] = port
+    require(set(owners) == set(value["archive_objects"]), "Incomplete frozen dependency replay")
+    for name, record in value["files"].items():
+        if not name.endswith(".pc"):
+            checked(member(prefix, name), record)
+    # The actual vcpkg file lists, not merely our receipts, establish ownership.
+    lists = list((prefix.parent / "vcpkg/info").glob("*_" + TRIPLET + ".list"))
+    listed = {}
+    for path in lists:
+        clean_path(path)
+        port = path.name.split("_", 1)[0]
+        for name in path.read_text().splitlines():
+            if name.startswith(TRIPLET + "/") and name[len(TRIPLET) + 1:] in owners:
+                relative = name[len(TRIPLET) + 1:]
+                require(relative not in listed, "Duplicate vcpkg dependency owner")
+                listed[relative] = port
+    require(listed == owners, "Frozen dependencies lost vcpkg package ownership")
+    return {"frozen_dependency_archives_verified": len(owners),
+            "frozen_dependency_owners_verified": len(set(owners.values()))}
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--spec", type=Path, required=True)
+    parser.add_argument("--sha256", required=True)
+    parser.add_argument("--package", type=Path, required=True)
+    parser.add_argument("--port", required=True)
+    parser.add_argument("--triplet", required=True)
+    args = parser.parse_args()
+    result = replay(args.spec, args.sha256, args.package, args.port, args.triplet)
+    if result["archives"]:
+        print("CEF_FROZEN_DEPENDENCY_REPLAY " + json.dumps(result, sort_keys=True))
+
+
+if __name__ == "__main__":
+    main()
