@@ -415,6 +415,12 @@ def verify_installed(prefix: Path, manifest: Path, expected: str) -> dict:
     """Check exact archives, headers and owning-port receipts after installation/relocation."""
     value = manifest_at(manifest, expected)
     clean_path(prefix)
+    # Revalidate the source-defined metadata alias after install and relocation.
+    # The archive/header rules below still prohibit all redirected link inputs.
+    alias = prefix / "lib/pkgconfig/libcrypt.pc"
+    if alias.is_symlink():
+        require(cef_harfbuzz_boundary.verified_metadata_alias(alias, prefix, value),
+                "Installed libxcrypt metadata alias changed")
     owners = {}
     boundary_fields = {}
     for receipt in sorted((prefix / "share").glob("*/" + RECEIPT)):

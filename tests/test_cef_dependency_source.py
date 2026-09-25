@@ -154,8 +154,19 @@ class NativeTests(unittest.TestCase):
             stack.enter_context(mock.patch.object(source, "REVISION", self.revision))
             stack.enter_context(mock.patch.object(source, "ARCHIVE_NAME", "cef-gbm-" + self.revision + ".tar.gz"))
             stack.enter_context(mock.patch.object(source, "_environment", side_effect=environment))
-            sleeper = stack.enter_context(mock.patch.object(source.time, "sleep"))
+            # Do not patch the process-global time.sleep used by subprocess
+            # polling / the native HTTP server (which may sleep for 0.001s).
+            timer = stack.enter_context(mock.patch.object(source, "time", spec=source.time))
+            sleeper = timer.sleep
             yield sleeper
+
+    def test_retry_clock_mock_does_not_intercept_process_polling(self):
+        import time
+        actual_sleep = time.sleep
+        with self.configuration("http://127.0.0.1/fixture") as sleeper:
+            self.assertIs(time.sleep, actual_sleep)
+            time.sleep(0.001)
+            sleeper.assert_not_called()
 
     def test_real_http_502_then_exact_git_archive_and_pinned_vcpkg_cache(self):
         report = {}
