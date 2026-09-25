@@ -11,6 +11,17 @@ set(VCPKG_ENV_PASSTHROUGH_UNTRACKED
     CEF_STATIC_PLATFORM_SHA256
 )
 set(X_VCPKG_FORCE_VCPKG_X_LIBRARIES ON)
+# FreeRDP's upstream VAAPI H264 default probes host libva even though the
+# pinned freerdp[ffmpeg,proxy,x11] port does not declare a libva dependency.
+# CEF's build-deps install libva-dev on the host: never absorb it into the
+# target SDK. Keep the requested FFmpeg audio/video/scaling features intact.
+# These port-specific options are part of the triplet ABI, not an untracked env.
+if(PORT STREQUAL "freerdp")
+    list(APPEND VCPKG_CMAKE_CONFIGURE_OPTIONS
+        -DWITH_VAAPI=OFF
+        -DWITH_VAAPI_H264_ENCODING=OFF
+    )
+endif()
 if(PORT STREQUAL "cef-toolchain-runtime")
     find_program(_cef_runtime_cc NAMES gcc-14 REQUIRED)
     execute_process(COMMAND "${_cef_runtime_cc}" -dumpmachine

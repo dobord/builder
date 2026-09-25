@@ -7,3 +7,6 @@ tests/fixtures/cef-qualified-export/portfile.cmake text eol=lf
 
 # Full pinned acquisition inputs are verified byte-for-byte on every OS.
 /tests/fixtures/cef-dependency-source/* text eol=lf
+
+# Public pinned FreeRDP regression inputs are byte-verified.
+/tests/fixtures/freerdp-host-isolation/** text eol=lf

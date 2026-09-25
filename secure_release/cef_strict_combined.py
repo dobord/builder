@@ -22,7 +22,10 @@ from . import (
     build_support, cef_build, cef_contract, cef_native_link_static,
     cef_nss_isolation, cef_unwind_backtrace, cef_x11_static, crypto, safeio,
 )
-from . import cef_combined_identity, cef_combined_port, cef_dependency_source, cef_strict_iteration
+from . import (
+    cef_combined_identity, cef_combined_port, cef_dependency_source,
+    cef_freerdp_profile, cef_strict_iteration,
+)
 
 ENGINE_VCPKG = "b4bb281192ea8bb004542012ac804b988a4ff403"
 SDK_VCPKG = "936bbb0e7cb7d6d10f8f5ef5874521466278c799"
@@ -670,6 +673,9 @@ def main() -> None:
             log=root / "vcpkg-install.log", timeout=21600,
         )
 
+        stage = "installed-freerdp-profile"
+        summary.update(cef_freerdp_profile.verify(installed / TRIPLET))
+
         stage = "installed-isolation-proof"
         cef_combined_port.verify_packaged_isolation(
             installed / TRIPLET, platform_sha, port_profile["binding_sha256"]
@@ -722,6 +728,8 @@ def main() -> None:
             platform_sha, port_profile["binding_sha256"],
         )
         summary["relocated_isolation_bytes_verified"] = True
+        cef_freerdp_profile.verify(consumer_sdk / "installed" / TRIPLET)
+        summary["relocated_freerdp_profile_verified"] = True
 
         stage = "combined-consumer"
         smoke_build = root / "smoke-build"
