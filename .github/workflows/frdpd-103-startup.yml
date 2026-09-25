@@ -1,0 +1,248 @@
+name: Bounded RAIL startup and native desktop validation
+on:
+  push:
+    branches: [investigate/frdpd-103-mstsc-20260924]
+    paths: ['.github/workflows/frdpd-103-startup.yml']
+permissions:
+  contents: read
+concurrency:
+  group: frdpd-103-startup-${{ github.ref }}
+  cancel-in-progress: false
+env:
+  SOURCE_SHA: 34c2d2a79f4a19640d2a34e65fa85196a3a4db66
+  CANDIDATE_SHA: 34c2d2a79f4a19640d2a34e65fa85196a3a4db66
+  CANDIDATE_TREE: 27175c998652d8b9731718ce40879caaefe34646
+  ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    outputs:
+      full_exit: ${{ steps.full.outputs.exit }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.13'
+      - name: Prepare encrypted workspace
+        run: |
+          python -m pip install --require-hashes --only-binary=:all: -r requirements.lock
+          mkdir -m 700 "$RUNNER_TEMP/startup-private"
+      - name: Fetch the fixed private source as data
+        env:
+          SOURCE_READ_TOKEN: ${{ secrets.SOURCE_READ_TOKEN }}
+        run: |
+          umask 077
+          python - <<'PY'
+          import os,subprocess,json
+          from pathlib import Path
+          root=Path(os.environ['RUNNER_TEMP'])/'startup-private';source=root/'source';ask=root/'askpass'
+          ask.write_text('#!/bin/sh\ncase "$1" in *Username*) echo x-access-token ;; *) printf "%s\\n" "$SOURCE_READ_TOKEN" ;; esac\n');ask.chmod(0o700)
+          try:
+              env=dict(os.environ,GIT_ASKPASS=str(ask),GIT_TERMINAL_PROMPT='0')
+              with (root/'fetch.log').open('w') as log:
+                  def git(*args):subprocess.run(['git',*args],env=env,stdout=log,stderr=log,check=True,timeout=300)
+                  git('init',str(source));git('-C',str(source),'remote','add','origin','https://github.com/dobord/frdpd.git')
+                  git('-C',str(source),'fetch','--depth=1','origin',os.environ['SOURCE_SHA']);git('-C',str(source),'checkout','--detach','FETCH_HEAD')
+                  tree=subprocess.check_output(['git','-C',str(source),'rev-parse','HEAD^{tree}'],text=True).strip()
+                  if tree!=os.environ['CANDIDATE_TREE']:raise RuntimeError('Source tree mismatch')
+                  git('-C',str(source),'-c','url.https://github.com/.insteadOf=git@github.com:','submodule','update','--init','--recursive','--depth=1')
+                  if subprocess.check_output(['git','-C',str(source/'freerdp'),'rev-parse','HEAD'],text=True).strip()!='aa8650b300aa4cabd85d9c72b431301509b9043f':raise RuntimeError('Upstream pin mismatch')
+                  (root/'provenance.json').write_text(json.dumps({'commit':os.environ['SOURCE_SHA'],'tree':tree,'source_edits':False,'builder':os.environ['GITHUB_SHA']}))
+          finally:ask.unlink(missing_ok=True)
+          PY
+      - name: Build unchanged source inside Docker
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/startup-private"
+          docker build --build-arg FRDP_BUILD_COMPONENT_TESTS=ON -f "$root/source/server/frdp/test/e2e/Dockerfile" -t frdpd-startup:fixed "$root/source" >"$root/build.log" 2>&1
+      - name: Test deadline boundaries, readiness permutations and related contracts
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/startup-private"
+          timeout -k 15s 300s docker run --rm --init --network none --entrypoint bash frdpd-startup:fixed -lc 'ctest --test-dir /opt/freerdp-build --output-on-failure --no-tests=error --timeout 90 -R "TestFreeRDPFrdp(RemoteAppContract|GfxPolicy|TransportPolicy|GraphicsAdapter|SharedBuffer|ListenerPolicyBoundary|X11WindowCapture.*|AgentStop|AgentNativeTopology|SessionResources|E2EScripts)$"' >"$root/focused.log" 2>&1
+      - name: Full wrapper without excluding existing failures
+        id: full
+        run: |
+          root="$RUNNER_TEMP/startup-private"
+          rc=0
+          timeout -k 20s 600s docker run --rm --init --network none --entrypoint bash frdpd-startup:fixed -lc 'FRDP_BUILD_DIR=/opt/freerdp-build FRDP_BUILD_JOBS=2 /src/scripts/test.sh' >"$root/full-wrapper.log" 2>&1 || rc=$?
+          printf 'full_exit=%s\n' "$rc" >"$root/status.txt"
+          echo "exit=$rc" >> "$GITHUB_OUTPUT"
+      - name: Complete independent client E2E on both backends
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/startup-private"
+          for backend in xorg-dummy xorg-native; do
+            FRDP_E2E_NO_BUILD=1 FRDP_E2E_IMAGE=frdpd-startup:fixed FRDP_LAYERED_DISPLAY_BACKEND="$backend" FRDP_E2E_PROFILE_TIMEOUT=300 FRDP_E2E_ARTIFACTS="$root/e2e-$backend" COMPOSE_PROJECT_NAME="startup-${backend}-${GITHUB_RUN_ID}" bash "$root/source/server/frdp/test/e2e/run-layered.sh" >"$root/e2e-$backend.log" 2>&1
+          done
+      - name: Export private runtime without source or source credentials
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/startup-private"
+          docker run --name startup-export --network none --entrypoint bash frdpd-startup:fixed -lc 'rm -rf /src /opt/freerdp-pristine-source /opt/freerdp-pristine-build; find /opt/freerdp-build -type d -name CMakeFiles -prune -exec rm -rf {} +; rm -rf /opt/freerdp-build/Testing; apt-get clean' >"$root/export.log" 2>&1
+          docker export startup-export | gzip -1 >"$root/native-rootfs.tar.gz"
+          docker rm startup-export >>"$root/export.log"
+      - name: Encrypt runtime for the dependent native jobs
+        env:
+          BUILDER_INPUT_PRIVATE_KEY: ${{ secrets.BUILDER_INPUT_PRIVATE_KEY }}
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from secure_release.crypto import encrypt_file,public_text
+          root=Path(os.environ['RUNNER_TEMP'])
+          encrypt_file(root/'startup-private'/'native-rootfs.tar.gz',root/'native.enc',public_text(os.environ['BUILDER_INPUT_PRIVATE_KEY']),{'purpose':'frdpd-103-native-input','run_id':os.environ['GITHUB_RUN_ID'],'source_sha':os.environ['SOURCE_SHA']})
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: startup-native-input-${{ github.run_id }}
+          path: ${{ runner.temp }}/native.enc
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+      - name: Encrypt Linux diagnostics
+        if: always()
+        run: |
+          python - <<'PY'
+          import os,tarfile
+          from pathlib import Path
+          from secure_release.crypto import encrypt_file
+          root=Path(os.environ['RUNNER_TEMP']);archive=root/'build.tar.gz'
+          with tarfile.open(archive,'w:gz') as out:
+              for p in (root/'startup-private').glob('*'):
+                  if p.name not in ('source','askpass','native-rootfs.tar.gz'):out.add(p,arcname=p.name)
+          encrypt_file(archive,root/'build.enc',os.environ['ARTIFACT_ENCRYPTION_PUBLIC_KEY'],{'purpose':'frdpd-103-startup-build','run_id':os.environ['GITHUB_RUN_ID'],'source_sha':os.environ['SOURCE_SHA'],'tree_sha':os.environ['CANDIDATE_TREE']})
+          archive.unlink()
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: encrypted-startup-build-${{ github.run_id }}
+          path: ${{ runner.temp }}/build.enc
+          retention-days: 1
+          compression-level: 0
+      - if: always()
+        run: |
+          sudo rm -rf "$RUNNER_TEMP/startup-private" "$RUNNER_TEMP/native.enc" "$RUNNER_TEMP/build.enc"
+  full-regression-gate:
+    needs: build
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Preserve the actual full regression outcome
+        env:
+          FULL_EXIT: ${{ needs.build.outputs.full_exit }}
+          BUILD_RESULT: ${{ needs.build.result }}
+        run: |
+          test "$BUILD_RESULT" = success && test "$FULL_EXIT" = 0
+  native:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025, windows-11-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    env:
+      SOURCE_RUN: ${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.13'
+          architecture: x64
+      - run: |
+          python -m pip install --require-hashes --only-binary=:all: -r requirements.lock
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/native-private" | Out-Null
+          python investigations/frdpd-103/test_native_platform.py
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
+      - name: Install authenticated native ARM64 QEMU only on ARM64 hosts
+        id: msys
+        if: matrix.os == 'windows-11-arm'
+        run: |
+          & ./investigations/frdpd-103/install-arm-vm.ps1
+      - name: Prepare the matching host platform without changing mstsc policy
+        env:
+          MSYS2_ROOT: ${{ steps.msys.outputs.msys2-location }}
+          NATIVE_HOST: ${{ matrix.os }}
+        run: |
+          @'
+          import os,runpy
+          from pathlib import Path
+          p=Path('investigations/frdpd-103/native.py')
+          api=runpy.run_path('investigations/frdpd-103/native-arm-platform.py')
+          if os.environ['NATIVE_HOST']=='windows-11-arm':
+              api['prepare']()
+          else:
+              s,_=api['verified_fixture'](p.read_bytes())
+              boot="set +e; sudo cloud-init status --wait --format=json; rc=$?; set -e; case $rc in 0|2) ;; *) exit $rc ;; esac; test -f /var/lib/cloud/instance/boot-finished; sudo systemctl is-active --quiet docker; sudo docker info >/dev/null\\n"
+              for a,b in [('time.monotonic()-stable_since>=10','time.monotonic()-stable_since>=30'),("REPORT.get('stable_window_seconds',0)>=10","REPORT.get('stable_window_seconds',0)>=30"),('FRDP_DISPLAY_BACKEND=xorg-dummy\\n','FRDP_DISPLAY_BACKEND=xorg-dummy\\nWLOG_LEVEL=DEBUG\\n'),('sudo cloud-init status --wait; sudo docker info >/dev/null\\n',boot)]:
+                  if s.count(a)!=1:raise RuntimeError('Native fixture hook changed')
+                  s=s.replace(a,b,1)
+              compile(s,str(p),'exec');p.write_bytes(s.encode())
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
+      - name: Handle only the fixture first-use consent
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File investigations/frdpd-103/native-preflight.ps1
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: startup-native-input-${{ github.run_id }}
+          path: ${{ runner.temp }}/native-cipher
+      - name: Authenticate the exact tested runtime
+        env:
+          BUILDER_INPUT_PRIVATE_KEY: ${{ secrets.BUILDER_INPUT_PRIVATE_KEY }}
+        run: |
+          @'
+          import os
+          from pathlib import Path
+          from secure_release.crypto import decrypt_file
+          root=Path(os.environ['RUNNER_TEMP'])
+          decrypt_file(root/'native-cipher'/'native.enc',root/'native-private'/'native-rootfs.tar.gz',os.environ['BUILDER_INPUT_PRIVATE_KEY'],{'purpose':'frdpd-103-native-input','run_id':os.environ['SOURCE_RUN'],'source_sha':os.environ['SOURCE_SHA']})
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
+      - name: Record real platform and run native RemoteApp
+        env:
+          MSYS2_ROOT: ${{ steps.msys.outputs.msys2-location }}
+        run: |
+          @{ os=(Get-CimInstance Win32_OperatingSystem | Select-Object Caption,Version,BuildNumber,OSArchitecture); video=(Get-CimInstance Win32_VideoController | Select-Object Name,DriverVersion) } | ConvertTo-Json -Depth 5 | Set-Content "$env:RUNNER_TEMP/native-private/host-product.json"
+          python investigations/frdpd-103/native.py
+          Set-Content "$env:RUNNER_TEMP/native-exit" $LASTEXITCODE
+          exit 0
+      - name: Encrypt client evidence
+        if: always()
+        env:
+          NATIVE_HOST: ${{ matrix.os }}
+        run: |
+          @'
+          import os,tarfile
+          from pathlib import Path
+          from secure_release.crypto import encrypt_file
+          root=Path(os.environ['RUNNER_TEMP']);archive=root/'native.tar.gz'
+          with tarfile.open(archive,'w:gz') as out:
+              for p in (root/'native-private').glob('*'):
+                  if p.is_file() and p.suffix in ('.log','.json','.txt','.png'):out.add(p,arcname=p.name)
+          encrypt_file(archive,root/'client.enc',os.environ['ARTIFACT_ENCRYPTION_PUBLIC_KEY'],{'purpose':'frdpd-103-startup-native','run_id':os.environ['GITHUB_RUN_ID'],'source_sha':os.environ['SOURCE_SHA'],'tree_sha':os.environ['CANDIDATE_TREE'],'os':os.environ['NATIVE_HOST']})
+          archive.unlink()
+          '@ | python -
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: encrypted-startup-${{ matrix.os }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/client.enc
+          retention-days: 1
+          compression-level: 0
+      - name: Clean and report actual result
+        if: always()
+        run: |
+          Get-Process qemu-system-x86_64 -ErrorAction SilentlyContinue | Stop-Process -Force
+          $rc=1
+          if (Test-Path "$env:RUNNER_TEMP/native-exit") {$rc=[int](Get-Content "$env:RUNNER_TEMP/native-exit")}
+          Remove-Item -Recurse -Force "$env:RUNNER_TEMP/native-private","$env:RUNNER_TEMP/native-cipher" -ErrorAction SilentlyContinue
+          exit $rc
