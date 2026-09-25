@@ -11,6 +11,21 @@ import time
 EXPECTED_FIXTURE = 'aaccff9fc516437479ba9cfb53e8440d065e2eb6'
 
 
+def blob_sha(data: bytes) -> str:
+    return hashlib.sha1(b'blob ' + str(len(data)).encode('ascii') + b'\0' + data).hexdigest()
+
+
+def verified_fixture(data: bytes, expected: str = EXPECTED_FIXTURE) -> tuple[str, dict]:
+    """Accept Git's CRLF checkout transform, never an unreviewed source edit."""
+    canonical = data.replace(b'\r\n', b'\n')
+    if b'\r' in canonical or blob_sha(canonical) != expected:
+        raise RuntimeError('Native fixture changed; review platform adapter before reuse')
+    return canonical.decode('utf-8'), {
+        'checkout_blob': blob_sha(data), 'canonical_blob': blob_sha(canonical),
+        'normalized_crlf': data != canonical,
+    }
+
+
 def pe_machine(path: Path) -> int:
     with path.open('rb') as stream:
         if stream.read(2) != b'MZ':
@@ -26,6 +41,11 @@ def pe_machine(path: Path) -> int:
 def prepare() -> None:
     root = Path(os.environ['RUNNER_TEMP']) / 'native-private'
     root.mkdir(exist_ok=True)
+    # Check source before starting any VM. Git's working-tree newline conversion
+    # is not a source change; the reviewed canonical blob stays pinned.
+    fixture = Path(__file__).with_name('native.py')
+    text, verification = verified_fixture(fixture.read_bytes())
+    (root / 'fixture-source.json').write_text(json.dumps(verification, indent=2))
     prefix = Path(os.environ['MSYS2_ROOT']) / 'clangarm64'
     qdir = prefix / 'bin'
     qemu, image_tool = qdir / 'qemu-system-x86_64.exe', qdir / 'qemu-img.exe'
@@ -59,12 +79,6 @@ def prepare() -> None:
                 except subprocess.TimeoutExpired:
                     proc.kill(); proc.wait(timeout=10)
             (root / 'platform-preflight.json').write_text(json.dumps(report, indent=2))
-    fixture = Path(__file__).with_name('native.py')
-    data = fixture.read_bytes()
-    blob = hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest()
-    if blob != EXPECTED_FIXTURE:
-        raise RuntimeError('Native fixture changed; review platform adapter before reuse')
-    text = data.decode('utf-8')
     start = text.index("    mark('verified-qemu-download')")
     end = text.index("    mark('verified-cloud-image-download')", start)
     replacement = "    mark('verified-native-arm-qemu')\n    qdir=Path(os.environ['MSYS2_ROOT'])/'clangarm64'/'bin'\n    qemu=qdir/'qemu-system-x86_64.exe'; image_tool=qdir/'qemu-img.exe'\n    ENV['PATH']=str(qdir)+os.pathsep+ENV['PATH']\n    REPORT['qemu_version']=run([str(qemu),'--version'],capture=True).stdout.decode(errors='replace')\n"
@@ -83,7 +97,7 @@ def prepare() -> None:
             raise RuntimeError('Native fixture hook is ambiguous or missing')
         text = text.replace(old, new, 1)
     compile(text, str(fixture), 'exec')
-    fixture.write_text(text, encoding='utf-8')
+    fixture.write_bytes(text.encode('utf-8'))
 
 
 if __name__ == '__main__':
