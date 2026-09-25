@@ -1,0 +1,95 @@
+name: Full local identity regression for startup candidate
+on:
+  push:
+    branches: [investigate/frdpd-103-mstsc-20260924]
+    paths: ['.github/workflows/frdpd-103-local-regression.yml']
+permissions:
+  contents: read
+concurrency:
+  group: frdpd-103-local-regression-${{ github.ref }}
+  cancel-in-progress: false
+env:
+  SOURCE_SHA: 34c2d2a79f4a19640d2a34e65fa85196a3a4db66
+  SOURCE_TREE: 27175c998652d8b9731718ce40879caaefe34646
+  ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
+jobs:
+  full-local:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.13'
+      - run: |
+          python -m pip install --require-hashes --only-binary=:all: -r requirements.lock
+          mkdir -m 700 "$RUNNER_TEMP/local-private"
+      - name: Fetch the same source without executing it
+        env:
+          SOURCE_READ_TOKEN: ${{ secrets.SOURCE_READ_TOKEN }}
+        run: |
+          umask 077
+          python - <<'PY'
+          import os,subprocess,json
+          from pathlib import Path
+          root=Path(os.environ['RUNNER_TEMP'])/'local-private';source=root/'source';ask=root/'askpass'
+          ask.write_text('#!/bin/sh\ncase "$1" in *Username*) echo x-access-token ;; *) printf "%s\\n" "$SOURCE_READ_TOKEN" ;; esac\n');ask.chmod(0o700)
+          try:
+              env=dict(os.environ,GIT_ASKPASS=str(ask),GIT_TERMINAL_PROMPT='0')
+              with (root/'fetch.log').open('w') as log:
+                  def git(*args):subprocess.run(['git',*args],env=env,stdout=log,stderr=log,check=True,timeout=300)
+                  git('init',str(source));git('-C',str(source),'remote','add','origin','https://github.com/dobord/frdpd.git')
+                  git('-C',str(source),'fetch','--depth=1','origin',os.environ['SOURCE_SHA']);git('-C',str(source),'checkout','--detach','FETCH_HEAD')
+                  tree=subprocess.check_output(['git','-C',str(source),'rev-parse','HEAD^{tree}'],text=True).strip()
+                  if tree!=os.environ['SOURCE_TREE']:raise RuntimeError('Source tree mismatch')
+                  git('-C',str(source),'-c','url.https://github.com/.insteadOf=git@github.com:','submodule','update','--init','--recursive','--depth=1')
+                  (root/'provenance.json').write_text(json.dumps({'commit':os.environ['SOURCE_SHA'],'tree':tree,'source_edits':False,'identity_fixture':'files-only NSS; default PAM denies; test-specific pam_wrapper remains authoritative','scope':'local identity only, not SSSD/domain or live systemd coverage'}))
+          finally:ask.unlink(missing_ok=True)
+          PY
+      - name: Build unchanged product in Docker
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/local-private"
+          docker build --build-arg FRDP_BUILD_COMPONENT_TESTS=ON -f "$root/source/server/frdp/test/e2e/Dockerfile" -t frdpd-local-regression:fixed "$root/source" >"$root/build.log" 2>&1
+      - name: Full suite with deterministic local identity and real child reaping
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/local-private"
+          rc=0
+          timeout -k 15s 600s docker run --rm --init --network none --entrypoint bash frdpd-local-regression:fixed -lc '
+            set -euo pipefail
+            sed -i -E "s/^(passwd|group|shadow):.*/\1: files/" /etc/nsswitch.conf
+            for service in frdpd frdpd-password; do
+              printf "%s\n" "auth required pam_deny.so" "account required pam_deny.so" "session required pam_deny.so" "password required pam_deny.so" >"/etc/pam.d/$service"
+            done
+            echo "Local fixture: no unavailable SSSD backend; unwrapped PAM denies; explicit pam_wrapper tests unchanged"
+            FRDP_BUILD_DIR=/opt/freerdp-build FRDP_BUILD_JOBS=2 /src/scripts/test.sh
+          ' >"$root/full-local.log" 2>&1 || rc=$?
+          printf 'full_local_exit=%s\n' "$rc" >"$root/status.txt"
+          exit "$rc"
+      - name: Encrypt actual status and full diagnostics
+        if: always()
+        run: |
+          python - <<'PY'
+          import os,tarfile
+          from pathlib import Path
+          from secure_release.crypto import encrypt_file
+          root=Path(os.environ['RUNNER_TEMP']);archive=root/'local.tar.gz'
+          with tarfile.open(archive,'w:gz') as out:
+              for p in (root/'local-private').glob('*'):
+                  if p.is_file() and p.suffix in ('.log','.json','.txt'):out.add(p,arcname=p.name)
+          encrypt_file(archive,root/'local.enc',os.environ['ARTIFACT_ENCRYPTION_PUBLIC_KEY'],{'purpose':'frdpd-103-full-local','run_id':os.environ['GITHUB_RUN_ID'],'source_sha':os.environ['SOURCE_SHA'],'tree_sha':os.environ['SOURCE_TREE']})
+          archive.unlink()
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: encrypted-full-local-${{ github.run_id }}
+          path: ${{ runner.temp }}/local.enc
+          retention-days: 1
+          compression-level: 0
+      - if: always()
+        run: |
+          sudo rm -rf "$RUNNER_TEMP/local-private" "$RUNNER_TEMP/local.enc"
