@@ -22,11 +22,11 @@ jobs:
             tree: ffa3bd512e739cc396ec56431f0759e501d9c359
             input_run: '36026580121'
             input_name: differential-input-36026580121
-          - variant: reviewed
-            source: 334cfa8554993578f48de643622cece6737a038b
-            tree: 5a528eda5c43118340173da77ad37de9311733ab
-            input_run: '36030883266'
-            input_name: review-native-input-36030883266
+          - variant: tcp-reviewed
+            source: ca82a3cea02ba7eb1655a2781a24003467300595
+            tree: 7e2506adb48269d2d8eabe3aadb4c222d5dd83c8
+            input_run: '36035005764'
+            input_name: tcp-native-input-36035005764
     runs-on: windows-11-arm
     timeout-minutes: 40
     env:
@@ -46,6 +46,10 @@ jobs:
       - run: |
           python -m pip install --require-hashes --only-binary=:all: -r requirements.lock
           New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/native-private" | Out-Null
+      - name: Test LF and CRLF checkout guard without starting a VM
+        run: |
+          python investigations/frdpd-103/test_native_platform.py
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
       - name: Install native ARM64 VM dependencies from authenticated distributions
         id: msys
         run: |
