@@ -309,7 +309,10 @@ def undefined(path: Path) -> set[str]:
 
 def reference_inputs(roots: list[Path], excluded: set[Path]) -> list[Path]:
     """Read-only consumer inventory; reject ambiguous/redirection-based graphs."""
-    from . import cef_frozen_dependencies as replay
+    if __package__:
+        from . import cef_frozen_dependencies as replay
+    else:  # vcpkg executes the owning replay module as a file.
+        import cef_frozen_dependencies as replay
     paths = set()
     for root in roots:
         replay.clean_path(root)
@@ -325,7 +328,10 @@ def reference_inputs(roots: list[Path], excluded: set[Path]) -> list[Path]:
 
 
 def audit_incoming(paths: list[Path], forbidden: set[str]) -> int:
-    from . import cef_frozen_dependencies as replay
+    if __package__:
+        from . import cef_frozen_dependencies as replay
+    else:  # vcpkg executes the owning replay module as a file.
+        import cef_frozen_dependencies as replay
     for path in paths:
         if path.suffix == ".a":
             with path.open("rb") as stream:
@@ -340,8 +346,14 @@ def audit_incoming(paths: list[Path], forbidden: set[str]) -> int:
 def native_probe(folder: Path, prefix: Path, package: Path, manifest: dict,
                  api: set[str], absent: set[str], target: Path) -> int:
     """Link ALL frozen core objects, not just the few objects reached by a smoke."""
-    from . import cef_frozen_dependencies as replay
-    from .cef_x11_static import OS_NEEDED
+    if __package__:
+        from . import cef_frozen_dependencies as replay
+    else:  # vcpkg executes the owning replay module as a file.
+        import cef_frozen_dependencies as replay
+    if __package__:
+        from .cef_x11_static import OS_NEEDED
+    else:
+        from cef_x11_static import OS_NEEDED
     cc = shutil.which("gcc-14") or shutil.which("cc")
     cxx = shutil.which("g++-14") or shutil.which("c++")
     reviewed_require(bool(cc and cxx and shutil.which("ld")), "native toolchain unavailable")
@@ -420,7 +432,10 @@ extern "C" int cpp_api_probe(void) {
 
 def _verify(spec: dict, value: dict, package: Path, port: str, features: str,
            version: str, name: str, built: set[str], frozen: set[str]) -> dict:
-    from . import cef_frozen_dependencies as replay
+    if __package__:
+        from . import cef_frozen_dependencies as replay
+    else:  # vcpkg executes the owning replay module as a file.
+        import cef_frozen_dependencies as replay
     reviewed_require(port == "harfbuzz" and name == "lib/libharfbuzz.a" and version == "14.2.1"
             and features.split(";") and set(features.split(";")) == {"core", "c-linker", "freetype"},
             "unreviewed package profile")
@@ -470,7 +485,10 @@ def reviewed_verify(spec: dict, value: dict, package: Path, port: str, features:
            version: str, name: str, built: set[str], frozen: set[str],
            *, diagnostics: Path | None = None) -> dict:
     """Detailed failed native proofs stay in the encrypted-only diagnostic tree."""
-    from . import cef_frozen_dependencies as replay
+    if __package__:
+        from . import cef_frozen_dependencies as replay
+    else:  # vcpkg executes the owning replay module as a file.
+        import cef_frozen_dependencies as replay
     trace: list[dict] = []
     token = _TRACE.set(trace)
     try:

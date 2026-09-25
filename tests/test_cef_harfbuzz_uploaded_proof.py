@@ -205,6 +205,32 @@ class Boundary(unittest.TestCase):
             added.assert_called_once()
         self.assertEqual((original.read_bytes(), original.stat().st_mtime_ns), before)
 
+    def test_real_post_portfile_top_level_import_runs_whole_boundary(self):
+        # The actual hook executes cef_frozen_dependencies.py as a script, so
+        # its HarfBuzz helper has no package context. Exercise that import mode
+        # in an isolated fresh process, not the package imported by unittest.
+        payload = {"review": self.review, "spec": self.spec, "value": self.value,
+                   "package": str(self.package), "built": sorted(self.built),
+                   "frozen": sorted(self.frozen)}
+        script = """import sys, json
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import cef_harfbuzz_boundary as boundary
+assert not boundary.__package__
+payload = json.load(sys.stdin)
+boundary.REVIEW = payload['review']
+proof = boundary.reviewed_verify(
+    payload['spec'], payload['value'], Path(payload['package']),
+    'harfbuzz', 'core;c-linker;freetype', '14.2.1', 'lib/libharfbuzz.a',
+    set(payload['built']), set(payload['frozen']))
+print(json.dumps(proof))
+"""
+        result = subprocess.run(
+            [sys.executable, "-I", "-c", script, str(ROOT / "secure_release")],
+            input=json.dumps(payload), capture_output=True, text=True, timeout=120)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(json.loads(result.stdout)['static_link_and_api_verified'])
+
     def test_installed_receipt_policy_remains_bound_to_composed_module(self):
         import inspect
         text = inspect.getsource(replay.materialize)
