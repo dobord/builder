@@ -1,0 +1,121 @@
+name: RAIL core finalization boundary
+on:
+  push:
+    branches: [investigate/frdpd-103-mstsc-20260924]
+    paths: ['.github/workflows/frdpd-103-finalization.yml']
+permissions:
+  contents: read
+concurrency:
+  group: frdpd-103-finalization-${{ github.ref }}
+  cancel-in-progress: false
+env:
+  SOURCE_SHA: df407241a6d59cac64f68c8cb8fdc69984425c02
+  SOURCE_TREE: 3462ab9d69d7ff62e86ecf15617304c1d3f08b9c
+  ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
+jobs:
+  linux-regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.13'
+      - name: Prepare private diagnostics
+        run: |
+          python -m pip install --require-hashes --only-binary=:all: -r requirements.lock
+          mkdir -m 700 "$RUNNER_TEMP/finalization-private"
+      - name: Fetch immutable authorized source as data
+        env:
+          SOURCE_READ_TOKEN: ${{ secrets.SOURCE_READ_TOKEN }}
+        run: |
+          umask 077
+          python - <<'PY'
+          import os,subprocess,json
+          from pathlib import Path
+          root=Path(os.environ['RUNNER_TEMP'])/'finalization-private';source=root/'source';ask=root/'askpass'
+          ask.write_text('#!/bin/sh\ncase "$1" in *Username*) echo x-access-token ;; *) printf "%s\\n" "$SOURCE_READ_TOKEN" ;; esac\n');ask.chmod(0o700)
+          try:
+              env=dict(os.environ,GIT_ASKPASS=str(ask),GIT_TERMINAL_PROMPT='0')
+              with (root/'fetch.log').open('w') as log:
+                  def git(*args):subprocess.run(['git',*args],env=env,stdout=log,stderr=log,check=True,timeout=300)
+                  git('init',str(source));git('-C',str(source),'remote','add','origin','https://github.com/dobord/frdpd.git')
+                  git('-C',str(source),'fetch','--depth=1','origin',os.environ['SOURCE_SHA']);git('-C',str(source),'checkout','--detach','FETCH_HEAD')
+                  tree=subprocess.check_output(['git','-C',str(source),'rev-parse','HEAD^{tree}'],text=True).strip()
+                  if tree!=os.environ['SOURCE_TREE']:raise RuntimeError('Source tree mismatch')
+                  git('-C',str(source),'-c','url.https://github.com/.insteadOf=git@github.com:','submodule','update','--init','--recursive','--depth=1')
+                  upstream=subprocess.check_output(['git','-C',str(source/'freerdp'),'rev-parse','HEAD'],text=True).strip()
+                  if upstream!='aa8650b300aa4cabd85d9c72b431301509b9043f':raise RuntimeError('Upstream mismatch')
+                  (root/'provenance.json').write_text(json.dumps({'commit':os.environ['SOURCE_SHA'],'tree':tree,'upstream':upstream,'source_edits':False,'builder':os.environ['GITHUB_SHA'],'full_suite_fixture':'local NSS, default PAM denies, reaping init; not domain/live-systemd acceptance'}))
+          finally:ask.unlink(missing_ok=True)
+          PY
+      - name: Build unchanged product in Docker
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/finalization-private"
+          docker build --build-arg FRDP_BUILD_COMPONENT_TESTS=ON -f "$root/source/server/frdp/test/e2e/Dockerfile" -t frdpd-finalization:fixed "$root/source" >"$root/build.log" 2>&1
+      - name: Verify source integration, removed-guard controls and evidence parser
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/finalization-private"
+          docker run --rm --init --network none -v "$GITHUB_WORKSPACE/investigations/frdpd-103/check-finalization.py:/check.py:ro" --entrypoint python3 frdpd-finalization:fixed /check.py --self-test --source /src/server/frdp/frdpd/frdpd.c >"$root/finalization-contract.log" 2>&1
+      - name: Run connection policy and focused protocol regression
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/finalization-private"
+          timeout -k 15s 300s docker run --rm --init --network none --entrypoint bash frdpd-finalization:fixed -lc 'ctest --test-dir /opt/freerdp-build --output-on-failure --no-tests=error --timeout 90 -R "TestFreeRDPFrdp(TransportPolicy|RemoteAppContract|ListenerPolicyBoundary|GfxPolicy|GraphicsAdapter|SharedBuffer|X11WindowCapture.*|AgentStop|AgentNativeTopology|SessionResources|E2EScripts)$"' >"$root/focused.log" 2>&1
+      - name: Full test wrapper in explicit local identity fixture
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/finalization-private"
+          rc=0
+          timeout -k 20s 600s docker run --rm --init --network none --entrypoint bash frdpd-finalization:fixed -lc '
+            set -euo pipefail
+            sed -i -E "s/^(passwd|group|shadow):.*/\1: files/" /etc/nsswitch.conf
+            for service in frdpd frdpd-password; do
+              printf "%s\n" "auth required pam_deny.so" "account required pam_deny.so" "session required pam_deny.so" "password required pam_deny.so" >"/etc/pam.d/$service"
+            done
+            FRDP_BUILD_DIR=/opt/freerdp-build FRDP_BUILD_JOBS=2 /src/scripts/test.sh
+          ' >"$root/full-local.log" 2>&1 || rc=$?
+          printf 'full_local_exit=%s\n' "$rc" >"$root/status.txt"
+          exit "$rc"
+      - name: Independent pristine FreeRDP RemoteApp and classic E2E on both backends
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/finalization-private"
+          for backend in xorg-dummy xorg-native; do
+            FRDP_E2E_NO_BUILD=1 FRDP_E2E_IMAGE=frdpd-finalization:fixed FRDP_LAYERED_DISPLAY_BACKEND="$backend" FRDP_E2E_PROFILE_TIMEOUT=300 FRDP_E2E_ARTIFACTS="$root/e2e-$backend" COMPOSE_PROJECT_NAME="finalization-${backend}-${GITHUB_RUN_ID}" bash "$root/source/server/frdp/test/e2e/run-layered.sh" >"$root/e2e-$backend.log" 2>&1
+            docker run --rm --init --network none -v "$GITHUB_WORKSPACE/investigations/frdpd-103/check-finalization.py:/check.py:ro" -v "$root/e2e-$backend/layered/compose.log:/evidence.log:ro" --entrypoint python3 frdpd-finalization:fixed /check.py --log /evidence.log >"$root/order-$backend.log" 2>&1
+          done
+      - name: Exercise local TLS NLA PAM resize and reconnect
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/finalization-private"
+          FRDP_E2E_NO_BUILD=1 FRDP_E2E_IMAGE=frdpd-finalization:fixed FRDP_E2E_PROFILE_TIMEOUT=420 FRDP_E2E_ARTIFACTS="$root/local-e2e" COMPOSE_PROJECT_NAME="finalization-local-${GITHUB_RUN_ID}" bash "$root/source/server/frdp/test/e2e/run.sh" local >"$root/local-e2e.log" 2>&1
+      - name: Encrypt all detailed evidence
+        if: always()
+        run: |
+          python - <<'PY'
+          import os,tarfile
+          from pathlib import Path
+          from secure_release.crypto import encrypt_file
+          root=Path(os.environ['RUNNER_TEMP']);archive=root/'finalization.tar.gz'
+          with tarfile.open(archive,'w:gz') as out:
+              for p in (root/'finalization-private').glob('*'):
+                  if p.name not in ('source','askpass'):out.add(p,arcname=p.name)
+          encrypt_file(archive,root/'finalization.enc',os.environ['ARTIFACT_ENCRYPTION_PUBLIC_KEY'],{'purpose':'frdpd-103-finalization','run_id':os.environ['GITHUB_RUN_ID'],'source_sha':os.environ['SOURCE_SHA'],'tree_sha':os.environ['SOURCE_TREE']})
+          archive.unlink()
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: encrypted-finalization-${{ github.run_id }}
+          path: ${{ runner.temp }}/finalization.enc
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+      - if: always()
+        run: |
+          sudo rm -rf "$RUNNER_TEMP/finalization-private" "$RUNNER_TEMP/finalization.enc"
