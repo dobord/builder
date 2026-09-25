@@ -8,6 +8,9 @@ on:
       - secure_release/cef_strict_combined.py
       - secure_release/cef_freerdp_profile.py
       - secure_release/cef_frozen_dependencies.py
+      - secure_release/cef_harfbuzz_boundary.py
+      - ci/cef-harfbuzz-interface.json
+      - tests/test_cef_harfbuzz_boundary.py
       - secure_release/cef_frozen_evidence.py
       - tests/test_cef_frozen_dependencies.py
       - tests/test_cef_frozen_evidence.py
@@ -136,6 +139,19 @@ jobs:
         env:
           REQUIRE_CEF_COMBINED_PORT_FIXTURE: '1'
         run: python -m unittest discover -s tests -p test_cef_combined_port.py -v
+      - name: Verify pinned HarfBuzz C boundary before archive replay
+        env:
+          REQUIRE_CEF_HARFBUZZ_BOUNDARY: '1'
+          CEF_HARFBUZZ_SOURCE_FIXTURE: ${{ runner.temp }}/cef-harfbuzz-source/harfbuzz-14.2.1
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/cef-harfbuzz-source.tar.gz"
+          curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o "$archive" https://github.com/harfbuzz/harfbuzz/archive/14.2.1.tar.gz
+          echo "b7642a81eb021bf96cf8c91c5ebdde7f4fdfd40c76db722f00cf001125f4b81b954d08485774d2b23318d49b1e954fa0189ba8f10db56d148f33f9d90891d0cb  $archive" | sha512sum -c -
+          mkdir "$RUNNER_TEMP/cef-harfbuzz-source"
+          tar -xzf "$archive" -C "$RUNNER_TEMP/cef-harfbuzz-source"
+          python -m unittest discover -s tests -p test_cef_harfbuzz_boundary.py -v
       - name: Verify frozen archive ownership with native vcpkg before restore
         env:
           CEF_FROZEN_VCPKG_ROOT: ${{ github.workspace }}/private-vcpkg/.full-upstream

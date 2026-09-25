@@ -20,6 +20,11 @@ import sys
 import subprocess
 import tempfile
 
+if __package__:
+    from . import cef_harfbuzz_boundary
+else:  # Executed by the explicitly ABI-tracked vcpkg post-portfile hook.
+    import cef_harfbuzz_boundary
+
 TRIPLET = "x64-linux-static-release"
 PORTS_BLOB = "244769fb406f1248c8d3b7cce0f8ff5075777d7f"
 RECEIPT = "cef-frozen-platform-replay.json"
@@ -256,7 +261,7 @@ def mismatch_summary(overlay: Path, platform_sha: str) -> dict:
 
 
 def replay(spec_path: Path, spec_sha: str, package: Path, port: str, triplet: str,
-           *, features: str = "", version: str = "") -> dict:
+           *, features: str = "", version: str = "", installed: Path | None = None) -> dict:
     spec, value = read_spec(spec_path, spec_sha)
     require(re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", port) is not None
             and triplet == spec["triplet"], "Invalid frozen replay package identity")
@@ -297,12 +302,27 @@ def replay(spec_path: Path, spec_sha: str, package: Path, port: str, triplet: st
                 "built_export_count": len(built_names), "frozen_export_count": len(frozen_names),
                 "built_only": elf_details(target, built_names - frozen_names),
                 "frozen_only": elf_details(source, frozen_names - built_names)})
+    boundary_proof = None
     if mismatches:
-        record_mismatch(spec_path, spec, port, mismatches, len(headers), features, version)
-        # Preserve the original fail-closed symbol-superset rule. In particular,
-        # weak/hidden/C++ symbols are NOT automatically waived by diagnostics.
-        raise ValueError("Frozen dependency would lose a built feature symbol: "
-                         + Path(mismatches[0]["archive"]).name)
+        # No general weak/C++ exemption. Only the complete pinned HarfBuzz
+        # boundary may be proved using headers, both ELF sets, external
+        # references and a live C-linker probe. Every other mismatch still fails.
+        if (port == "harfbuzz" and len(mismatches) == 1
+                and mismatches[0]["archive"] == cef_harfbuzz_boundary.ARCHIVE):
+            try:
+                require(installed is not None, "HarfBuzz consumer prefix was not supplied")
+                boundary_proof = cef_harfbuzz_boundary.verify(
+                    package=package, prefix=prefix, inventory=value,
+                    version=version, features=features, installed=installed,
+                    output=spec_path.parent / "harfbuzz-boundary-proof",
+                )
+            except Exception:
+                record_mismatch(spec_path, spec, port, mismatches, len(headers), features, version)
+                raise
+        else:
+            record_mismatch(spec_path, spec, port, mismatches, len(headers), features, version)
+            raise ValueError("Frozen dependency would lose a built feature symbol: "
+                             + Path(mismatches[0]["archive"]).name)
     # Validate all selected bytes and headers before the first replacement.
     # vcpkg has not installed or recorded ownership of this staging tree yet.
     try:
@@ -325,7 +345,8 @@ def replay(spec_path: Path, spec_sha: str, package: Path, port: str, triplet: st
         with receipt.open("xb") as stream:
             stream.write(canonical({"schema": 1, "kind": "cef-frozen-dependency-replay",
                 "port": port, "triplet": triplet, "platform_sha256": spec["platform_sha256"],
-                "archives": records, "headers_verified": len(headers), "runtime_verified": False}))
+                "archives": records, "headers_verified": len(headers), "runtime_verified": False,
+                **({"harfbuzz_boundary": boundary_proof} if boundary_proof is not None else {})}))
     finally:
         for _, temporary in staged:
             temporary.unlink(missing_ok=True)
@@ -359,16 +380,25 @@ def materialize(destination: Path, base_triplet: Path, manifest: Path, prefix: P
     spec_path = destination / "frozen-dependencies.json"
     spec_path.write_bytes(data)
     policy = Path(__file__).resolve()
+    boundary = Path(cef_harfbuzz_boundary.__file__).resolve()
+    interface = cef_harfbuzz_boundary.INTERFACE
+    require(sha(interface) == cef_harfbuzz_boundary.INTERFACE_SHA256,
+            "Public HarfBuzz interface policy changed")
     hook = destination / "frozen-dependencies.cmake"
     hook.write_text(
         '# Frozen archive reuse before vcpkg installs its owning package.\n'
         f'file(SHA256 {_quote(policy)} _cef_policy_sha)\n'
         f'if(NOT _cef_policy_sha STREQUAL "{sha(policy)}")\n'
-        '  message(FATAL_ERROR "Frozen replay policy changed")\nendif()\n'
+        '  message(FATAL_ERROR "Frozen replay policy changed")\nendif()\n' +
+        ''.join(f'file(SHA256 {_quote(p)} _cef_boundary_sha)\n'
+                f'if(NOT _cef_boundary_sha STREQUAL "{sha(p)}")\n'
+                '  message(FATAL_ERROR "HarfBuzz boundary input changed")\nendif()\n'
+                for p in (boundary, interface)) +
         f'execute_process(COMMAND {_quote(Path(sys.executable))} {_quote(policy)}\n'
         f'  --spec {_quote(spec_path)} --sha256 "{hashlib.sha256(data).hexdigest()}"\n'
         '  --package "${CURRENT_PACKAGES_DIR}" --port "${PORT}" --triplet "${TARGET_TRIPLET}"\n'
         '  --features "${FEATURES}" --version "${VERSION}"\n'
+        '  --installed "${CURRENT_INSTALLED_DIR}"\n'
         '  COMMAND_ERROR_IS_FATAL ANY)\n', encoding="utf-8", newline="\n")
     triplet = destination / base_triplet.name
     triplet.write_text(
@@ -376,7 +406,7 @@ def materialize(destination: Path, base_triplet: Path, manifest: Path, prefix: P
         f'include({_quote(base_triplet)})\n'
         f'list(APPEND VCPKG_POST_PORTFILE_INCLUDES {_quote(hook)})\n'
         'list(APPEND VCPKG_HASH_ADDITIONAL_FILES\n' +
-        ''.join('  ' + _quote(p) + '\n' for p in (base_triplet, manifest, spec_path, policy, hook)) + ')\n',
+        ''.join('  ' + _quote(p) + '\n' for p in (base_triplet, manifest, spec_path, policy, hook, boundary, interface)) + ')\n',
         encoding="utf-8", newline="\n")
     return destination
 
@@ -386,6 +416,7 @@ def verify_installed(prefix: Path, manifest: Path, expected: str) -> dict:
     value = manifest_at(manifest, expected)
     clean_path(prefix)
     owners = {}
+    boundary_fields = {}
     for receipt in sorted((prefix / "share").glob("*/" + RECEIPT)):
         clean_path(receipt)
         require(receipt.is_file() and receipt.stat().st_size <= 1024**2,
@@ -397,6 +428,24 @@ def verify_installed(prefix: Path, manifest: Path, expected: str) -> dict:
                 and record.get("triplet") == TRIPLET and record.get("runtime_verified") is False
                 and isinstance(record.get("archives"), dict) and record["archives"],
                 "Packaged frozen replay identity changed")
+        if "harfbuzz_boundary" in record:
+            proof = record["harfbuzz_boundary"]
+            archive = record["archives"].get(cef_harfbuzz_boundary.ARCHIVE, {})
+            require(port == "harfbuzz" and isinstance(proof, dict)
+                    and proof.get("schema") == 1
+                    and proof.get("kind") == "harfbuzz-14.2.1-closed-c-boundary"
+                    and proof.get("public_link_verified") is True
+                    and proof.get("runtime_verified") is False
+                    and proof.get("interface_sha256") == cef_harfbuzz_boundary.INTERFACE_SHA256
+                    and proof.get("policy_sha256") == sha(Path(cef_harfbuzz_boundary.__file__))
+                    and proof.get("frozen_sha256") == archive.get("sha256")
+                    and proof.get("built_sha256") == archive.get("built_sha256")
+                    and all(type(proof.get(k)) is int and proof[k] >= 0 for k in (
+                        "public_functions", "private_built_only", "private_frozen_only", "reference_archives"))
+                    and proof["public_functions"] > 400 and proof["reference_archives"] > 0,
+                    "Installed HarfBuzz C boundary proof changed")
+            boundary_fields = {"frozen_harfbuzz_c_link_verified": True,
+                               "frozen_harfbuzz_public_functions": proof["public_functions"]}
         for name, info in record["archives"].items():
             require(name in value["archive_objects"] and name not in owners
                     and info.get("sha256") == value["files"][name]["sha256"],
@@ -419,7 +468,7 @@ def verify_installed(prefix: Path, manifest: Path, expected: str) -> dict:
                 listed[relative] = port
     require(listed == owners, "Frozen dependencies lost vcpkg package ownership")
     return {"frozen_dependency_archives_verified": len(owners),
-            "frozen_dependency_owners_verified": len(set(owners.values()))}
+            "frozen_dependency_owners_verified": len(set(owners.values())), **boundary_fields}
 
 
 def main() -> None:
@@ -431,9 +480,10 @@ def main() -> None:
     parser.add_argument("--triplet", required=True)
     parser.add_argument("--features", default="")
     parser.add_argument("--version", default="")
+    parser.add_argument("--installed", type=Path)
     args = parser.parse_args()
     result = replay(args.spec, args.sha256, args.package, args.port, args.triplet,
-                    features=args.features, version=args.version)
+                    features=args.features, version=args.version, installed=args.installed)
     if result["archives"]:
         print("CEF_FROZEN_DEPENDENCY_REPLAY " + json.dumps(result, sort_keys=True))
 
