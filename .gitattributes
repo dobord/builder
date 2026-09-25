@@ -1,3 +1,6 @@
 # Digest-bound backtrace inputs must have identical bytes on every CI host.
 secure_release/cef_unwind_backtrace.h text eol=lf
 tests/fixtures/cef-backtrace/collect_stack_trace.cc text eol=lf
+
+# The qualified acquisition patch verifies the exact public port fixture bytes.
+tests/fixtures/cef-qualified-export/portfile.cmake text eol=lf

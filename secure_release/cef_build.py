@@ -209,9 +209,16 @@ def run_engine(root: Path, cfg: dict, platform: str, execute, environment: dict,
 
 def verify_consumer(root: Path, cfg: dict, platform: str, execute,
                     platform_sha256: str | None = None,
-                    platform_preflight: dict | None = None) -> dict:
+                    platform_preflight: dict | None = None,
+                    *, recipe_root: Path | None = None) -> dict:
     """Run a NEW relocated combined consumer; upstream receipts are provenance only."""
-    recipe = root / "cef-recipe"
+    recipe = root / "cef-recipe" if recipe_root is None else recipe_root
+    if recipe_root is not None:
+        # Combined qualification uses a real pinned checkout for exact recipe
+        # reconstruction, rather than the ordinary worker's copied recipe tree.
+        driver = recipe / "vcpkg/integration/driver.py"
+        if recipe.is_symlink() or driver.is_symlink() or not driver.is_file():
+            raise ValueError("Explicit CEF consumer recipe is missing or redirected")
     name = "cef_static_combined_smoke" + (".exe" if platform == "windows" else "")
     candidates = [p for p in (root / "smoke-build").rglob(name) if p.is_file()]
     if len(candidates) != 1:

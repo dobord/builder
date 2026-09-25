@@ -22,7 +22,7 @@ from . import (
     build_support, cef_build, cef_contract, cef_native_link_static,
     cef_nss_isolation, cef_unwind_backtrace, cef_x11_static, crypto, safeio,
 )
-from . import cef_combined_identity, cef_strict_iteration
+from . import cef_combined_identity, cef_combined_port, cef_strict_iteration
 
 ENGINE_VCPKG = "b4bb281192ea8bb004542012ac804b988a4ff403"
 SDK_VCPKG = "936bbb0e7cb7d6d10f8f5ef5874521466278c799"
@@ -568,6 +568,7 @@ def main() -> None:
                     != "static-platform-graph-verified"
                 or receipt.get("smoke", {}).get("third_party_modules_static") is not True):
             raise RuntimeError("Restored strict engine runtime receipt is incomplete")
+        summary["restored_engine_runtime_verified"] = True
 
         stage = "platform-requalification"
         requalified = root / "requalified-target-prefix"
@@ -592,8 +593,20 @@ def main() -> None:
                 or preflight.get("module_count") != 37
                 or preflight.get("manifest_sha256") != platform_sha):
             raise RuntimeError("Restored platform prefix did not reproduce its qualification")
+        summary["restored_platform_requalified"] = True
         shutil.rmtree(requalified)
         requalified_manifest.unlink()
+
+        stage = "qualified-acquisition-port"
+        port_profile = cef_combined_port.materialize(
+            registry / "ports/cef-static", recipe, source,
+            engine_work / "platform-inputs.json", engine_work / "target-prefix",
+            platform_sha,
+        )
+        summary["qualified_port_abi_tracked"] = port_profile["abi_tracked"]
+        summary["qualified_port_patch_sha256"] = port_profile["patch_sha256"]
+        summary["qualified_port_bindings_sha256"] = port_profile["binding_sha256"]
+        summary["qualified_port_isolated_archive_count"] = port_profile["isolated_archives"]
 
         stage = "source-archives"
         downloads = upstream / "downloads"
@@ -653,6 +666,12 @@ def main() -> None:
             log=root / "vcpkg-install.log", timeout=21600,
         )
 
+        stage = "installed-isolation-proof"
+        cef_combined_port.verify_packaged_isolation(
+            installed / TRIPLET, platform_sha, port_profile["binding_sha256"]
+        )
+        summary["installed_isolation_bytes_verified"] = True
+
         stage = "vcpkg-export"
         package_names = list(dict.fromkeys(
             item.split("[", 1)[0] for item in plan["platforms"]["linux"]["packages"]
@@ -693,6 +712,13 @@ def main() -> None:
                 or crypto.parse(contract_path.read_bytes()) != expected_contract):
             raise RuntimeError("Final SDK CEF build contract differs from the signed plan")
 
+        stage = "relocated-isolation-proof"
+        summary["relocated_isolated_archive_count"] = cef_combined_port.verify_packaged_isolation(
+            consumer_sdk / "installed" / TRIPLET,
+            platform_sha, port_profile["binding_sha256"],
+        )
+        summary["relocated_isolation_bytes_verified"] = True
+
         stage = "combined-consumer"
         smoke_build = root / "smoke-build"
         configure = build_support.consumer_configure_command(
@@ -713,7 +739,7 @@ def main() -> None:
             log=root / "consumer-build.log", timeout=3600,
         )
         relocated_smokes = [
-            path for path in smoke_build.rglob("cef_static_smoke")
+            path for path in smoke_build.rglob("cef_static_combined_smoke")
             if path.is_file() and not path.is_symlink()
         ]
         if len(relocated_smokes) != 1:
@@ -987,7 +1013,7 @@ PrivateKeyFile={private_key}
         proof = cef_build.verify_consumer(
             root, cfg, "linux", execute,
             platform_sha256=platform_sha,
-            platform_preflight=platform_preflight,
+            platform_preflight=platform_preflight, recipe_root=recipe,
         )
         cef_build.validate_platform_preflight(preflight, proof, cfg, "linux")
         final_key, final_contract = cef_build.qualified_contract(
