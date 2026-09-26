@@ -1,6 +1,6 @@
 name: Offline local diagnostic tools
 # No private inputs or decryption in Actions. Public source fixtures only.
-# Capture the public SDK baseline and pinned XZ documentation sources.
+# Capture the public SDK baseline and pinned FFmpeg/Xtrans source interfaces.
 on:
   push:
     branches: [feature/cef-static-integration]
@@ -53,6 +53,19 @@ jobs:
           cp requirements.lock "$kit/requirements.lock"
           git rev-parse HEAD > "$kit/source-commit.txt"
           git rev-parse 'HEAD^{tree}' > "$kit/source-tree.txt"
+          curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o "$kit/upstream/ffmpeg-source.tar.gz" https://github.com/FFmpeg/FFmpeg/archive/n8.1.2.tar.gz
+          echo "c72f4062aecc16d8b2b1e8678d5efe3af4cfaa0cc7c0997052248f9e499e60c2463acf07877cf3b78b246ce3e8078cb043e8d97e90a6b50d06af32ff7369a788  $kit/upstream/ffmpeg-source.tar.gz" | sha512sum -c -
+          curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o "$kit/upstream/xtrans-source.tar.gz" https://gitlab.freedesktop.org/xorg/lib/libxtrans/-/archive/xtrans-1.6.0/libxtrans-xtrans-1.6.0.tar.gz
+          echo "c7037cb6d2fb641486a43c9203949edec2038735ba758f8556add63598dbb3205166a2ec272700639884b1952642c171806e3dab566722cadd4c71ca98c0a1bf  $kit/upstream/xtrans-source.tar.gz" | sha512sum -c -
+          for port in ffmpeg xtrans; do
+            mkdir -p "$kit/upstream/vcpkg/ports/$port"
+            for file in portfile.cmake vcpkg.json; do
+              curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o "$kit/upstream/vcpkg/ports/$port/$file" "https://raw.githubusercontent.com/microsoft/vcpkg/9e593bb18ea69cc5095e012465dcd675a822ed0d/ports/$port/$file"
+            done
+          done
+          for file in win32.patch symbols.patch; do
+            curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o "$kit/upstream/vcpkg/ports/xtrans/$file" "https://raw.githubusercontent.com/microsoft/vcpkg/9e593bb18ea69cc5095e012465dcd675a822ed0d/ports/xtrans/$file"
+          done
           curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o "$kit/upstream/xz-source.tar.gz" https://github.com/tukaani-project/xz/archive/v5.8.3.tar.gz
           echo "8fb5e6a13397d259d8ff7484f9b63f8a6752ff1c63e1a4601170ad8175aadefb5126a1cae7f73370bfc6c2a0b4e1c0bad57a58fc5b781d3f7d45e5a483c091cc  $kit/upstream/xz-source.tar.gz" | sha512sum -c -
           mkdir -p "$kit/upstream/vcpkg/ports/liblzma"
