@@ -8,6 +8,30 @@ on:
 permissions:
   contents: read
 jobs:
+  public-source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Snapshot only tracked public builder sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/public-builder-source"
+          mkdir "$out"
+          git archive --format=tar HEAD > "$out/builder-source.tar"
+          git rev-parse HEAD > "$out/source-commit.txt"
+          git rev-parse 'HEAD^{tree}' > "$out/source-tree.txt"
+          (cd "$out" && sha256sum builder-source.tar source-commit.txt source-tree.txt > SHA256SUMS)
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: public-builder-source-${{ github.run_id }}
+          path: ${{ runner.temp }}/public-builder-source
+          retention-days: 7
+          compression-level: 0
+          if-no-files-found: error
   public-tools:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
