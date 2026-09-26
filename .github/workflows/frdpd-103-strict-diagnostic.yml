@@ -1,0 +1,62 @@
+name: PR103 strict diagnostic
+on:
+  push:
+    branches: [fix/frdpd-103-review-20260926]
+    paths: ['.github/workflows/frdpd-103-strict-diagnostic.yml']
+permissions:
+  contents: read
+env:
+  SOURCE_SHA: 1b0d2889c7ef215805c9a83cdc2236259f9c594f
+  SOURCE_TREE: 4fc6324da0792596145708aabede8c75fd048dc3
+  REVIEW_VARIANT: noavc
+  ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
+jobs:
+  all-diagnostics:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.13'
+      - run: |
+          python -m pip install --require-hashes --only-binary=:all: -r requirements.lock
+      - name: Build with Ninja keep-going, still failing on every warning
+        env:
+          SOURCE_READ_TOKEN: ${{ secrets.SOURCE_READ_TOKEN }}
+        run: |
+          python - <<'PY'
+          import runpy,sys
+          api=runpy.run_path('investigations/frdpd-103/review-ci.py')
+          original=api['docker']
+          def diagnostics(name,script,timeout=900):
+              script=script.replace('--target frdpd frdp-session-agent TestFreeRDPFrdp\n','--target frdpd frdp-session-agent TestFreeRDPFrdp -- -k 0\n')
+              return original(name,script,timeout)
+          api['main'].__globals__['docker']=diagnostics
+          sys.exit(api['main']())
+          PY
+      - name: Encrypt diagnostic evidence
+        if: always()
+        run: |
+          python - <<'PY'
+          import os,tarfile
+          from pathlib import Path
+          from secure_release.crypto import encrypt_file
+          root=Path(os.environ['RUNNER_TEMP']); archive=root/'strict.tar.gz'
+          with tarfile.open(archive,'w:gz') as out:
+              for p in (root/'review-validation').glob('*'):
+                  if p.is_file() and p.name!='askpass':out.add(p,arcname=p.name)
+          encrypt_file(archive,root/'strict.enc',os.environ['ARTIFACT_ENCRYPTION_PUBLIC_KEY'],{'purpose':'frdpd-103-strict-diagnostic','source_sha':os.environ['SOURCE_SHA'],'run_id':os.environ['GITHUB_RUN_ID']})
+          archive.unlink()
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: encrypted-strict-${{ github.run_id }}
+          path: ${{ runner.temp }}/strict.enc
+          retention-days: 3
+          compression-level: 0
+      - if: always()
+        run: sudo rm -rf "$RUNNER_TEMP/review-validation" "$RUNNER_TEMP/strict.enc"
