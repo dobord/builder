@@ -24,7 +24,7 @@ from . import (
 )
 from . import (
     cef_combined_identity, cef_combined_port, cef_dependency_source,
-    cef_freerdp_profile, cef_frozen_dependencies, cef_sdk_example, cef_sdk_headers, cef_sdk_aliases, cef_sdk_protoc, cef_strict_iteration,
+    cef_freerdp_profile, cef_frozen_dependencies, cef_sdk_example, cef_sdk_headers, cef_sdk_aliases, cef_sdk_protoc, cef_sdk_xz, cef_strict_iteration,
 )
 
 ENGINE_VCPKG = "b4bb281192ea8bb004542012ac804b988a4ff403"
@@ -391,6 +391,7 @@ def main() -> None:
     verify_engine_registry_delta(engine_registry, registry)
     example_review = cef_sdk_example.capture(lfc_ui, registry)
     cef_sdk_protoc.validate_sources(upstream)
+    cef_sdk_xz.validate_sources(upstream)
 
     plan = json.loads((registry / "ci/release-plan.json").read_text(encoding="utf-8"))
     cfg = plan["cef"]
@@ -734,10 +735,19 @@ def main() -> None:
         )
         summary["sdk_aliases_verified"] = True
         summary["sdk_alias_count"] = len(reviewed_aliases)
+        stage = "sdk-documentation-review"
+        reviewed_docs = cef_sdk_xz.verify(sdk)
+        summary["sdk_xz_documentation_verified"] = True
+        summary["sdk_xz_source_count"] = len(reviewed_docs)
+        stage = "sdk-source-inventory"
+        summary["sdk_source_inventory_count"] = cef_sdk_xz.inventory_sources(
+            sdk, examples=reviewed_sources, headers=reviewed_headers, docs=reviewed_docs,
+            aliases=reviewed_aliases, diagnostics=root / "sdk-source-inventory.json",
+        )
         stage = "sdk-packaging"
         safeio.sdk_zip(sdk, sdk_zip, reviewed_sources=reviewed_sources,
                        reviewed_include_sources=reviewed_headers,
-                       reviewed_aliases=reviewed_aliases)
+                       reviewed_aliases=reviewed_aliases, reviewed_doc_sources=reviewed_docs)
         consumer_sdk = root / "consumer-sdk"
         stage = "sdk-relocation"
         safeio.extract_zip(sdk_zip, consumer_sdk)
@@ -745,6 +755,8 @@ def main() -> None:
         summary["relocated_sdk_example_source_verified"] = True
         cef_sdk_headers.verify(consumer_sdk, engine_work / "platform-inputs.json", platform_sha)
         summary["relocated_sdk_include_source_verified"] = True
+        cef_sdk_xz.verify(consumer_sdk)
+        summary["relocated_sdk_xz_documentation_verified"] = True
         cef_sdk_aliases.verify(consumer_sdk, engine_work / "platform-inputs.json", platform_sha,
                                expected=reviewed_aliases, protoc_review=protoc_review)
         summary["relocated_sdk_aliases_verified"] = True

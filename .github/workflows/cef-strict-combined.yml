@@ -11,6 +11,8 @@ on:
       - secure_release/cef_sdk_headers.py
       - secure_release/cef_sdk_aliases.py
       - secure_release/cef_sdk_protoc.py
+      - secure_release/cef_sdk_xz.py
+      - tests/test_cef_sdk_xz.py
       - tests/test_cef_sdk_protoc.py
       - tests/fixtures/cef-sdk-protoc/**
       - tests/test_cef_sdk_aliases.py
@@ -179,6 +181,17 @@ jobs:
           CEF_SDK_PROTOC_VCPKG_ROOT: ${{ github.workspace }}/private-vcpkg/.full-upstream
           REQUIRE_CEF_SDK_PROTOC: '1'
         run: python -m unittest discover -s tests -p test_cef_sdk_protoc.py -v
+      - name: Verify pinned XZ documentation with real static library and SDK transport
+        env:
+          CEF_SDK_XZ_UPSTREAM: ${{ github.workspace }}/private-vcpkg/.full-upstream
+          CEF_SDK_XZ_ARCHIVE: ${{ runner.temp }}/cef-sdk-xz-source.tar.gz
+          REQUIRE_CEF_SDK_XZ: '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o "$CEF_SDK_XZ_ARCHIVE" https://github.com/tukaani-project/xz/archive/v5.8.3.tar.gz
+          echo "8fb5e6a13397d259d8ff7484f9b63f8a6752ff1c63e1a4601170ad8175aadefb5126a1cae7f73370bfc6c2a0b4e1c0bad57a58fc5b781d3f7d45e5a483c091cc  $CEF_SDK_XZ_ARCHIVE" | sha512sum -c -
+          python -m unittest discover -s tests -p test_cef_sdk_xz.py -v
       - name: Verify pinned HarfBuzz C boundary before archive replay
         env:
           REQUIRE_CEF_HARFBUZZ_BOUNDARY: '1'
