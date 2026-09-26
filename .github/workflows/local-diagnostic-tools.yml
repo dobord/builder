@@ -1,6 +1,6 @@
 name: Offline local diagnostic tools
 # No private inputs or decryption in Actions. Public source fixtures only.
-# Refresh the public baseline for the source-defined versioned protoc alias.
+# Capture the public SDK baseline and pinned XZ documentation sources.
 on:
   push:
     branches: [feature/cef-static-integration]
@@ -53,6 +53,11 @@ jobs:
           cp requirements.lock "$kit/requirements.lock"
           git rev-parse HEAD > "$kit/source-commit.txt"
           git rev-parse 'HEAD^{tree}' > "$kit/source-tree.txt"
+          curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o "$kit/upstream/xz-source.tar.gz" https://github.com/tukaani-project/xz/archive/v5.8.3.tar.gz
+          echo "8fb5e6a13397d259d8ff7484f9b63f8a6752ff1c63e1a4601170ad8175aadefb5126a1cae7f73370bfc6c2a0b4e1c0bad57a58fc5b781d3f7d45e5a483c091cc  $kit/upstream/xz-source.tar.gz" | sha512sum -c -
+          mkdir -p "$kit/upstream/vcpkg/ports/liblzma"
+          curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o "$kit/upstream/vcpkg/ports/liblzma/portfile.cmake" https://raw.githubusercontent.com/microsoft/vcpkg/9e593bb18ea69cc5095e012465dcd675a822ed0d/ports/liblzma/portfile.cmake
+          curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o "$kit/upstream/vcpkg/ports/liblzma/vcpkg.json" https://raw.githubusercontent.com/microsoft/vcpkg/9e593bb18ea69cc5095e012465dcd675a822ed0d/ports/liblzma/vcpkg.json
           curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o "$kit/upstream/cef-source.tar.gz" https://github.com/dobord/cef/archive/2aff22e09daaa5c28780c5766a70ee13e61c93b6.tar.gz
           curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o "$kit/upstream/freerdp-source.tar.gz" https://github.com/FreeRDP/FreeRDP/archive/63b948ca5cb94307fd5444ee6e73927a41ccdab4.tar.gz
           curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o "$kit/upstream/harfbuzz-source.tar.gz" https://github.com/harfbuzz/harfbuzz/archive/14.2.1.tar.gz
