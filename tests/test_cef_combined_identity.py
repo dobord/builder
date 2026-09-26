@@ -177,6 +177,7 @@ class CombinedOrchestrationTests(unittest.TestCase):
                                                   side_effect=lambda: dict(clean(), ImageVersion=ACTUAL)))
             stack.enter_context(mock.patch.object(combined, "git_head", side_effect=heads.__getitem__))
             stack.enter_context(mock.patch.object(combined, "verify_engine_registry_delta"))
+            stack.enter_context(mock.patch.object(combined.cef_sdk_example, "capture", return_value={}))
             stack.enter_context(mock.patch.object(combined.cef_contract, "validate"))
             stack.enter_context(mock.patch.object(combined.cef_contract, "build_key", return_value="b"*64))
             stack.enter_context(mock.patch.object(engine, "qualification_lock", return_value={"checkpoint": api.selected}))

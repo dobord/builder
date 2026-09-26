@@ -1,5 +1,6 @@
 """Bounded, non-executing archive operations with portable path validation."""
 from __future__ import annotations
+import hashlib
 import os
 from pathlib import Path, PurePosixPath
 import re
@@ -185,30 +186,92 @@ def shared_target_payload(name: str) -> bool:
             or ".so" in filename)
 
 
-def sdk_zip(root: Path, archive: Path) -> None:
-    """Package the export only, with normalized portable ZIP metadata."""
+SOURCE_SUFFIXES = frozenset({".c", ".cc", ".cpp", ".cxx"})
+MAX_REVIEWED_SOURCE_BYTES = 1024**2
+
+
+def _source_review(records: dict | None) -> dict[str, dict]:
+    """An explicit caller review, never a manifest discovered inside the SDK.
+
+    Only exact installed example files may opt in. No globs, directories or
+    source-tree roots; default callers still prohibit implementation sources.
+    """
+    if records is None:
+        return {}
+    if not isinstance(records, dict) or not 0 < len(records) <= 16:
+        raise ValueError("invalid SDK example source review")
+    result = {}
+    index = _PathIndex()
+    for name, record in records.items():
+        path = parts(name)
+        if (name != "/".join(path) or len(path) < 7
+                or path[0] != "installed" or path[2] != "share" or path[4] != "examples"
+                or PurePosixPath(name).suffix.casefold() not in SOURCE_SUFFIXES
+                or forbidden_sdk_tree(name) or not isinstance(record, dict)
+                or set(record) != {"sha256", "size"}
+                or type(record["size"]) is not int
+                or not 0 < record["size"] <= MAX_REVIEWED_SOURCE_BYTES
+                or not isinstance(record["sha256"], str)
+                or re.fullmatch(r"[0-9a-f]{64}", record["sha256"]) is None):
+            raise ValueError("invalid SDK example source review")
+        index.add(name, False)
+        result[name] = dict(record)
+    return result
+
+
+def sdk_zip(root: Path, archive: Path, *, reviewed_sources: dict | None = None) -> None:
+    """Package the export with portable metadata and deny-by-default sources.
+
+    A reviewed source is read into a bounded buffer and hashed, and those SAME
+    bytes are written. A new partial archive is removed on failure. The caller
+    separately proves pinned origin, companion files and package ownership.
+    """
+    review = _source_review(reviewed_sources)
+    seen = set()
     banned_suffix = {".pdb", ".ilk", ".obj", ".o", ".pch", ".idb", ".ipch", ".dmp", ".log"}
     banned_names = {"cmakecache.txt", "compile_commands.json", "credentials", ".git-credentials"}
-    with zipfile.ZipFile(archive, "x", zipfile.ZIP_DEFLATED, compresslevel=6) as z:
-        for item in _regular_files(root):
-            rel = item.relative_to(root)
-            if forbidden_sdk_tree(rel.as_posix()):
-                raise ValueError("workspace or debug tree in SDK")
-            if shared_target_payload(rel.as_posix()):
-                raise ValueError("shared target payload in static SDK")
-            if item.suffix.casefold() in banned_suffix or item.name.casefold() in banned_names:
-                continue
-            if item.suffix.casefold() in {".c", ".cc", ".cpp", ".cxx"}:
-                raise ValueError("implementation source in SDK; review required")
-            info = zipfile.ZipInfo(rel.as_posix(), date_time=(1980, 1, 1, 0, 0, 0))
-            info.create_system = 3
-            info.compress_type = zipfile.ZIP_DEFLATED
-            source_info = item.stat()
-            mode = 0o755 if source_info.st_mode & 0o111 else 0o644
-            info.external_attr = (stat.S_IFREG | mode) << 16
-            info.file_size = source_info.st_size
-            with item.open("rb") as source, z.open(info, "w", force_zip64=True) as target:
-                shutil.copyfileobj(source, target, 1024 * 1024)
-    if archive.stat().st_size > 1900 * 1024**2:
-        raise ValueError("SDK exceeds the 1900 MiB initial release limit")
-    zip_files(archive)
+    created = False
+    try:
+        with zipfile.ZipFile(archive, "x", zipfile.ZIP_DEFLATED, compresslevel=6) as z:
+            created = True
+            for item in _regular_files(root):
+                name = item.relative_to(root).as_posix()
+                if forbidden_sdk_tree(name):
+                    raise ValueError("workspace or debug tree in SDK")
+                if shared_target_payload(name):
+                    raise ValueError("shared target payload in static SDK")
+                if item.suffix.casefold() in banned_suffix or item.name.casefold() in banned_names:
+                    continue
+                approved = None
+                if item.suffix.casefold() in SOURCE_SUFFIXES:
+                    record = review.get(name)
+                    if record is None:
+                        raise ValueError("implementation source in SDK; review required: " + name)
+                    with item.open("rb") as source:
+                        approved = source.read(record["size"] + 1)
+                    if (len(approved) != record["size"]
+                            or hashlib.sha256(approved).hexdigest() != record["sha256"]):
+                        raise ValueError("reviewed SDK example source bytes changed")
+                    seen.add(name)
+                info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+                info.create_system = 3
+                info.compress_type = zipfile.ZIP_DEFLATED
+                source_info = item.stat()
+                mode = 0o755 if source_info.st_mode & 0o111 else 0o644
+                info.external_attr = (stat.S_IFREG | mode) << 16
+                info.file_size = len(approved) if approved is not None else source_info.st_size
+                with z.open(info, "w", force_zip64=True) as target:
+                    if approved is not None:
+                        target.write(approved)
+                    else:
+                        with item.open("rb") as source:
+                            shutil.copyfileobj(source, target, 1024 * 1024)
+            if seen != set(review):
+                raise ValueError("reviewed SDK example source is missing")
+        if archive.stat().st_size > 1900 * 1024**2:
+            raise ValueError("SDK exceeds the 1900 MiB initial release limit")
+        zip_files(archive)
+    except BaseException:
+        if created:
+            archive.unlink(missing_ok=True)
+        raise

@@ -24,7 +24,7 @@ from . import (
 )
 from . import (
     cef_combined_identity, cef_combined_port, cef_dependency_source,
-    cef_freerdp_profile, cef_frozen_dependencies, cef_strict_iteration,
+    cef_freerdp_profile, cef_frozen_dependencies, cef_sdk_example, cef_strict_iteration,
 )
 
 ENGINE_VCPKG = "b4bb281192ea8bb004542012ac804b988a4ff403"
@@ -389,6 +389,7 @@ def main() -> None:
         if git_head(path) != revision:
             raise ValueError("Strict combined SDK source revision mismatch")
     verify_engine_registry_delta(engine_registry, registry)
+    example_review = cef_sdk_example.capture(lfc_ui, registry)
 
     plan = json.loads((registry / "ci/release-plan.json").read_text(encoding="utf-8"))
     cfg = plan["cef"]
@@ -711,9 +712,17 @@ def main() -> None:
             sdk, workspace / "triplets", TRIPLET
         )
         sdk_zip = root / "sdk.zip"
-        safeio.sdk_zip(sdk, sdk_zip)
+        stage = "sdk-example-review"
+        reviewed_sources = cef_sdk_example.verify(sdk, example_review)
+        summary["sdk_example_source_verified"] = True
+        summary["sdk_example_source_count"] = len(reviewed_sources)
+        stage = "sdk-packaging"
+        safeio.sdk_zip(sdk, sdk_zip, reviewed_sources=reviewed_sources)
         consumer_sdk = root / "consumer-sdk"
+        stage = "sdk-relocation"
         safeio.extract_zip(sdk_zip, consumer_sdk)
+        cef_sdk_example.verify(consumer_sdk, example_review)
+        summary["relocated_sdk_example_source_verified"] = True
         verify_relocated_metadata(
             consumer_sdk,
             [installed, sdk, upstream / "buildtrees", upstream / "packages"],

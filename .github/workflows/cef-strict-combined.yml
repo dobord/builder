@@ -6,6 +6,9 @@ on:
     paths:
       - .github/workflows/cef-strict-combined.yml
       - secure_release/cef_strict_combined.py
+      - secure_release/safeio.py
+      - secure_release/cef_sdk_example.py
+      - tests/test_cef_sdk_example.py
       - secure_release/cef_freerdp_profile.py
       - secure_release/cef_frozen_dependencies.py
       - secure_release/cef_harfbuzz_boundary.py
@@ -145,6 +148,13 @@ jobs:
         env:
           REQUIRE_CEF_COMBINED_PORT_FIXTURE: '1'
         run: python -m unittest discover -s tests -p test_cef_combined_port.py -v
+      - name: Verify pinned installed example and native vcpkg SDK packaging
+        env:
+          CEF_SDK_EXAMPLE_LFC_UI_ROOT: ${{ github.workspace }}/private-lfc-ui
+          CEF_SDK_EXAMPLE_REGISTRY_ROOT: ${{ github.workspace }}/private-vcpkg
+          CEF_SDK_EXAMPLE_VCPKG_ROOT: ${{ github.workspace }}/private-vcpkg/.full-upstream
+          REQUIRE_CEF_SDK_EXAMPLE: '1'
+        run: python -m unittest discover -s tests -p test_cef_sdk_example.py -v
       - name: Verify pinned HarfBuzz C boundary before archive replay
         env:
           REQUIRE_CEF_HARFBUZZ_BOUNDARY: '1'
