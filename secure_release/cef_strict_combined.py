@@ -24,7 +24,7 @@ from . import (
 )
 from . import (
     cef_combined_identity, cef_combined_port, cef_dependency_source,
-    cef_freerdp_profile, cef_frozen_dependencies, cef_sdk_example, cef_strict_iteration,
+    cef_freerdp_profile, cef_frozen_dependencies, cef_sdk_example, cef_sdk_headers, cef_strict_iteration,
 )
 
 ENGINE_VCPKG = "b4bb281192ea8bb004542012ac804b988a4ff403"
@@ -716,13 +716,22 @@ def main() -> None:
         reviewed_sources = cef_sdk_example.verify(sdk, example_review)
         summary["sdk_example_source_verified"] = True
         summary["sdk_example_source_count"] = len(reviewed_sources)
+        stage = "sdk-include-review"
+        reviewed_headers = cef_sdk_headers.verify(
+            sdk, engine_work / "platform-inputs.json", platform_sha
+        )
+        summary["sdk_include_source_verified"] = True
+        summary["sdk_include_source_count"] = len(reviewed_headers)
         stage = "sdk-packaging"
-        safeio.sdk_zip(sdk, sdk_zip, reviewed_sources=reviewed_sources)
+        safeio.sdk_zip(sdk, sdk_zip, reviewed_sources=reviewed_sources,
+                       reviewed_include_sources=reviewed_headers)
         consumer_sdk = root / "consumer-sdk"
         stage = "sdk-relocation"
         safeio.extract_zip(sdk_zip, consumer_sdk)
         cef_sdk_example.verify(consumer_sdk, example_review)
         summary["relocated_sdk_example_source_verified"] = True
+        cef_sdk_headers.verify(consumer_sdk, engine_work / "platform-inputs.json", platform_sha)
+        summary["relocated_sdk_include_source_verified"] = True
         verify_relocated_metadata(
             consumer_sdk,
             [installed, sdk, upstream / "buildtrees", upstream / "packages"],

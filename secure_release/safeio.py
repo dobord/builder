@@ -190,11 +190,12 @@ SOURCE_SUFFIXES = frozenset({".c", ".cc", ".cpp", ".cxx"})
 MAX_REVIEWED_SOURCE_BYTES = 1024**2
 
 
-def _source_review(records: dict | None) -> dict[str, dict]:
+def _source_review(records: dict | None, *, include_headers: bool = False) -> dict[str, dict]:
     """An explicit caller review, never a manifest discovered inside the SDK.
 
-    Only exact installed example files may opt in. No globs, directories or
-    source-tree roots; default callers still prohibit implementation sources.
+    Exact installed examples and separately reviewed source-suffixed inclusion
+    headers have distinct scopes. No globs or source-tree roots; defaults still
+    prohibit implementation sources. Neither scope discovers its own approval.
     """
     if records is None:
         return {}
@@ -204,8 +205,11 @@ def _source_review(records: dict | None) -> dict[str, dict]:
     index = _PathIndex()
     for name, record in records.items():
         path = parts(name)
-        if (name != "/".join(path) or len(path) < 7
-                or path[0] != "installed" or path[2] != "share" or path[4] != "examples"
+        scope = (len(path) >= 5 and path[0] == "installed" and path[2] == "include"
+                 if include_headers else
+                 len(path) >= 7 and path[0] == "installed"
+                 and path[2] == "share" and path[4] == "examples")
+        if (name != "/".join(path) or not scope
                 or PurePosixPath(name).suffix.casefold() not in SOURCE_SUFFIXES
                 or forbidden_sdk_tree(name) or not isinstance(record, dict)
                 or set(record) != {"sha256", "size"}
@@ -219,7 +223,8 @@ def _source_review(records: dict | None) -> dict[str, dict]:
     return result
 
 
-def sdk_zip(root: Path, archive: Path, *, reviewed_sources: dict | None = None) -> None:
+def sdk_zip(root: Path, archive: Path, *, reviewed_sources: dict | None = None,
+            reviewed_include_sources: dict | None = None) -> None:
     """Package the export with portable metadata and deny-by-default sources.
 
     A reviewed source is read into a bounded buffer and hashed, and those SAME
@@ -227,6 +232,13 @@ def sdk_zip(root: Path, archive: Path, *, reviewed_sources: dict | None = None) 
     separately proves pinned origin, companion files and package ownership.
     """
     review = _source_review(reviewed_sources)
+    headers = _source_review(reviewed_include_sources, include_headers=True)
+    index = _PathIndex()
+    for name in (*review, *headers):
+        index.add(name, False)
+    review.update(headers)
+    if len(review) > 16:
+        raise ValueError("too many reviewed SDK source files")
     seen = set()
     banned_suffix = {".pdb", ".ilk", ".obj", ".o", ".pch", ".idb", ".ipch", ".dmp", ".log"}
     banned_names = {"cmakecache.txt", "compile_commands.json", "credentials", ".git-credentials"}
