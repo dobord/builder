@@ -1,0 +1,64 @@
+name: Private review source snapshot
+on:
+  push:
+    branches: [fix/frdpd-103-review-20260926]
+    paths: ['.github/workflows/frdpd-103-review-source.yml']
+permissions:
+  contents: read
+jobs:
+  snapshot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      SOURCE_SHA: d6e088b4473d6a5393ad09cf6300e8cd86c7aff1
+      ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.13'
+      - run: python -m pip install --require-hashes --only-binary=:all: -r requirements.lock
+      - name: Fetch source as data without executing project code
+        env:
+          SOURCE_READ_TOKEN: ${{ secrets.SOURCE_READ_TOKEN }}
+        run: |
+          umask 077
+          python - <<'PY'
+          import os,subprocess,tarfile,json
+          from pathlib import Path
+          root=Path(os.environ['RUNNER_TEMP'])/'review-private';root.mkdir(mode=0o700)
+          src=root/'source';ask=root/'askpass'
+          ask.write_text('#!/bin/sh\ncase "$1" in *Username*) echo x-access-token ;; *) printf "%s\\n" "$SOURCE_READ_TOKEN" ;; esac\n');ask.chmod(0o700)
+          try:
+              env=dict(os.environ,GIT_ASKPASS=str(ask),GIT_TERMINAL_PROMPT='0')
+              with (root/'fetch.log').open('w') as log:
+                  def git(*args): return subprocess.run(['git',*args],env=env,stdout=log,stderr=log,check=True,timeout=180)
+                  git('init',str(src));git('-C',str(src),'remote','add','origin','https://github.com/dobord/frdpd.git')
+                  git('-C',str(src),'fetch','--depth=1','origin',os.environ['SOURCE_SHA']);git('-C',str(src),'checkout','--detach','FETCH_HEAD')
+                  subprocess.run(['git','-C',str(src),'archive','--format=tar.gz','--output',str(root/'source.tar.gz'),'HEAD'],check=True,stdout=log,stderr=log)
+                  tree=subprocess.check_output(['git','-C',str(src),'rev-parse','HEAD^{tree}'],text=True).strip()
+                  (root/'provenance.json').write_text(json.dumps({'source_sha':os.environ['SOURCE_SHA'],'tree':tree}))
+          finally: ask.unlink(missing_ok=True)
+          with tarfile.open(root/'review.tar.gz','w:gz') as out:
+              for name in ('source.tar.gz','provenance.json','fetch.log'):out.add(root/name,arcname=name)
+          PY
+      - name: Encrypt source for the authorized reviewer
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from secure_release.crypto import encrypt_file
+          root=Path(os.environ['RUNNER_TEMP'])
+          encrypt_file(root/'review-private/review.tar.gz',root/'review-source.enc',os.environ['ARTIFACT_ENCRYPTION_PUBLIC_KEY'],{'purpose':'frdpd-103-review-source','source_sha':os.environ['SOURCE_SHA'],'run_id':os.environ['GITHUB_RUN_ID']})
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: encrypted-review-source-${{ github.run_id }}
+          path: ${{ runner.temp }}/review-source.enc
+          retention-days: 3
+          compression-level: 0
+          if-no-files-found: error
+      - if: always()
+        run: rm -rf "$RUNNER_TEMP/review-private" "$RUNNER_TEMP/review-source.enc"
