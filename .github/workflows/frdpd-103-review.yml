@@ -1,0 +1,62 @@
+name: PR103 review corrections
+on:
+  push:
+    branches: [fix/frdpd-103-review-20260926]
+    paths: ['.github/workflows/frdpd-103-review.yml', 'investigations/frdpd-103/review-ci.py']
+permissions:
+  contents: read
+concurrency:
+  group: review103-${{ github.ref }}
+  cancel-in-progress: false
+env:
+  SOURCE_SHA: 1b0d2889c7ef215805c9a83cdc2236259f9c594f
+  SOURCE_TREE: 4fc6324da0792596145708aabede8c75fd048dc3
+  ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
+jobs:
+  regression:
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [full, asan, noavc]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    env:
+      REVIEW_VARIANT: ${{ matrix.variant }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.13'
+      - run: |
+          python -m pip install --require-hashes --only-binary=:all: -r requirements.lock
+      - name: Exact source and isolated regression
+        env:
+          SOURCE_READ_TOKEN: ${{ secrets.SOURCE_READ_TOKEN }}
+        run: |
+          python investigations/frdpd-103/review-ci.py
+      - name: Encrypt complete diagnostics
+        if: always()
+        run: |
+          python - <<'PY'
+          import os,tarfile
+          from pathlib import Path
+          from secure_release.crypto import encrypt_file
+          root=Path(os.environ['RUNNER_TEMP']); archive=root/'review-evidence.tar.gz'
+          with tarfile.open(archive,'w:gz') as out:
+              for p in (root/'review-validation').glob('*'):
+                  if p.name not in ('source','askpass'):out.add(p,arcname=p.name)
+          encrypt_file(archive,root/'review.enc',os.environ['ARTIFACT_ENCRYPTION_PUBLIC_KEY'],{'purpose':'frdpd-103-review-validation','source_sha':os.environ['SOURCE_SHA'],'tree_sha':os.environ['SOURCE_TREE'],'run_id':os.environ['GITHUB_RUN_ID'],'variant':os.environ['REVIEW_VARIANT']})
+          archive.unlink()
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: encrypted-review-${{ matrix.variant }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/review.enc
+          retention-days: 3
+          compression-level: 0
+          if-no-files-found: error
+      - if: always()
+        run: sudo rm -rf "$RUNNER_TEMP/review-validation" "$RUNNER_TEMP/review.enc"
