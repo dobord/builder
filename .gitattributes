@@ -22,3 +22,6 @@ tests/fixtures/cef-qualified-export/portfile.cmake text eol=lf
 
 # Source-bound GLib installed inclusion-header packaging fixtures.
 /tests/fixtures/cef-sdk-headers/** text eol=lf
+
+# Full pinned protoc target source for the native packaging fixture.
+/tests/fixtures/cef-sdk-protoc/** text eol=lf

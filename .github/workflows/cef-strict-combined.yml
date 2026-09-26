@@ -10,6 +10,9 @@ on:
       - secure_release/cef_sdk_example.py
       - secure_release/cef_sdk_headers.py
       - secure_release/cef_sdk_aliases.py
+      - secure_release/cef_sdk_protoc.py
+      - tests/test_cef_sdk_protoc.py
+      - tests/fixtures/cef-sdk-protoc/**
       - tests/test_cef_sdk_aliases.py
       - tests/test_cef_sdk_headers.py
       - tests/fixtures/cef-sdk-headers/**
@@ -171,6 +174,11 @@ jobs:
           CEF_SDK_ALIASES_VCPKG_ROOT: ${{ github.workspace }}/private-vcpkg/.full-upstream
           REQUIRE_CEF_SDK_ALIASES: '1'
         run: python -m unittest discover -s tests -p test_cef_sdk_aliases.py -v
+      - name: Verify owned versioned protoc through SDK transport
+        env:
+          CEF_SDK_PROTOC_VCPKG_ROOT: ${{ github.workspace }}/private-vcpkg/.full-upstream
+          REQUIRE_CEF_SDK_PROTOC: '1'
+        run: python -m unittest discover -s tests -p test_cef_sdk_protoc.py -v
       - name: Verify pinned HarfBuzz C boundary before archive replay
         env:
           REQUIRE_CEF_HARFBUZZ_BOUNDARY: '1'

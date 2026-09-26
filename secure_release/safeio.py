@@ -228,6 +228,10 @@ def _source_review(records: dict | None, *, include_headers: bool = False) -> di
 
 
 MAX_REVIEWED_ALIAS_BYTES = 16 * 1024**2
+# One pinned host compiler, not a target-library or arbitrary tools exemption.
+PROTOC_ALIAS = "installed/x64-linux-static-release/tools/protobuf/protoc"
+PROTOC_TARGET = "protoc-33.4.0"
+MAX_REVIEWED_PROTOC_BYTES = 64 * 1024**2
 
 
 def _alias_review(records: dict | None) -> dict[str, dict]:
@@ -246,14 +250,20 @@ def _alias_review(records: dict | None) -> dict[str, dict]:
     for name, record in records.items():
         path = parts(name)
         suffix = PurePosixPath(name).suffix
+        tool = name == PROTOC_ALIAS
+        fields = {"target", "sha256", "size", "mode"} if tool else {"target", "sha256", "size"}
+        limit = MAX_REVIEWED_PROTOC_BYTES if tool else MAX_REVIEWED_ALIAS_BYTES
         if (name != "/".join(path) or forbidden_sdk_tree(name) or path[0] != "installed"
                 or not ((len(path) == 4 and path[2] == "lib" and suffix == ".a")
-                        or (len(path) == 5 and path[2:4] == ("lib", "pkgconfig") and suffix == ".pc"))
-                or not isinstance(record, dict) or set(record) != {"target", "sha256", "size"}
+                        or (len(path) == 5 and path[2:4] == ("lib", "pkgconfig") and suffix == ".pc") or tool)
+                or not isinstance(record, dict) or set(record) != fields
                 or not isinstance(record["target"], str)
                 or parts(record["target"]) != (record["target"],)
-                or PurePosixPath(record["target"]).suffix != suffix or record["target"] == path[-1]
-                or type(record["size"]) is not int or not 0 < record["size"] <= MAX_REVIEWED_ALIAS_BYTES
+                or (tool and (record["target"] != PROTOC_TARGET or type(record["mode"]) is not int
+                              or record["mode"] != 0o755))
+                or (not tool and PurePosixPath(record["target"]).suffix != suffix)
+                or record["target"] == path[-1]
+                or type(record["size"]) is not int or not 0 < record["size"] <= limit
                 or not isinstance(record["sha256"], str)
                 or re.fullmatch(r"[0-9a-f]{64}", record["sha256"]) is None):
             raise ValueError("invalid SDK alias review")
@@ -261,7 +271,7 @@ def _alias_review(records: dict | None) -> dict[str, dict]:
         result[name] = dict(record)
         total += record["size"]
     targets = {str(PurePosixPath(n).with_name(r["target"])) for n, r in result.items()}
-    if targets & set(result) or len(targets) != len(result) or total > 32 * 1024**2:
+    if targets & set(result) or len(targets) != len(result) or total > 32 * 1024**2 + (result[PROTOC_ALIAS]["size"] if PROTOC_ALIAS in result else 0):
         raise ValueError("chained, duplicate or oversized SDK alias review")
     for name in targets:
         index.add(name, False)
@@ -297,11 +307,19 @@ def _alias_bytes(path: Path, record: dict) -> bytes:
     with os.fdopen(os.open(path, flags), "rb") as stream:
         info = os.fstat(stream.fileno())
         if (not stat.S_ISREG(info.st_mode) or info.st_size != record["size"]
-                or info.st_mode & 0o111 or getattr(info, "st_file_attributes", 0) & 0x400):
+                or (stat.S_IMODE(info.st_mode) != record["mode"] if "mode" in record else info.st_mode & 0o111)
+                or getattr(info, "st_file_attributes", 0) & 0x400):
             raise ValueError("invalid SDK alias file")
         data = stream.read(record["size"] + 1)
     if len(data) != record["size"] or hashlib.sha256(data).hexdigest() != record["sha256"]:
         raise ValueError("reviewed SDK alias bytes changed")
+    if "mode" in record:
+        # ELF64 little-endian x86-64 executable/PIE, not a script or shared file
+        # disguised as our sole reviewed compiler. Full origin is caller-bound.
+        if (len(data) < 64 or data[:7] != b"\x7fELF\x02\x01\x01"
+                or int.from_bytes(data[16:18], "little") not in {2, 3}
+                or int.from_bytes(data[18:20], "little") != 62):
+            raise ValueError("reviewed protoc is not a native executable")
     return data
 
 
@@ -369,7 +387,9 @@ def sdk_zip(root: Path, archive: Path, *, reviewed_sources: dict | None = None,
                 info.create_system = 3
                 info.compress_type = zipfile.ZIP_DEFLATED
                 source_info = item.stat()
-                mode = 0o755 if source_info.st_mode & 0o111 else 0o644
+                alias_record = aliases.get(name, canonical.get(name))
+                mode = (alias_record.get("mode", 0o644) if alias_record is not None else
+                        0o755 if source_info.st_mode & 0o111 else 0o644)
                 info.external_attr = (stat.S_IFREG | mode) << 16
                 info.file_size = len(approved) if approved is not None else source_info.st_size
                 with z.open(info, "w", force_zip64=True) as target:

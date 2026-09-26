@@ -1,8 +1,9 @@
-"""Materialize two source-defined SDK file aliases without following arbitrary links.
+"""Materialize reviewed SDK file aliases without following arbitrary links.
 
 libpng's static archive alias is a real linker input. libxcrypt's pkg-config
 alias is metadata. Both already have reviewed native/installed policies; bind
 their canonical payloads and original vcpkg owners before ZIP and after extract.
+A versioned protoc tool additionally requires an external pre-export capture.
 The platform manifest is authenticated by the caller, never supplied by the SDK.
 No source/archive/metadata bytes or source symlinks are changed by this module.
 """
@@ -17,7 +18,7 @@ import stat
 from . import cef_frozen_dependencies as frozen
 from . import cef_harfbuzz_boundary as boundary
 from . import cef_sdk_example as checked
-from . import safeio
+from . import safeio, cef_sdk_protoc
 
 TRIPLET = "x64-linux-static-release"
 # Full pinned source installation rules are exercised by the existing native
@@ -28,7 +29,7 @@ ALIASES = {
 }
 
 
-def inventory_links(sdk: Path, diagnostics: Path | None) -> None:
+def inventory_links(sdk: Path, diagnostics: Path | None, *, protoc: bool = False) -> None:
     """Inventory ALL nonregular entries before ZIP, without following links.
 
     #78 did not identify the first rejected link. Preserve a bounded complete
@@ -39,6 +40,8 @@ def inventory_links(sdk: Path, diagnostics: Path | None) -> None:
     checked.require(sdk.is_dir(), "Missing SDK alias root")
     entries, count = [], 0
     allowed = {"installed/" + TRIPLET + "/" + n for n in ALIASES}
+    if protoc:
+        allowed.add(safeio.PROTOC_ALIAS)
     bad = False
     for current, directories, filenames in os.walk(sdk, followlinks=False):
         directories.sort(); filenames.sort()
@@ -77,10 +80,11 @@ def inventory_links(sdk: Path, diagnostics: Path | None) -> None:
 
 
 def verify(sdk: Path, manifest: Path, platform_sha256: str, *,
-           expected: dict | None = None, diagnostics: Path | None = None) -> dict:
+           expected: dict | None = None, diagnostics: Path | None = None,
+           protoc_review: dict | None = None) -> dict:
     sdk = sdk.absolute()
     value = frozen.manifest_at(manifest, platform_sha256)
-    inventory_links(sdk, diagnostics)
+    inventory_links(sdk, diagnostics, protoc=protoc_review is not None)
     prefix = checked.clean(sdk / "installed" / TRIPLET)
     review, owners = {}, {}
     for name, (target_name, port, version) in ALIASES.items():
@@ -132,6 +136,8 @@ def verify(sdk: Path, manifest: Path, platform_sha256: str, *,
                                 "SDK alias lost its pinned owning package")
                 actual[line] = (port, version)
     checked.require(actual == owners, "SDK alias or canonical target is unowned")
+    if protoc_review is not None:
+        review.update(cef_sdk_protoc.verify(sdk / "installed", protoc_review))
     safeio._alias_review(review)
     if expected is not None:
         checked.require(review == expected, "Relocated SDK alias bytes changed")
