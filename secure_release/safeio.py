@@ -67,7 +67,7 @@ def _target(root: Path, name: str) -> Path:
     return result
 
 
-def _regular_files(root: Path):
+def _regular_files(root: Path, *, reviewed_aliases: dict | None = None):
     """Do not silently skip junctions or symlink directories when packaging."""
     info = root.lstat()
     if (not stat.S_ISDIR(info.st_mode) or root.is_symlink()
@@ -83,14 +83,18 @@ def _regular_files(root: Path):
             info = path.lstat()
             if (not stat.S_ISDIR(info.st_mode) or path.is_symlink()
                     or getattr(info, "st_file_attributes", 0) & 0x400):
-                raise ValueError("links and reparse directories are forbidden")
+                raise ValueError("links and reparse directories are forbidden: " + path.relative_to(root).as_posix())
             index.add(path.relative_to(root).as_posix(), True)
             count += 1
         for name in filenames:
             path = Path(current) / name
+            relative = path.relative_to(root).as_posix()
             if not regular(path):
-                raise ValueError("cannot package link or special file")
-            index.add(path.relative_to(root).as_posix(), False)
+                record = (reviewed_aliases or {}).get(relative)
+                if record is None or not path.is_symlink():
+                    raise ValueError("cannot package link or special file: " + relative)
+                _alias_target(root, relative, record)
+            index.add(relative, False)
             count += 1
             total += path.stat().st_size
             if count > MAX_FILES or total > MAX_BYTES:
@@ -223,8 +227,87 @@ def _source_review(records: dict | None, *, include_headers: bool = False) -> di
     return result
 
 
+MAX_REVIEWED_ALIAS_BYTES = 16 * 1024**2
+
+
+def _alias_review(records: dict | None) -> dict[str, dict]:
+    """Explicit same-directory library/metadata file aliases; never directories.
+
+    The caller independently verifies source provenance, frozen identity and
+    ownership. This transport policy does not discover approvals in the SDK.
+    Default callers still reject all symlinks. Extraction still accepts only
+    regular ZIP members; reviewed aliases are materialized, not stored as links.
+    """
+    if records is None:
+        return {}
+    if not isinstance(records, dict) or not 0 < len(records) <= 8:
+        raise ValueError("invalid SDK alias review")
+    result, index, total = {}, _PathIndex(), 0
+    for name, record in records.items():
+        path = parts(name)
+        suffix = PurePosixPath(name).suffix
+        if (name != "/".join(path) or forbidden_sdk_tree(name) or path[0] != "installed"
+                or not ((len(path) == 4 and path[2] == "lib" and suffix == ".a")
+                        or (len(path) == 5 and path[2:4] == ("lib", "pkgconfig") and suffix == ".pc"))
+                or not isinstance(record, dict) or set(record) != {"target", "sha256", "size"}
+                or not isinstance(record["target"], str)
+                or parts(record["target"]) != (record["target"],)
+                or PurePosixPath(record["target"]).suffix != suffix or record["target"] == path[-1]
+                or type(record["size"]) is not int or not 0 < record["size"] <= MAX_REVIEWED_ALIAS_BYTES
+                or not isinstance(record["sha256"], str)
+                or re.fullmatch(r"[0-9a-f]{64}", record["sha256"]) is None):
+            raise ValueError("invalid SDK alias review")
+        index.add(name, False)
+        result[name] = dict(record)
+        total += record["size"]
+    targets = {str(PurePosixPath(n).with_name(r["target"])) for n, r in result.items()}
+    if targets & set(result) or len(targets) != len(result) or total > 32 * 1024**2:
+        raise ValueError("chained, duplicate or oversized SDK alias review")
+    for name in targets:
+        index.add(name, False)
+    return result
+
+
+def _alias_target(root: Path, name: str, record: dict) -> Path:
+    path = root.joinpath(*parts(name))
+    target = path.with_name(record["target"])
+    for parent in target.parents:
+        info = parent.lstat()
+        if (not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode)
+                or getattr(info, "st_file_attributes", 0) & 0x400):
+            raise ValueError("redirected SDK alias parent: " + name)
+    if not regular(target):
+        raise ValueError("SDK alias target is not regular: " + name)
+    info = path.lstat()
+    if getattr(info, "st_file_attributes", 0) & 0x400:
+        raise ValueError("SDK alias reparse input: " + name)
+    if path.is_symlink():
+        if os.readlink(path) != record["target"]:
+            raise ValueError("SDK alias target changed: " + name)
+    elif not regular(path):
+        raise ValueError("SDK alias input is not regular: " + name)
+    return target
+
+
+def _alias_bytes(path: Path, record: dict) -> bytes:
+    # Do not block on a swapped FIFO or follow a swapped final symlink. Hash
+    # bounded bytes BEFORE writing, then write that same buffer. Both the alias
+    # and its canonical ZIP member are independently bound to this same digest.
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    with os.fdopen(os.open(path, flags), "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if (not stat.S_ISREG(info.st_mode) or info.st_size != record["size"]
+                or info.st_mode & 0o111 or getattr(info, "st_file_attributes", 0) & 0x400):
+            raise ValueError("invalid SDK alias file")
+        data = stream.read(record["size"] + 1)
+    if len(data) != record["size"] or hashlib.sha256(data).hexdigest() != record["sha256"]:
+        raise ValueError("reviewed SDK alias bytes changed")
+    return data
+
+
 def sdk_zip(root: Path, archive: Path, *, reviewed_sources: dict | None = None,
-            reviewed_include_sources: dict | None = None) -> None:
+            reviewed_include_sources: dict | None = None,
+            reviewed_aliases: dict | None = None) -> None:
     """Package the export with portable metadata and deny-by-default sources.
 
     A reviewed source is read into a bounded buffer and hashed, and those SAME
@@ -239,14 +322,18 @@ def sdk_zip(root: Path, archive: Path, *, reviewed_sources: dict | None = None,
     review.update(headers)
     if len(review) > 16:
         raise ValueError("too many reviewed SDK source files")
-    seen = set()
+    aliases = _alias_review(reviewed_aliases)
+    canonical = {str(PurePosixPath(n).with_name(r["target"])): r for n, r in aliases.items()}
+    for name in (*aliases, *canonical):
+        index.add(name, False)
+    seen, alias_seen = set(), set()
     banned_suffix = {".pdb", ".ilk", ".obj", ".o", ".pch", ".idb", ".ipch", ".dmp", ".log"}
     banned_names = {"cmakecache.txt", "compile_commands.json", "credentials", ".git-credentials"}
     created = False
     try:
         with zipfile.ZipFile(archive, "x", zipfile.ZIP_DEFLATED, compresslevel=6) as z:
             created = True
-            for item in _regular_files(root):
+            for item in _regular_files(root, reviewed_aliases=aliases):
                 name = item.relative_to(root).as_posix()
                 if forbidden_sdk_tree(name):
                     raise ValueError("workspace or debug tree in SDK")
@@ -255,6 +342,19 @@ def sdk_zip(root: Path, archive: Path, *, reviewed_sources: dict | None = None,
                 if item.suffix.casefold() in banned_suffix or item.name.casefold() in banned_names:
                     continue
                 approved = None
+                if name in aliases:
+                    record = aliases[name]
+                    target_path = _alias_target(root, name, record)
+                    approved = _alias_bytes(target_path, record)
+                    if not item.is_symlink() and _alias_bytes(item, record) != approved:
+                        raise ValueError("copied SDK alias bytes changed")
+                    _alias_target(root, name, record)
+                    alias_seen.add(name)
+                elif name in canonical:
+                    if not regular(item):
+                        raise ValueError("canonical SDK alias member is not regular")
+                    approved = _alias_bytes(item, canonical[name])
+                    alias_seen.add(name)
                 if item.suffix.casefold() in SOURCE_SUFFIXES:
                     record = review.get(name)
                     if record is None:
@@ -280,6 +380,8 @@ def sdk_zip(root: Path, archive: Path, *, reviewed_sources: dict | None = None,
                             shutil.copyfileobj(source, target, 1024 * 1024)
             if seen != set(review):
                 raise ValueError("reviewed SDK example source is missing")
+            if alias_seen != set(aliases) | set(canonical):
+                raise ValueError("reviewed SDK alias or canonical target is missing")
         if archive.stat().st_size > 1900 * 1024**2:
             raise ValueError("SDK exceeds the 1900 MiB initial release limit")
         zip_files(archive)

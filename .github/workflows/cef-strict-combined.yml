@@ -9,6 +9,8 @@ on:
       - secure_release/safeio.py
       - secure_release/cef_sdk_example.py
       - secure_release/cef_sdk_headers.py
+      - secure_release/cef_sdk_aliases.py
+      - tests/test_cef_sdk_aliases.py
       - tests/test_cef_sdk_headers.py
       - tests/fixtures/cef-sdk-headers/**
       - tests/test_cef_sdk_example.py
@@ -164,6 +166,11 @@ jobs:
           CEF_SDK_HEADERS_VCPKG_ROOT: ${{ github.workspace }}/private-vcpkg/.full-upstream
           REQUIRE_CEF_SDK_HEADERS: '1'
         run: python -m unittest discover -s tests -p test_cef_sdk_headers.py -v
+      - name: Verify owned SDK aliases through native vcpkg packaging and relocation
+        env:
+          CEF_SDK_ALIASES_VCPKG_ROOT: ${{ github.workspace }}/private-vcpkg/.full-upstream
+          REQUIRE_CEF_SDK_ALIASES: '1'
+        run: python -m unittest discover -s tests -p test_cef_sdk_aliases.py -v
       - name: Verify pinned HarfBuzz C boundary before archive replay
         env:
           REQUIRE_CEF_HARFBUZZ_BOUNDARY: '1'
