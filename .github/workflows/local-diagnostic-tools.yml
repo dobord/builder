@@ -1,6 +1,6 @@
 name: Offline local diagnostic tools
 # No private inputs or decryption in Actions. Public source fixtures only.
-# Refresh the public packaging baseline for source-defined SDK alias regression.
+# Refresh the public baseline for the source-defined versioned protoc alias.
 on:
   push:
     branches: [feature/cef-static-integration]
