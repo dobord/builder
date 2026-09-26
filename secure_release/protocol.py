@@ -6,7 +6,7 @@ from pathlib import Path
 import re
 import time
 import uuid
-from . import crypto
+from . import crypto, cef_contract
 
 SOURCE = "dobord/vcpkg"
 BUILDER = "dobord/builder"
@@ -67,8 +67,15 @@ def file_context(release_id: str, salt: str, run: int, attempt: int, revision: s
 
 
 def validate_plan(plan: dict):
-    if set(plan) != {"version", "upstream_sha", "ports", "platforms", "smoke_path"} or plan["version"] != 1:
+    if not isinstance(plan, dict) or type(plan.get("version")) is not int or plan["version"] not in (1, 2):
         raise ValueError("invalid build plan")
+    fields = {"version", "upstream_sha", "ports", "platforms", "smoke_path"}
+    if plan["version"] == 2:
+        fields.add("cef")
+    if set(plan) != fields:
+        raise ValueError("invalid build plan fields")
+    if plan["version"] == 2:
+        cef_contract.validate(plan["cef"])
     sha(plan["upstream_sha"])
     if plan["smoke_path"] != "ci/smoke" or not 1 <= len(plan["ports"]) <= 8:
         raise ValueError("unsupported build plan")
@@ -87,6 +94,13 @@ def validate_plan(plan: dict):
             raise ValueError("invalid packages")
         if not all(isinstance(p, str) and PACKAGE.fullmatch(p) for p in cfg["packages"]):
             raise ValueError("unsafe package argument")
+        engines = [p for p in cfg["packages"] if p.split("[", 1)[0] == "cef-static"]
+        if plan["version"] == 2:
+            expected = "cef-static[strict-platform]" if plan["cef"]["profile"] == "static-third-party" else "cef-static"
+            if engines != [expected]:
+                raise ValueError("CEF package features must match the signed linkage profile")
+        elif engines:
+            raise ValueError("CEF requires one explicit version-2 acquisition contract")
 
 
 def verified(document: dict, public: str, *, allow_expired: bool = False) -> dict:

@@ -1,0 +1,101 @@
+name: Offline local diagnostic tools
+# No private inputs or decryption in Actions. Public source fixtures only.
+# Capture the public SDK baseline and pinned FFmpeg/Xtrans source interfaces.
+on:
+  push:
+    branches: [feature/cef-static-integration]
+    paths: [.github/workflows/local-diagnostic-tools.yml]
+permissions:
+  contents: read
+jobs:
+  public-source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Snapshot only tracked public builder sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/public-builder-source"
+          mkdir "$out"
+          git archive --format=tar HEAD > "$out/builder-source.tar"
+          git rev-parse HEAD > "$out/source-commit.txt"
+          git rev-parse 'HEAD^{tree}' > "$out/source-tree.txt"
+          (cd "$out" && sha256sum builder-source.tar source-commit.txt source-tree.txt > SHA256SUMS)
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: public-builder-source-${{ github.run_id }}
+          path: ${{ runner.temp }}/public-builder-source
+          retention-days: 7
+          compression-level: 0
+          if-no-files-found: error
+  public-tools:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.13'
+      - name: Package tracked public source and hash-pinned wheels only
+        shell: bash
+        run: |
+          set -euo pipefail
+          kit="$RUNNER_TEMP/local-diagnostic-tools"
+          mkdir -p "$kit/wheels" "$kit/upstream"
+          python -m pip download --disable-pip-version-check --require-hashes --only-binary=:all: -r requirements.lock -d "$kit/wheels"
+          git archive --format=tar HEAD > "$kit/builder-source.tar"
+          cp requirements.lock "$kit/requirements.lock"
+          git rev-parse HEAD > "$kit/source-commit.txt"
+          git rev-parse 'HEAD^{tree}' > "$kit/source-tree.txt"
+          curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o "$kit/upstream/ffmpeg-source.tar.gz" https://github.com/FFmpeg/FFmpeg/archive/n8.1.2.tar.gz
+          echo "c72f4062aecc16d8b2b1e8678d5efe3af4cfaa0cc7c0997052248f9e499e60c2463acf07877cf3b78b246ce3e8078cb043e8d97e90a6b50d06af32ff7369a788  $kit/upstream/ffmpeg-source.tar.gz" | sha512sum -c -
+          curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o "$kit/upstream/xtrans-source.tar.gz" https://gitlab.freedesktop.org/xorg/lib/libxtrans/-/archive/xtrans-1.6.0/libxtrans-xtrans-1.6.0.tar.gz
+          echo "c7037cb6d2fb641486a43c9203949edec2038735ba758f8556add63598dbb3205166a2ec272700639884b1952642c171806e3dab566722cadd4c71ca98c0a1bf  $kit/upstream/xtrans-source.tar.gz" | sha512sum -c -
+          for port in ffmpeg xtrans; do
+            mkdir -p "$kit/upstream/vcpkg/ports/$port"
+            for file in portfile.cmake vcpkg.json; do
+              curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o "$kit/upstream/vcpkg/ports/$port/$file" "https://raw.githubusercontent.com/microsoft/vcpkg/9e593bb18ea69cc5095e012465dcd675a822ed0d/ports/$port/$file"
+            done
+          done
+          for file in win32.patch symbols.patch; do
+            curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o "$kit/upstream/vcpkg/ports/xtrans/$file" "https://raw.githubusercontent.com/microsoft/vcpkg/9e593bb18ea69cc5095e012465dcd675a822ed0d/ports/xtrans/$file"
+          done
+          curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o "$kit/upstream/xz-source.tar.gz" https://github.com/tukaani-project/xz/archive/v5.8.3.tar.gz
+          echo "8fb5e6a13397d259d8ff7484f9b63f8a6752ff1c63e1a4601170ad8175aadefb5126a1cae7f73370bfc6c2a0b4e1c0bad57a58fc5b781d3f7d45e5a483c091cc  $kit/upstream/xz-source.tar.gz" | sha512sum -c -
+          mkdir -p "$kit/upstream/vcpkg/ports/liblzma"
+          curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o "$kit/upstream/vcpkg/ports/liblzma/portfile.cmake" https://raw.githubusercontent.com/microsoft/vcpkg/9e593bb18ea69cc5095e012465dcd675a822ed0d/ports/liblzma/portfile.cmake
+          curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o "$kit/upstream/vcpkg/ports/liblzma/vcpkg.json" https://raw.githubusercontent.com/microsoft/vcpkg/9e593bb18ea69cc5095e012465dcd675a822ed0d/ports/liblzma/vcpkg.json
+          curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o "$kit/upstream/cef-source.tar.gz" https://github.com/dobord/cef/archive/2aff22e09daaa5c28780c5766a70ee13e61c93b6.tar.gz
+          curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o "$kit/upstream/freerdp-source.tar.gz" https://github.com/FreeRDP/FreeRDP/archive/63b948ca5cb94307fd5444ee6e73927a41ccdab4.tar.gz
+          curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o "$kit/upstream/harfbuzz-source.tar.gz" https://github.com/harfbuzz/harfbuzz/archive/14.2.1.tar.gz
+          echo "b7642a81eb021bf96cf8c91c5ebdde7f4fdfd40c76db722f00cf001125f4b81b954d08485774d2b23318d49b1e954fa0189ba8f10db56d148f33f9d90891d0cb  $kit/upstream/harfbuzz-source.tar.gz" | sha512sum -c -
+          curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o "$kit/upstream/freetype-source.tar.gz" https://gitlab.freedesktop.org/freetype/freetype/-/archive/VER-2-14-3/freetype-VER-2-14-3.tar.gz
+          echo "c3b6b0cc4b428c9c647ab2148386901dfd315273b68051940e8fea6010d46fdd2913467c3ef58be0d499b8e2ef5a0f1a4cc5e739756155587f4f7dff08ef9695  $kit/upstream/freetype-source.tar.gz" | sha512sum -c -
+          curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o "$kit/upstream/glib-source.tar.xz" https://download.gnome.org/sources/glib/2.88/glib-2.88.2.tar.xz
+          echo "d6f40d1ff0f73faccdff8060fabd29b8217cc46139cf33e5792fee05af0665f96cd04e7866995bd84fcd99c9e40c40367d1326f8417bad99c1242dd841ec72a5  $kit/upstream/glib-source.tar.xz" | sha512sum -c -
+          mkdir -p "$kit/upstream/vcpkg/scripts" "$kit/upstream/vcpkg/ports/freetype" "$kit/upstream/vcpkg/ports/glib"
+          curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o "$kit/upstream/vcpkg/scripts/ports.cmake" https://raw.githubusercontent.com/microsoft/vcpkg/9e593bb18ea69cc5095e012465dcd675a822ed0d/scripts/ports.cmake
+          curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o "$kit/upstream/vcpkg/ports/freetype/portfile.cmake" https://raw.githubusercontent.com/microsoft/vcpkg/9e593bb18ea69cc5095e012465dcd675a822ed0d/ports/freetype/portfile.cmake
+          curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o "$kit/upstream/vcpkg/ports/glib/portfile.cmake" https://raw.githubusercontent.com/microsoft/vcpkg/9e593bb18ea69cc5095e012465dcd675a822ed0d/ports/glib/portfile.cmake
+          for path in base/BUILD.gn base/debug/stack_trace_posix.cc base/debug/stack_trace_android.cc base/debug/debug.gni build/config/c++/c++.gni ui/gfx/x/BUILD.gn ui/gfx/x/xlib_support.cc ui/gfx/x/xlib.h ui/gfx/x/xlib_support.h ui/gfx/x/xlib_xcb.h ui/gtk/gtk_ui.cc third_party/expat/BUILD.gn tools/generate_library_loader/generate_library_loader.gni tools/generate_library_loader/generate_library_loader.py; do
+            mkdir -p "$kit/upstream/$(dirname "$path")"
+            curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o "$kit/upstream/$path" "https://raw.githubusercontent.com/chromium/chromium/79460ebecaa5625e57a5fb679a735659e73dc687/$path"
+          done
+          mkdir -p "$kit/upstream/third_party/webrtc/modules/desktop_capture"
+          curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' 'https://webrtc.googlesource.com/src/+/6f37672d358475cd17544121a12494da454d85fb/modules/desktop_capture/BUILD.gn?format=TEXT' | base64 --decode > "$kit/upstream/third_party/webrtc/modules/desktop_capture/BUILD.gn"
+          (cd "$kit" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+          python -m pip install --disable-pip-version-check --no-index --find-links="$kit/wheels" --require-hashes --only-binary=:all: -r requirements.lock
+          python -m unittest discover -s tests -p test_encrypted_logs.py -v
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: public-local-diagnostic-tools-${{ github.run_id }}
+          path: ${{ runner.temp }}/local-diagnostic-tools
+          retention-days: 7
+          compression-level: 0
+          if-no-files-found: error

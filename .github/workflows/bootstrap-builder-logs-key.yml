@@ -1,0 +1,85 @@
+name: Bootstrap builder log encryption key
+
+"on":
+  workflow_dispatch: {}
+  push:
+    branches:
+      - feature/cef-static-integration
+    paths:
+      - ".github/workflows/bootstrap-builder-logs-key.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout builder
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: "3.12"
+
+      - name: Install pinned Tink runtime
+        run: >-
+          python -m pip install --disable-pip-version-check
+          --require-hashes --only-binary=:all: -r requirements.lock
+
+      - name: Generate and install builder log key
+        env:
+          GH_TOKEN: ${{ secrets.SOURCE_READ_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          prefix="$RUNNER_TEMP/builder-ci-log-key"
+          python -m secure_release.encrypted_logs keygen --prefix "$prefix"
+          mkdir -p "$RUNNER_TEMP/builder-log-key-public" "$RUNNER_TEMP/builder-log-key-fallback"
+          cp "$prefix.public.b64" "$RUNNER_TEMP/builder-log-key-public/public.b64"
+          if [ -n "${GH_TOKEN:-}" ]; then
+            private="$(tr -d '\r\n' < "$prefix.private.b64")"
+            if gh secret set BUILDER_LOGS_PRIVATE_KEY_B64 --repo dobord/builder-logs --body "$private"; then
+              unset private
+              rm -f "$prefix.private.b64"
+              printf 'stored\n' > "$RUNNER_TEMP/builder-log-key-stored"
+            else
+              unset private
+              cp "$prefix.private.b64" "$RUNNER_TEMP/builder-log-key-fallback/private.b64"
+            fi
+          else
+            cp "$prefix.private.b64" "$RUNNER_TEMP/builder-log-key-fallback/private.b64"
+          fi
+
+      - name: Upload public key
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: builder-logs-public-key-${{ github.run_id }}
+          path: ${{ runner.temp }}/builder-log-key-public/public.b64
+          retention-days: 7
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Upload private-key fallback if needed
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: builder-logs-private-key-fallback-${{ github.run_id }}
+          path: ${{ runner.temp }}/builder-log-key-fallback/private.b64
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: ignore
+
+      - name: Require repository secret storage
+        if: always()
+        shell: bash
+        run: |
+          test -f "$RUNNER_TEMP/builder-log-key-stored" || {
+            echo "BUILDER_LOGS_SECRET_BOOTSTRAP_FAILED" >&2
+            exit 1
+          }

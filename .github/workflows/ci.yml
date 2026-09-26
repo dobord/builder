@@ -29,10 +29,12 @@ jobs:
         run: |
           python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r requirements.lock
           python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r build-tools.lock
+      - name: Compile Python modules before running expensive tests
+        run: python -m compileall -q secure_release tests
       - name: Synthetic tests only; no repository secrets
         env:
           REQUIRE_TINK_TESTS: '1'
-        run: python -m unittest discover -s tests -v
+        run: python -m secure_release.logged_run --output "${{ runner.temp }}/synthetic-security-tests.log" -- python -m unittest discover -s tests -v
       - name: Public integration prerequisites
         if: runner.os == 'Linux'
         run: |
@@ -45,7 +47,15 @@ jobs:
           path: public-upstream
           persist-credentials: false
       - name: Real vcpkg regression with PUBLIC sources only
-        run: python tests/public_vcpkg_integration.py public-upstream
+        run: python -m secure_release.logged_run --output "${{ runner.temp }}/public-vcpkg-integration.log" -- python tests/public_vcpkg_integration.py public-upstream
+      - name: Build encrypted diagnostic artifact
+        if: always()
+        uses: ./.github/actions/encrypted-logs
+        with:
+          public_key_b64: ${{ secrets.BUILDER_ENCRYPTED_LOGS_PUBLIC_KEY_B64 }}
+          roots: |
+            ${{ runner.temp }}
+            ${{ github.workspace }}/public-upstream/buildtrees
       - name: Create PUBLIC test ciphertext and disposable test keys
         if: github.event_name != 'pull_request'
         run: python tests/transport_fixture.py create ${{ matrix.platform }}

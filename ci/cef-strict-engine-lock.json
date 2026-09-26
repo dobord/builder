@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "platform": "linux",
+  "vcpkg_commit": "b4bb281192ea8bb004542012ac804b988a4ff403",
+  "upstream_commit": "9e593bb18ea69cc5095e012465dcd675a822ed0d",
+  "cef_recipe_commit": "2aff22e09daaa5c28780c5766a70ee13e61c93b6",
+  "checkpoint": {
+    "run": 36018793333,
+    "attempt": 1,
+    "producer_sha": "1272da4d0e9708ef9480d6f6addbaf06bf442bc3",
+    "artifact_id": 10825341500,
+    "artifact_sha256": "8bc12166a2fee5ed698da28f8b71a4f833b664a4638c7362ac097e36a8e49a1d",
+    "summary_artifact_id": 10825361518,
+    "summary_artifact_sha256": "4c9237e7a898974097ed233e42355137ef7b43c26a208397fcc8a258cad5347e",
+    "build_key": "a60c3359bb8fa8df9207f5895729d7bda7c7b1f72ae2ecf0f767a1a1cf719f53",
+    "platform_sha256": "351272996be93d25308681ca051e34827b4f07375eff2d0f25de40164cdd206e"
+  }
+}

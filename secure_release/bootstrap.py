@@ -71,7 +71,8 @@ def configure(directory: Path, revision: str, with_tokens: bool):
             raise ValueError("source and destination must remain private")
     for repo in (SOURCE, BUILDER, BIN):
         variable(repo, "RELEASE_ENABLED", "false")
-    variable(BIN, "PUBLISH_ENABLED", "false")
+    variable(BUILDER, "PUBLISH_ENABLED", "false")
+    variable(BIN, "PUBLISH_ENABLED", "false")  # legacy destination setting stays disabled
     if api(f"repos/{BUILDER}/commits/main")["sha"] != revision:
         raise ValueError("reviewed builder commit must be current main")
     record = api(f"repos/{SOURCE}/contents/ci/release-plan.json?ref=main")
@@ -99,21 +100,21 @@ def configure(directory: Path, revision: str, with_tokens: bool):
     secret(SOURCE, "BUILDER_INPUT_PUBLIC_KEY", input_public)
     secret(BUILDER, "BUILDER_INPUT_PRIVATE_KEY", input_private)
     secret(BUILDER, "REQUEST_VERIFY_PUBLIC_KEY", signing_public)
-    secret(BIN, "REQUEST_VERIFY_PUBLIC_KEY", signing_public)
-    secret(BIN, "ARTIFACT_DECRYPTION_PRIVATE_KEY", artifact_private)
+    # Publication executes only in the reviewed builder workflow. The
+    # destination repository never needs an Actions runner or decryption key.
+    secret(BUILDER, "ARTIFACT_DECRYPTION_PRIVATE_KEY", artifact_private)
     source_repos = sorted({SOURCE, *(p["repository"] for p in plan["ports"])})
     secret(BUILDER, "SOURCE_ALLOWLIST", ",".join(source_repos))
     if with_tokens:
         prompts = ((SOURCE, "BUILDER_DISPATCH_TOKEN", "Selected repository: builder; Actions write"),
                    (BUILDER, "SOURCE_READ_TOKEN", "Selected source repositories from the private plan; Contents read, Actions read"),
-                   (BUILDER, "BIN_DISPATCH_TOKEN", "Selected repository: vcpkg-bin; Actions write"),
-                   (BIN, "BUILDER_READ_TOKEN", "Selected repository: builder; Actions read"))
+                   (BUILDER, "BIN_PUBLISH_TOKEN", "Selected repository: vcpkg-bin; Contents write"))
         for repo, name, scope in prompts:
             print(f"{name}: {scope}")
             value = getpass.getpass("Paste fine-grained PAT (hidden): ").strip()
             secret(repo, name, value)
             del value
-    print("Keys and approved revision installed. RELEASE_ENABLED and PUBLISH_ENABLED remain false.")
+    print("Keys and approved revision installed. RELEASE_ENABLED and builder PUBLISH_ENABLED remain false.")
     print("No release was started. Review green synthetic CI and the private setup guide before enabling.")
 
 

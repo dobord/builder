@@ -1,0 +1,167 @@
+name: Strict CEF engine iteration
+# Exact pins are mirrored by ci/cef-strict-engine-lock.json.
+on:
+  push:
+    branches:
+      - feature/cef-static-integration
+    paths:
+      - .github/workflows/cef-strict-engine-iteration.yml
+      - secure_release/cef_strict_iteration.py
+      - secure_release/cef_gtk_loader.py
+      - secure_release/cef_nss_isolation.py
+      - secure_release/cef_gtk_codecs.py
+      - secure_release/cef_smoke_progress.py
+      - secure_release/cef_smoke_progress.h
+      - secure_release/cef_strict_iteration_runtime.py
+      - secure_release/cef_x11_static.py
+      - secure_release/cef_native_link_static.py
+      - secure_release/cef_unwind_backtrace.py
+      - secure_release/cef_unwind_backtrace.h
+      - tests/test_cef_unwind_backtrace.py
+      - tests/test_cef_resume_cache_policy.py
+      - tests/fixtures/cef-backtrace/**
+      - tests/test_cef_gtk_loader.py
+      - tests/test_cef_gtk_codecs.py
+      - tests/test_cef_x11_static.py
+      - tests/test_cef_native_link_static.py
+      - tests/test_cef_desktop_prerequisites.py
+      - tests/test_cef_smoke_progress.py
+      - ci/cef-strict-engine-lock.json
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: cef-strict-engine-linux-1873bb62
+  cancel-in-progress: true
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: dobord/vcpkg
+          ref: b4bb281192ea8bb004542012ac804b988a4ff403
+          path: private-vcpkg
+          token: ${{ secrets.SOURCE_READ_TOKEN }}
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: microsoft/vcpkg
+          ref: 9e593bb18ea69cc5095e012465dcd675a822ed0d
+          path: private-vcpkg/.full-upstream
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: dobord/cef
+          ref: 2aff22e09daaa5c28780c5766a70ee13e61c93b6
+          path: private-vcpkg/.full-cef
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.12'
+      - name: Install hash-pinned cache cryptography
+        run: |
+          python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r requirements.lock
+      - name: Recover capacity and install native build tools
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /usr/local/.ghcup /opt/ghc
+          sudo apt-get update
+          sudo apt-get install -y gcc-14 g++-14 autoconf autoconf-archive automake libtool pkg-config ninja-build gperf flex bison nasm gettext texinfo libltdl-dev xvfb xauth fonts-dejavu-core ccache
+          df -h /
+      - name: Verify checkpoint-aware package cache policy
+        run: python -m unittest discover -s tests -p test_cef_resume_cache_policy.py -v
+      - name: Restore reviewed completed-package caches by exact artifact digest
+        env:
+          GH_TOKEN: ${{ secrets.SOURCE_READ_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # A resumed workspace already contains the complete frozen prefix.
+          # Validate the selector shape here; the worker still authenticates the
+          # producer, transport, full identity and prefix before using anything.
+          mode="$(python -c 'from pathlib import Path; from secure_release.cef_strict_iteration import qualification_lock; print("resume" if qualification_lock(Path.cwd())["checkpoint"] is not None else "fresh")')"
+          if [ "$mode" = "resume" ]; then
+            echo "CEF_PACKAGE_CACHES_UNUSED_FOR_CHECKPOINT_RESUME"
+            exit 0
+          fi
+          mkdir -p "$RUNNER_TEMP/cef-strict-cache"
+          fetch_cache() {
+            id="$1"; sha="$2"; name="$3"
+            archive="$RUNNER_TEMP/cef-strict-cache/$name.zip"
+            target="$RUNNER_TEMP/cef-strict-cache/$name"
+            gh api "repos/dobord/vcpkg/actions/artifacts/$id/zip" > "$archive"
+            echo "$sha  $archive" | sha256sum -c - >/dev/null
+            mkdir "$target"
+            unzip -q "$archive" -d "$target"
+            find "$target" -type f -name '*.zip' -print -quit | grep -q .
+          }
+          fetch_cache 10510999882 7fce9a50b14a91452f939011155c265ac5e996815c5d442ba7d1c6b7f5da2b05 core
+          fetch_cache 10513582038 13070e63a1a5ccdaef82d483f4296ba31fa7ef1f237cd17729cf81fddf3d118f cups
+          fetch_cache 10512319512 c837f50873e149ac8c1d823ab906fbb36217616c3198e029bc6ee647e0222b8e gbm
+      - name: Validate strict iteration worker syntax
+        run: python -m py_compile secure_release/cef_strict_iteration.py secure_release/cef_gtk_loader.py secure_release/cef_nss_isolation.py secure_release/cef_gtk_codecs.py secure_release/cef_x11_static.py secure_release/cef_native_link_static.py secure_release/cef_strict_iteration_runtime.py secure_release/cef_unwind_backtrace.py
+      - name: Compile static GTK loader regression before engine restore
+        run: python -m unittest discover -s tests -p test_cef_gtk_loader.py -v
+      - name: Verify isolated static image-codec closure before engine restore
+        run: python -m unittest discover -s tests -p test_cef_gtk_codecs.py -v
+      - name: Verify static X11 direct-loader repair before engine restore
+        run: python -m unittest discover -s tests -p test_cef_x11_static.py -v
+      - name: Verify frozen Expat and Chromium unwind repair before engine restore
+        run: |
+          python -m unittest discover -s tests -p test_cef_native_link_static.py -v
+          python -m secure_release.cef_native_link_static --check-recipe private-vcpkg/.full-cef/vcpkg/ports/cef-static/source_build.py
+      - name: Verify composed CEF desktop prerequisites before engine restore
+        run: python -m unittest discover -s tests -p test_cef_desktop_prerequisites.py -v
+      - name: Verify direct static backtrace and pinned source before engine restore
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m unittest discover -s tests -p test_cef_unwind_backtrace.py -v
+          source="$RUNNER_TEMP/cef-backtrace-public-source"
+          for path in base/BUILD.gn base/debug/stack_trace_posix.cc; do
+            mkdir -p "$source/$(dirname "$path")"
+            curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o "$source/$path" "https://raw.githubusercontent.com/chromium/chromium/79460ebecaa5625e57a5fb679a735659e73dc687/$path"
+          done
+          python -m secure_release.cef_unwind_backtrace --check-source "$source"
+      - name: Verify smoke progress instrumentation before engine restore
+        run: |
+          python -m unittest discover -s tests -p test_cef_smoke_progress.py -v
+          python -m secure_release.cef_smoke_progress --check-recipe private-vcpkg/.full-cef/vcpkg/ports/cef-static/smoke.c
+      - name: Run exact strict platform and Chromium iteration
+        id: strict
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          BUILDER_INPUT_PRIVATE_KEY: ${{ secrets.BUILDER_INPUT_PRIVATE_KEY }}
+          CEF_STRICT_BINARY_CACHE_CORE: ${{ runner.temp }}/cef-strict-cache/core
+          CEF_STRICT_BINARY_CACHE_CUPS: ${{ runner.temp }}/cef-strict-cache/cups
+          CEF_STRICT_BINARY_CACHE_GBM: ${{ runner.temp }}/cef-strict-cache/gbm
+        run: python -m secure_release.cef_strict_iteration_runtime
+      - name: Upload encrypted strict checkpoint
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: cef-strict-checkpoint-linux-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/cef-strict-checkpoint-encrypted/*.enc
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: ignore
+      - name: Upload non-sensitive iteration summary
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: cef-strict-iteration-summary-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/cef-strict-iteration-summary.json
+          retention-days: 7
+          if-no-files-found: ignore
+      - name: Build encrypted diagnostic artifact
+        if: always()
+        uses: ./.github/actions/encrypted-logs
+        with:
+          public_key_b64: ${{ secrets.BUILDER_ENCRYPTED_LOGS_PUBLIC_KEY_B64 }}
+          roots: |
+            ${{ runner.temp }}
+            ${{ github.workspace }}/private-vcpkg/.full-cef/static-diagnostics

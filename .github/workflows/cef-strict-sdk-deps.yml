@@ -1,0 +1,286 @@
+name: Strict SDK dependency qualification
+on:
+  push:
+    branches:
+      - feature/cef-static-integration
+    paths:
+      - .github/workflows/cef-strict-sdk-deps.yml
+permissions:
+  contents: read
+concurrency:
+  group: cef-strict-sdk-deps-1873bb62
+  cancel-in-progress: true
+jobs:
+  deps:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            platform: linux
+            triplet: x64-linux-static-release
+          - os: windows-2022
+            platform: windows
+            triplet: x64-windows-static-release
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 300
+    env:
+      VCPKG_DISABLE_METRICS: '1'
+      VCPKG_MAX_CONCURRENCY: '2'
+      VCPKG_BINARY_SOURCES: clear
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: dobord/vcpkg
+          ref: 39dccd415da14d8051559d66069019475d95787c
+          path: private-vcpkg
+          token: ${{ secrets.SOURCE_READ_TOKEN }}
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: microsoft/vcpkg
+          ref: 9e593bb18ea69cc5095e012465dcd675a822ed0d
+          path: private-vcpkg/.sdk-upstream
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: dobord/lockfreecoro
+          ref: 24038aed3a0be642adb60e71bd994ae8f0d90140
+          path: private-lockfreecoro
+          token: ${{ secrets.SOURCE_READ_TOKEN }}
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: dobord/lfc-ui
+          ref: 85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5
+          path: private-lfc-ui
+          token: ${{ secrets.SOURCE_READ_TOKEN }}
+          persist-credentials: false
+      - name: Verify and prefetch exact private source archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C private-vcpkg rev-parse HEAD)" = "39dccd415da14d8051559d66069019475d95787c"
+          test "$(git -C private-vcpkg/.sdk-upstream rev-parse HEAD)" = "9e593bb18ea69cc5095e012465dcd675a822ed0d"
+          test "$(git -C private-lockfreecoro rev-parse HEAD)" = "24038aed3a0be642adb60e71bd994ae8f0d90140"
+          test "$(git -C private-lfc-ui rev-parse HEAD)" = "85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5"
+          mkdir -p private-vcpkg/.sdk-upstream/downloads
+          git -C private-lockfreecoro -c core.autocrlf=false archive --format=tar.gz 24038aed3a0be642adb60e71bd994ae8f0d90140 -o "$GITHUB_WORKSPACE/private-vcpkg/.sdk-upstream/downloads/lockfreecoro-24038aed3a0be642adb60e71bd994ae8f0d90140.tar.gz"
+          git -C private-lfc-ui -c core.autocrlf=false archive --format=tar.gz 85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5 -o "$GITHUB_WORKSPACE/private-vcpkg/.sdk-upstream/downloads/lfc-ui-85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5.tar.gz"
+          test -s private-vcpkg/.sdk-upstream/downloads/lockfreecoro-24038aed3a0be642adb60e71bd994ae8f0d90140.tar.gz
+          test -s private-vcpkg/.sdk-upstream/downloads/lfc-ui-85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5.tar.gz
+      - name: Install Linux native build prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-14 g++-14 autoconf autoconf-archive automake libtool pkg-config ninja-build nasm gperf flex bison gettext texinfo libltdl-dev
+      - name: Bootstrap and install exact Linux SDK dependency graph
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          CC: gcc-14
+          CXX: g++-14
+        run: |
+          set -euo pipefail
+          upstream="$GITHUB_WORKSPACE/private-vcpkg/.sdk-upstream"
+          installed="$RUNNER_TEMP/strict-sdk-installed"
+          bash "$upstream/bootstrap-vcpkg.sh" -disableMetrics >"$RUNNER_TEMP/sdk-deps-bootstrap.log" 2>&1
+          set +e
+          "$upstream/vcpkg" install 'lockfreecoro[auth,grpc,h264,io-uring,opus,postgresql,process,protobuf,saml,sqlite,vp8,vp9]' 'lfc-ui[lockfreecoro]' --triplet=x64-linux-static-release --host-triplet=x64-linux-static-release --overlay-ports="$GITHUB_WORKSPACE/private-vcpkg/ports" --overlay-triplets="$GITHUB_WORKSPACE/private-vcpkg/triplets" --x-install-root="$installed" --binarysource=clear --clean-buildtrees-after-build --clean-packages-after-build >"$RUNNER_TEMP/sdk-deps-install.log" 2>&1
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ]; then
+            python - <<'PY'
+          import os, pathlib, re
+          text=(pathlib.Path(os.environ["RUNNER_TEMP"])/"sdk-deps-install.log").read_text(errors="replace")[-1048576:]
+          package="unknown"
+          for pattern in (
+              r"error: building ([a-z0-9][a-z0-9+_.-]*):",
+              r"BUILD_FAILED[^\n]*?([a-z0-9][a-z0-9+_.-]+):x64-linux-static-release",
+              r"([a-z0-9][a-z0-9+_.-]+):x64-linux-static-release failed",
+          ):
+              match=re.search(pattern,text,re.I)
+              if match:
+                  package=match.group(1).lower()
+                  break
+          if package == "unknown":
+              matches=re.findall(
+                  r"(?:Building package|Installing\s+[0-9]+/[0-9]+)\s+([a-z0-9][a-z0-9+_.-]*)(?:\[[^\]\r\n]*\])?:",
+                  text, re.I,
+              )
+              if matches:
+                  package=matches[-1].lower()
+          reason="unknown"
+          checks=(
+              ("patch",r"patch failed|does not apply|corrupt patch|malformed patch"),
+              ("missing-cmake-package",r"Could not find a package configuration file provided by"),
+              ("missing-dependency",r"(?:Dependency|Run-time dependency).*?(?:not found|found:\s*NO)"),
+              ("download",r"(?:download|curl|http).*?(?:failed|error|404|403|502|503|504)"),
+              ("configure",r"(?:configuring .* failed|CMake Error|meson\.build:\d+:\d+: ERROR:)"),
+              ("compile",r"(?:FAILED:|fatal error:|ninja: build stopped|make: \*\*\*)"),
+              ("post-build-validation",r"post-build validation|Found unexpected shared"),
+          )
+          for label,pattern in checks:
+              if re.search(pattern,text,re.I):
+                  reason=label
+                  break
+          if not re.fullmatch(r"[a-z0-9][a-z0-9+_.-]*|unknown",package):
+              package="unknown"
+          status=""
+          if reason == "download":
+              codes=re.findall(r"(?<![0-9])(4[0-9]{2}|5[0-9]{2})(?![0-9])",text)
+              if codes:
+                  status=codes[-1]
+          suffix=(" status="+status) if status else ""
+          print(f"SDK_DEPS_LINUX_INSTALL_FAILURE package={package} reason={reason}" + suffix)
+          PY
+            exit "$rc"
+          fi
+          mkdir -p "$RUNNER_TEMP/export"
+          if ! "$upstream/vcpkg" export lockfreecoro lfc-ui --triplet=x64-linux-static-release --host-triplet=x64-linux-static-release --overlay-ports="$GITHUB_WORKSPACE/private-vcpkg/ports" --overlay-triplets="$GITHUB_WORKSPACE/private-vcpkg/triplets" --x-install-root="$installed" --raw --output=sdk-deps --output-dir="$RUNNER_TEMP/export" >"$RUNNER_TEMP/sdk-deps-export.log" 2>&1; then
+            echo "SDK_DEPS_LINUX_EXPORT_FAILED" >&2
+            exit 1
+          fi
+          sdk="$RUNNER_TEMP/export/sdk-deps"
+          prefix="$sdk/installed/x64-linux-static-release"
+          mkdir -p "$sdk/triplets"
+          cp "$GITHUB_WORKSPACE/private-vcpkg/triplets/x64-linux-static-release.cmake" "$sdk/triplets/x64-linux-static-release.cmake"
+          if find "$prefix/lib" "$prefix/bin" -type f \( -name '*.so' -o -name '*.so.*' \) -print -quit | grep -q .; then
+            echo "SDK_DEPS_LINUX_SHARED_TARGET_PAYLOAD" >&2
+            exit 1
+          fi
+          cmake -S "$GITHUB_WORKSPACE/private-vcpkg/ci/smoke" -B "$RUNNER_TEMP/sdk-consumer" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DCMAKE_TOOLCHAIN_FILE="$sdk/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-linux-static-release -DVCPKG_HOST_TRIPLET=x64-linux-static-release -DVCPKG_MANIFEST_MODE=OFF >"$RUNNER_TEMP/sdk-deps-consumer-configure.log" 2>&1 || { echo "SDK_DEPS_LINUX_CONSUMER_CONFIGURE_FAILED" >&2; exit 1; }
+          cmake --build "$RUNNER_TEMP/sdk-consumer" --parallel 2 >"$RUNNER_TEMP/sdk-deps-consumer-build.log" 2>&1 || { echo "SDK_DEPS_LINUX_CONSUMER_BUILD_FAILED" >&2; exit 1; }
+          ctest --test-dir "$RUNNER_TEMP/sdk-consumer" --output-on-failure --timeout 60 >"$RUNNER_TEMP/sdk-deps-consumer-test.log" 2>&1 || { echo "SDK_DEPS_LINUX_CONSUMER_TEST_FAILED" >&2; exit 1; }
+          echo "SDK_DEPS_LINUX_QUALIFIED"
+      - name: Bootstrap and install exact Windows SDK dependency graph
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $upstream = Join-Path $env:GITHUB_WORKSPACE 'private-vcpkg/.sdk-upstream'
+          $installed = Join-Path $env:RUNNER_TEMP 'strict-sdk-installed'
+          & cmd.exe /d /c (Join-Path $upstream 'bootstrap-vcpkg.bat') -disableMetrics *> (Join-Path $env:RUNNER_TEMP 'sdk-deps-bootstrap.log')
+          if ($LASTEXITCODE -ne 0) { throw 'SDK_DEPS_WINDOWS_BOOTSTRAP_FAILED' }
+          $vcpkg = Join-Path $upstream 'vcpkg.exe'
+          $installArgs = @(
+            'install',
+            'lockfreecoro[auth,grpc,h264,opus,postgresql,process,protobuf,saml,sqlite,vp8,vp9]',
+            'lfc-ui[lockfreecoro]',
+            '--triplet=x64-windows-static-release',
+            '--host-triplet=x64-windows-static-release',
+            "--overlay-ports=$env:GITHUB_WORKSPACE/private-vcpkg/ports",
+            "--overlay-triplets=$env:GITHUB_WORKSPACE/private-vcpkg/triplets",
+            "--x-install-root=$installed",
+            '--binarysource=clear',
+            '--clean-buildtrees-after-build',
+            '--clean-packages-after-build'
+          )
+          $installLog = Join-Path $env:RUNNER_TEMP 'sdk-deps-install.log'
+          & $vcpkg @installArgs *> $installLog
+          $installRc = $LASTEXITCODE
+          if ($installRc -ne 0) {
+            $env:SDK_DEPS_DIAG_LOG = $installLog
+            @'
+          import os, pathlib, re
+          text=pathlib.Path(os.environ["SDK_DEPS_DIAG_LOG"]).read_text(errors="replace")[-1048576:]
+          package="unknown"
+          for pattern in (
+              r"error: building ([a-z0-9][a-z0-9+_.-]*):",
+              r"BUILD_FAILED[^\n]*?([a-z0-9][a-z0-9+_.-]+):x64-windows-static-release",
+              r"([a-z0-9][a-z0-9+_.-]+):x64-windows-static-release failed",
+          ):
+              match=re.search(pattern,text,re.I)
+              if match:
+                  package=match.group(1).lower()
+                  break
+          if package == "unknown":
+              matches=re.findall(
+                  r"(?:Building package|Installing\s+[0-9]+/[0-9]+)\s+([a-z0-9][a-z0-9+_.-]*)(?:\[[^\]\r\n]*\])?:",
+                  text, re.I,
+              )
+              if matches:
+                  package=matches[-1].lower()
+          reason="unknown"
+          for label,pattern in (
+              ("patch",r"patch failed|does not apply|corrupt patch|malformed patch"),
+              ("missing-cmake-package",r"Could not find a package configuration file provided by"),
+              ("download",r"(?:download|curl|http).*?(?:failed|error|404|403|502|503|504)"),
+              ("configure",r"(?:configuring .* failed|CMake Error)"),
+              ("compile",r"(?:FAILED:|fatal error:|ninja: build stopped|MSB[0-9]+)"),
+              ("post-build-validation",r"post-build validation|Found unexpected shared"),
+          ):
+              if re.search(pattern,text,re.I):
+                  reason=label
+                  break
+          if not re.fullmatch(r"[a-z0-9][a-z0-9+_.-]*|unknown",package):
+              package="unknown"
+          status=""
+          if reason == "download":
+              codes=re.findall(r"(?<![0-9])(4[0-9]{2}|5[0-9]{2})(?![0-9])",text)
+              if codes:
+                  status=codes[-1]
+          suffix=(" status="+status) if status else ""
+          print(f"SDK_DEPS_WINDOWS_INSTALL_FAILURE package={package} reason={reason}" + suffix)
+          '@ | python -
+            exit $installRc
+          }
+          $export = Join-Path $env:RUNNER_TEMP 'export'
+          New-Item -ItemType Directory -Force $export | Out-Null
+          $exportArgs = @(
+            'export','lockfreecoro','lfc-ui',
+            '--triplet=x64-windows-static-release',
+            '--host-triplet=x64-windows-static-release',
+            "--overlay-ports=$env:GITHUB_WORKSPACE/private-vcpkg/ports",
+            "--overlay-triplets=$env:GITHUB_WORKSPACE/private-vcpkg/triplets",
+            "--x-install-root=$installed",
+            '--raw','--output=sdk-deps',"--output-dir=$export"
+          )
+          & $vcpkg @exportArgs *> (Join-Path $env:RUNNER_TEMP 'sdk-deps-export.log')
+          if ($LASTEXITCODE -ne 0) { throw 'SDK_DEPS_WINDOWS_EXPORT_FAILED' }
+          $sdk = Join-Path $export 'sdk-deps'
+          $prefix = Join-Path $sdk 'installed/x64-windows-static-release'
+          $triplets = Join-Path $sdk 'triplets'
+          New-Item -ItemType Directory -Force $triplets | Out-Null
+          Copy-Item "$env:GITHUB_WORKSPACE/private-vcpkg/triplets/x64-windows-static-release.cmake" (Join-Path $triplets 'x64-windows-static-release.cmake')
+          $shared = @(Get-ChildItem (Join-Path $prefix 'lib'),(Join-Path $prefix 'bin') -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -ieq '.dll' })
+          if ($shared.Count -ne 0) {
+            $names = @($shared | ForEach-Object { $_.Name } | Sort-Object -Unique | Select-Object -First 20)
+            Write-Host ("SDK_DEPS_WINDOWS_SHARED_TARGET_PAYLOAD count=" + $shared.Count + " names=" + ($names -join ','))
+            exit 1
+          }
+          $consumer = Join-Path $env:RUNNER_TEMP 'sdk-consumer'
+          $cmakeArgs = @(
+            '-S',"$env:GITHUB_WORKSPACE/private-vcpkg/ci/smoke",
+            '-B',$consumer,
+            '-G','Visual Studio 17 2022','-A','x64',
+            '-DCMAKE_BUILD_TYPE=Release',
+            '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded',
+            "-DCMAKE_TOOLCHAIN_FILE=$sdk/scripts/buildsystems/vcpkg.cmake",
+            '-DVCPKG_TARGET_TRIPLET=x64-windows-static-release',
+            '-DVCPKG_HOST_TRIPLET=x64-windows-static-release',
+            '-DVCPKG_MANIFEST_MODE=OFF'
+          )
+          & cmake @cmakeArgs *> (Join-Path $env:RUNNER_TEMP 'sdk-deps-consumer-configure.log')
+          if ($LASTEXITCODE -ne 0) { throw 'SDK_DEPS_WINDOWS_CONSUMER_CONFIGURE_FAILED' }
+          & cmake --build $consumer --config Release --parallel 2 *> (Join-Path $env:RUNNER_TEMP 'sdk-deps-consumer-build.log')
+          if ($LASTEXITCODE -ne 0) { throw 'SDK_DEPS_WINDOWS_CONSUMER_BUILD_FAILED' }
+          & ctest --test-dir $consumer -C Release --output-on-failure --timeout 60 *> (Join-Path $env:RUNNER_TEMP 'sdk-deps-consumer-test.log')
+          if ($LASTEXITCODE -ne 0) { throw 'SDK_DEPS_WINDOWS_CONSUMER_TEST_FAILED' }
+          Write-Host 'SDK_DEPS_WINDOWS_QUALIFIED'
+      - name: Checkout builder encrypted-log tooling
+        if: always()
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: dobord/builder
+          ref: ${{ github.sha }}
+          path: builder-log-tools
+          persist-credentials: false
+      - name: Build encrypted diagnostic artifact
+        if: always()
+        uses: ./builder-log-tools/.github/actions/encrypted-logs
+        with:
+          public_key_b64: ${{ secrets.BUILDER_ENCRYPTED_LOGS_PUBLIC_KEY_B64 }}
+          roots: |
+            ${{ runner.temp }}
+            ${{ github.workspace }}/private-vcpkg/.sdk-upstream/buildtrees

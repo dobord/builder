@@ -1,0 +1,134 @@
+name: GTK3 static build failure identity
+on:
+  push:
+    branches:
+      - feature/cef-static-integration
+    paths:
+      - .github/workflows/gtk3-static-diagnostic.yml
+permissions:
+  contents: read
+concurrency:
+  group: gtk3-static-build-diagnostic
+  cancel-in-progress: true
+jobs:
+  gtk3:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: dobord/vcpkg
+          ref: c01f6ebc41c9282bee4ed6d409f9a8a4a7a39535
+          path: private-vcpkg
+          token: ${{ secrets.SOURCE_READ_TOKEN }}
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: microsoft/vcpkg
+          ref: 9e593bb18ea69cc5095e012465dcd675a822ed0d
+          path: private-vcpkg/.gtk-upstream
+          persist-credentials: false
+      - name: Install native prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-14 g++-14 autoconf autoconf-archive automake libtool pkg-config ninja-build gettext
+      - name: Restore reviewed static dependency caches
+        env:
+          GH_TOKEN: ${{ secrets.SOURCE_READ_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/gtk-cache"
+          fetch_cache() {
+            id="$1"; sha="$2"; name="$3"
+            archive="$RUNNER_TEMP/gtk-cache/$name.zip"
+            target="$RUNNER_TEMP/gtk-cache/$name"
+            gh api "repos/dobord/vcpkg/actions/artifacts/$id/zip" > "$archive"
+            echo "$sha  $archive" | sha256sum -c - >/dev/null
+            mkdir "$target"
+            unzip -q "$archive" -d "$target"
+          }
+          fetch_cache 10510999882 7fce9a50b14a91452f939011155c265ac5e996815c5d442ba7d1c6b7f5da2b05 core
+          fetch_cache 10513582038 13070e63a1a5ccdaef82d483f4296ba31fa7ef1f237cd17729cf81fddf3d118f cups
+          fetch_cache 10512319512 c837f50873e149ac8c1d823ab906fbb36217616c3198e029bc6ee647e0222b8e gbm
+      - name: Reproduce and classify GTK3 static failure
+        shell: bash
+        env:
+          CC: gcc-14
+          CXX: g++-14
+          VCPKG_DISABLE_METRICS: "1"
+          VCPKG_BINARY_SOURCES: clear
+        run: |
+          set -euo pipefail
+          upstream="$GITHUB_WORKSPACE/private-vcpkg/.gtk-upstream"
+          test "$(git -C private-vcpkg rev-parse HEAD)" = "c01f6ebc41c9282bee4ed6d409f9a8a4a7a39535"
+          bash "$upstream/bootstrap-vcpkg.sh" -disableMetrics >"$RUNNER_TEMP/gtk-bootstrap.log" 2>&1
+          set +e
+          "$upstream/vcpkg" install gtk3             --triplet=x64-linux-static-release             --host-triplet=x64-linux-static-release             "--overlay-ports=$GITHUB_WORKSPACE/private-vcpkg/ports"             "--overlay-triplets=$GITHUB_WORKSPACE/private-vcpkg/ci/cef-platform/triplets"             "--x-install-root=$RUNNER_TEMP/gtk-installed"             --binarysource=clear             "--binarysource=files,$RUNNER_TEMP/gtk-cache/core,read"             "--binarysource=files,$RUNNER_TEMP/gtk-cache/cups,read"             "--binarysource=files,$RUNNER_TEMP/gtk-cache/gbm,read" >"$RUNNER_TEMP/gtk-install.log" 2>&1
+          rc=$?
+          set -e
+          if [ "$rc" -eq 0 ]; then
+            echo "GTK3_STATIC_BUILD_QUALIFIED"
+            exit 0
+          fi
+          python - <<'PY'
+          import os, pathlib, re
+          root = pathlib.Path(os.environ["GITHUB_WORKSPACE"]) / "private-vcpkg/.gtk-upstream/buildtrees/gtk3"
+          logs = []
+          if root.is_dir():
+              candidates = sorted(
+                  [p for p in root.rglob("*") if p.is_file() and
+                   (p.suffix == ".log" or p.name in {"meson-log.txt","config.log"})],
+                  key=lambda p: p.stat().st_mtime,
+                  reverse=True,
+              )[:24]
+              logs = [p.read_text(errors="replace")[-262144:] for p in candidates]
+          text = "\n".join(logs)
+          category, token = "unknown", ""
+          if re.search(r"patch failed|does not apply|corrupt patch|malformed patch", text, re.I):
+              category = "patch"
+          else:
+              concrete = [
+                  ("missing-header", r"fatal error:\s*([A-Za-z0-9_+./-]+):\s*No such file"),
+                  ("missing-library", r"(?:cannot find|unable to find)\s+-l([A-Za-z0-9_+.-]+)"),
+                  ("undefined-reference", r"undefined reference to [\x60'\"]([A-Za-z_][A-Za-z0-9_:]*)"),
+                  ("multiple-definition", r"multiple definition of [\x60'\"]?([A-Za-z_][A-Za-z0-9_:]*)"),
+              ]
+              for label, pattern in concrete:
+                  m = re.search(pattern, text, re.I)
+                  if m:
+                      category = label
+                      raw = pathlib.PurePosixPath(m.group(1)).name.lower()
+                      if re.fullmatch(r"[a-z0-9_+.:/-]+", raw):
+                          token = raw
+                      break
+          if category == "unknown":
+              if re.search(r"collect2: error: ld returned|linker command failed", text, re.I):
+                  category = "link"
+              elif re.search(r"(?:^|\n)FAILED:", text):
+                  category = "compile"
+              elif re.search(r"post-build validation|Found unexpected shared", text, re.I):
+                  category = "post-build-validation"
+              elif re.search(r"meson\.build:\d+:\d+: ERROR:", text):
+                  category = "meson-error"
+          if category == "unknown":
+              probes = [
+                  ("unknown-option", r"Unknown options?:\s*['\"]?([A-Za-z0-9_+.-]+)"),
+                  ("missing-program", r"Program\s+['\"]?([A-Za-z0-9_+.-]+)['\"]?[^\n]*(?:not found|found:\s*NO)"),
+                  ("missing-dependency", r"(?:Dependency|Run-time dependency)\s+['\"]?([A-Za-z0-9_+.-]+)['\"]?[^\n]*(?:not found|found:\s*NO)"),
+              ]
+              for label, pattern in probes:
+                  m = re.search(pattern, text, re.I)
+                  if m:
+                      category = label
+                      raw = pathlib.PurePosixPath(m.group(1)).name.lower()
+                      if re.fullmatch(r"[a-z0-9_+.-]+", raw):
+                          token = raw
+                      break
+          suffix = (" token=" + token) if token else ""
+          print("GTK3_STATIC_FAILURE category=" + category + suffix)
+          PY
+          exit "$rc"
