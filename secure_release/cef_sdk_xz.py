@@ -85,7 +85,7 @@ def verify(sdk: Path) -> dict:
 
 
 def inventory_sources(sdk: Path, *, examples: dict, headers: dict, docs: dict,
-                      aliases: dict, diagnostics: Path) -> int:
+                      aliases: dict, diagnostics: Path, interfaces: dict | None = None) -> int:
     """Record ALL source-suffix entries before ZIP; discovery grants NO approval.
 
     #80 revealed an upstream documentation source after earlier reviews passed.
@@ -97,6 +97,7 @@ def inventory_sources(sdk: Path, *, examples: dict, headers: dict, docs: dict,
     allowed = set(safeio._source_review(examples))
     allowed.update(safeio._source_review(headers, include_headers=True))
     allowed.update(safeio._source_review(docs, documentation=True))
+    allowed.update(safeio._source_review(interfaces, shared_interfaces=True))
     records = []
     for path in safeio._regular_files(sdk, reviewed_aliases=safeio._alias_review(aliases)):
         if path.suffix.casefold() not in safeio.SOURCE_SUFFIXES:

@@ -11,6 +11,9 @@ on:
       - secure_release/cef_sdk_headers.py
       - secure_release/cef_sdk_aliases.py
       - secure_release/cef_sdk_protoc.py
+      - secure_release/cef_sdk_source_interfaces.py
+      - tests/test_cef_sdk_source_interfaces.py
+      - ci/cef-sdk-source-interfaces.json
       - secure_release/cef_sdk_xz.py
       - tests/test_cef_sdk_xz.py
       - tests/test_cef_sdk_protoc.py
@@ -144,7 +147,7 @@ jobs:
         run: |
           sudo rm -rf /usr/local/lib/android /usr/share/dotnet /usr/local/.ghcup /opt/ghc
           sudo apt-get update
-          sudo apt-get install -y gcc-14 g++-14 autoconf autoconf-archive automake libtool pkg-config ninja-build gperf flex bison nasm gettext texinfo libltdl-dev xvfb xauth fonts-dejavu-core ccache openssl
+          sudo apt-get install -y gcc-14 g++-14 autoconf autoconf-archive automake libtool pkg-config ninja-build gperf flex bison nasm gettext texinfo libltdl-dev x11proto-dev xvfb xauth fonts-dejavu-core ccache openssl
           df -h /
       - name: Validate final combined helper syntax
         run: python -m py_compile secure_release/cef_dependency_source.py secure_release/cef_strict_combined.py secure_release/cef_combined_identity.py secure_release/cef_nss_isolation.py secure_release/cef_native_link_static.py secure_release/cef_x11_static.py secure_release/cef_unwind_backtrace.py
@@ -192,6 +195,20 @@ jobs:
           curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o "$CEF_SDK_XZ_ARCHIVE" https://github.com/tukaani-project/xz/archive/v5.8.3.tar.gz
           echo "8fb5e6a13397d259d8ff7484f9b63f8a6752ff1c63e1a4601170ad8175aadefb5126a1cae7f73370bfc6c2a0b4e1c0bad57a58fc5b781d3f7d45e5a483c091cc  $CEF_SDK_XZ_ARCHIVE" | sha512sum -c -
           python -m unittest discover -s tests -p test_cef_sdk_xz.py -v
+      - name: Verify installed FFmpeg examples and patched Xtrans source interfaces
+        env:
+          CEF_SDK_INTERFACES_UPSTREAM: ${{ github.workspace }}/private-vcpkg/.full-upstream
+          CEF_SDK_FFMPEG_ARCHIVE: ${{ runner.temp }}/cef-sdk-ffmpeg-source.tar.gz
+          CEF_SDK_XTRANS_ARCHIVE: ${{ runner.temp }}/cef-sdk-xtrans-source.tar.gz
+          REQUIRE_CEF_SDK_INTERFACES: '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o "$CEF_SDK_FFMPEG_ARCHIVE" https://github.com/FFmpeg/FFmpeg/archive/n8.1.2.tar.gz
+          echo "c72f4062aecc16d8b2b1e8678d5efe3af4cfaa0cc7c0997052248f9e499e60c2463acf07877cf3b78b246ce3e8078cb043e8d97e90a6b50d06af32ff7369a788  $CEF_SDK_FFMPEG_ARCHIVE" | sha512sum -c -
+          curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o "$CEF_SDK_XTRANS_ARCHIVE" https://gitlab.freedesktop.org/xorg/lib/libxtrans/-/archive/xtrans-1.6.0/libxtrans-xtrans-1.6.0.tar.gz
+          echo "c7037cb6d2fb641486a43c9203949edec2038735ba758f8556add63598dbb3205166a2ec272700639884b1952642c171806e3dab566722cadd4c71ca98c0a1bf  $CEF_SDK_XTRANS_ARCHIVE" | sha512sum -c -
+          python -m unittest discover -s tests -p test_cef_sdk_source_interfaces.py -v
       - name: Verify pinned HarfBuzz C boundary before archive replay
         env:
           REQUIRE_CEF_HARFBUZZ_BOUNDARY: '1'

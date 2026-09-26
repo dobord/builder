@@ -195,7 +195,7 @@ MAX_REVIEWED_SOURCE_BYTES = 1024**2
 
 
 def _source_review(records: dict | None, *, include_headers: bool = False,
-                   documentation: bool = False) -> dict[str, dict]:
+                   documentation: bool = False, shared_interfaces: bool = False) -> dict[str, dict]:
     """An explicit caller review, never a manifest discovered inside the SDK.
 
     Exact installed examples and separately reviewed source-suffixed inclusion
@@ -203,11 +203,11 @@ def _source_review(records: dict | None, *, include_headers: bool = False,
     or source-tree roots; defaults still
     prohibit implementation sources. Neither scope discovers its own approval.
     """
-    if include_headers and documentation:
+    if sum((include_headers, documentation, shared_interfaces)) > 1:
         raise ValueError("conflicting SDK source review scopes")
     if records is None:
         return {}
-    if not isinstance(records, dict) or not 0 < len(records) <= 16:
+    if not isinstance(records, dict) or not 0 < len(records) <= (29 if shared_interfaces else 16):
         raise ValueError("invalid SDK example source review")
     result = {}
     index = _PathIndex()
@@ -220,6 +220,10 @@ def _source_review(records: dict | None, *, include_headers: bool = False,
         if documentation:
             scope = (len(path) == 7 and path[0] == "installed"
                      and path[2:4] == ("share", "doc") and path[5] == "examples")
+        if shared_interfaces:
+            scope = (path[:2] == ("installed", "x64-linux-static-release") and
+                     (len(path) == 6 and path[2:5] == ("share", "ffmpeg", "examples") or
+                      len(path) == 8 and path[2:7] == ("share", "xtrans", "include", "X11", "Xtrans")))
         if (name != "/".join(path) or not scope
                 or PurePosixPath(name).suffix.casefold() not in SOURCE_SUFFIXES
                 or forbidden_sdk_tree(name) or not isinstance(record, dict)
@@ -333,7 +337,8 @@ def _alias_bytes(path: Path, record: dict) -> bytes:
 def sdk_zip(root: Path, archive: Path, *, reviewed_sources: dict | None = None,
             reviewed_include_sources: dict | None = None,
             reviewed_aliases: dict | None = None,
-            reviewed_doc_sources: dict | None = None) -> None:
+            reviewed_doc_sources: dict | None = None,
+            reviewed_interface_sources: dict | None = None) -> None:
     """Package the export with portable metadata and deny-by-default sources.
 
     A reviewed source is read into a bounded buffer and hashed, and those SAME
@@ -343,13 +348,15 @@ def sdk_zip(root: Path, archive: Path, *, reviewed_sources: dict | None = None,
     review = _source_review(reviewed_sources)
     headers = _source_review(reviewed_include_sources, include_headers=True)
     docs = _source_review(reviewed_doc_sources, documentation=True)
+    interfaces = _source_review(reviewed_interface_sources, shared_interfaces=True)
     index = _PathIndex()
-    for name in (*review, *headers, *docs):
+    for name in (*review, *headers, *docs, *interfaces):
         index.add(name, False)
     review.update(headers)
     review.update(docs)
     if len(review) > 16:
         raise ValueError("too many reviewed SDK source files")
+    review.update(interfaces)
     aliases = _alias_review(reviewed_aliases)
     canonical = {str(PurePosixPath(n).with_name(r["target"])): r for n, r in aliases.items()}
     for name in (*aliases, *canonical):
