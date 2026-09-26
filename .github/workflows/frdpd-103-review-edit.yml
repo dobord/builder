@@ -1,0 +1,86 @@
+name: Apply bounded private review correction
+on:
+  push:
+    branches: [fix/frdpd-103-review-20260926]
+    paths: ['.github/workflows/frdpd-103-review-edit.yml']
+permissions:
+  contents: read
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    env:
+      SOURCE_SHA: 483cbf1b7ae7d931d0268daf02623957a95061db
+      SOURCE_BRANCH: fix/103-review-corrections-20260926
+      ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.13'
+      - run: |
+          python -m pip install --require-hashes --only-binary=:all: -r requirements.lock
+      - name: Apply only the reviewed patch and publish without force
+        env:
+          SOURCE_READ_TOKEN: ${{ secrets.SOURCE_READ_TOKEN }}
+        run: |
+          python - <<'PY'
+          import os,subprocess,json,hashlib
+          from pathlib import Path
+          os.umask(0o077)
+          root=Path(os.environ['RUNNER_TEMP'])/'review-edit';root.mkdir(mode=0o700)
+          src=root/'source';ask=root/'askpass';status={'published':False}
+          ask.write_text('#!/bin/sh\ncase "$1" in *Username*) echo x-access-token ;; *) printf "%s\\n" "$SOURCE_READ_TOKEN" ;; esac\n');ask.chmod(0o700)
+          env=dict(os.environ,GIT_ASKPASS=str(ask),GIT_TERMINAL_PROMPT='0')
+          try:
+              with (root/'edit.log').open('w') as log:
+                  def git(*args):
+                      return subprocess.run(['git',*args],env=env,stdout=log,stderr=log,check=True,timeout=120)
+                  def read(*args):
+                      return subprocess.check_output(['git','-C',str(src),*args],env=env,stderr=log,text=True,timeout=120).strip()
+                  git('init',str(src));git('-C',str(src),'remote','add','origin','https://github.com/dobord/frdpd.git')
+                  git('-C',str(src),'fetch','--depth=1','origin',os.environ['SOURCE_BRANCH'])
+                  git('-C',str(src),'checkout','--detach','FETCH_HEAD')
+                  if read('rev-parse','HEAD')!=os.environ['SOURCE_SHA']:raise RuntimeError('source branch advanced; refusing stale edit')
+                  path='server/frdp/frdpd/frdpd.c';patch='tools/review/strict-unused-config.patch'
+                  if read('hash-object',path)!='89788d7ff154f7a49fd9b6d80090164002573630':raise RuntimeError('unexpected complete source blob')
+                  git('-C',str(src),'apply','--check',patch)
+                  git('-C',str(src),'apply',patch)
+                  if read('hash-object',path)!='533d0742e8a1342ff4b22b9a9058cc6dca507cd8':raise RuntimeError('unexpected corrected source blob')
+                  git('-C',str(src),'rm',patch);git('-C',str(src),'add',path)
+                  if set(read('diff','--cached','--name-only').splitlines())!={path,patch}:raise RuntimeError('unrelated source edits')
+                  git('-C',str(src),'diff','--cached','--check')
+                  git('-C',str(src),'-c','user.name=frdpd CI','-c','user.email=41898282+github-actions[bot]@users.noreply.github.com','commit','-m','Keep the config parameter used when release assertions and local NTLM are disabled')
+                  status.update(commit=read('rev-parse','HEAD'),tree=read('rev-parse','HEAD^{tree}'),parent=os.environ['SOURCE_SHA'])
+                  # A normal push refuses concurrent changes; never force or change permissions.
+                  git('-C',str(src),'push','origin','HEAD:refs/heads/'+os.environ['SOURCE_BRANCH'])
+                  status['published']=True
+          finally:
+              (root/'status.json').write_text(json.dumps(status,indent=2))
+              ask.unlink(missing_ok=True)
+          PY
+      - name: Encrypt actual result
+        if: always()
+        run: |
+          python - <<'PY'
+          import os,tarfile
+          from pathlib import Path
+          from secure_release.crypto import encrypt_file
+          root=Path(os.environ['RUNNER_TEMP']);archive=root/'review-edit.tar.gz'
+          with tarfile.open(archive,'w:gz') as out:
+              for p in (root/'review-edit').glob('*'):
+                  if p.is_file() and p.suffix in ('.log','.json'):out.add(p,arcname=p.name)
+          encrypt_file(archive,root/'review-edit.enc',os.environ['ARTIFACT_ENCRYPTION_PUBLIC_KEY'],{'purpose':'frdpd-103-reviewed-source-edit','source_sha':os.environ['SOURCE_SHA'],'run_id':os.environ['GITHUB_RUN_ID']})
+          archive.unlink()
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: encrypted-review-edit-${{ github.run_id }}
+          path: ${{ runner.temp }}/review-edit.enc
+          retention-days: 3
+          if-no-files-found: error
+      - if: always()
+        run: rm -rf "$RUNNER_TEMP/review-edit" "$RUNNER_TEMP/review-edit.enc"
