@@ -153,7 +153,10 @@ class NativeTests(unittest.TestCase):
         for name in ('hb-ot.h','hb-aat.h','hb-ft.h'):
             (prefix/'include/harfbuzz'/name).write_text('/* fixture declarations are in hb.h */\n')
         a=self.lib('mock-c-api',body);shutil.copyfile(a,prefix/'lib/libharfbuzz.a')
-        inv={'archive_objects':{'lib/libharfbuzz.a':1}}
+        inv={'archive_objects':{'lib/libharfbuzz.a':1},
+             'modules':{'harfbuzz':{'includes':['include/harfbuzz']}},
+             'files':{p.relative_to(prefix).as_posix():{'sha256':hb.digest(p),'size':p.stat().st_size}
+                      for p in (prefix/'include').rglob('*') if p.is_file()}}
         hb.link_probe(prefix,inv,set(signatures),self.root/'proof')
         with self.assertRaisesRegex(ValueError,'C-link proof failed'):
             hb.link_probe(prefix,inv,set(signatures)|{'hb_missing'},self.root/'missing-proof')

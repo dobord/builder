@@ -254,6 +254,48 @@ def closed_difference(built: Path, frozen: Path, declared: set[str],
                  'private_frozen_only':len(f_only),'reference_archives':len(seen)}
 
 
+def include_flags(prefix: Path, inventory: dict) -> list[str]:
+    """Use captured pkg-config include roots, not a host-distribution layout.
+
+    vcpkg's FreeType port moves ft2build.h to include/, so include/freetype2
+    is not a portable substitute. The caller authenticates the full manifest;
+    validate every recorded include root and its captured header bytes here as
+    well, before asking a native compiler to search it. Do not consult host
+    pkg-config or fall back to system FreeType headers.
+    """
+    modules = inventory.get('modules')
+    module = modules.get('harfbuzz') if isinstance(modules, dict) else None
+    roots = module.get('includes') if isinstance(module, dict) else None
+    files = inventory.get('files')
+    require(isinstance(roots, list) and 0 < len(roots) <= 16
+            and isinstance(files, dict), 'Missing captured HarfBuzz include interface')
+    result, seen = [], set()
+    for name in roots:
+        require(isinstance(name, str) and
+                re.fullmatch(r'include(?:/[A-Za-z0-9_.+-]+)*', name) is not None
+                and all(p not in {'.', '..'} for p in name.split('/'))
+                and name not in seen, 'Invalid captured HarfBuzz include root')
+        seen.add(name)
+        directory = prefix / name
+        require(directory.is_dir() and not any(p.is_symlink() for p in
+                (directory, *directory.parents)), 'Redirected or missing HarfBuzz include root')
+        captured = [n for n in files if n.startswith(name + '/')]
+        require(captured, 'HarfBuzz include root has no captured headers')
+        for rel in captured:
+            require(re.fullmatch(r'include(?:/[A-Za-z0-9_.+-]+)+', rel) is not None
+                    and all(p not in {'.', '..'} for p in rel.split('/')),
+                    'Invalid captured HarfBuzz header path')
+            path = prefix / rel
+            record = files[rel]
+            regular(path)
+            require(isinstance(record, dict) and type(record.get('size')) is int
+                    and path.stat().st_size == record['size']
+                    and digest(path) == record.get('sha256'),
+                    'Captured HarfBuzz include bytes changed')
+        result.append('-I' + str(directory))
+    return result
+
+
 def link_probe(prefix: Path, inventory: dict, api: set[str], output: Path) -> None:
     """Every enabled public function is a live link root in a real C executable.
 
@@ -278,8 +320,8 @@ def link_probe(prefix: Path, inventory: dict, api: set[str], output: Path) -> No
         'int bad=(!g||n!=3);hb_font_destroy(f);hb_buffer_destroy(b);return bad;}\n')
     paths = [prefix/n for n in inventory['archive_objects']]
     executable = output/'harfbuzz-boundary'
-    command = ['cc','-O0','-static-libgcc','-I'+str(prefix/'include/harfbuzz'),
-               '-I'+str(prefix/'include/freetype2'),str(refs),str(main),
+    command = ['cc','-O0','-static-libgcc',*include_flags(prefix, inventory),
+               str(refs),str(main),
                '-Wl,--no-gc-sections','-Wl,--start-group',*map(str,paths),'-Wl,--end-group',
                '-lm','-ldl','-lrt','-pthread','-o',str(executable)]
     result = subprocess.run(command,capture_output=True,text=True,timeout=240)
@@ -517,8 +559,7 @@ extern "C" int cpp_api_probe(void) {
   return !a || !b || !c || a.get() != b.get();
 }
 ''', encoding="utf-8")
-    includes = ["-I" + str(package / "include"), "-I" + str(prefix / "include"),
-                "-I" + str(prefix / "include/freetype2")]
+    includes = ["-I" + str(package / "include"), *include_flags(prefix, manifest)]
     command([cc, "-O2", *includes, "-c", c, "-o", folder / "api.o"])
     command([cxx, "-std=c++17", "-O2", "-fno-exceptions", "-fno-rtti", *includes,
              "-c", cpp, "-o", folder / "cpp.o"])

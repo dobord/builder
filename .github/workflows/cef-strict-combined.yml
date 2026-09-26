@@ -12,6 +12,7 @@ on:
       - ci/cef-harfbuzz-interface.json
       - tests/test_cef_harfbuzz_boundary.py
       - tests/test_cef_harfbuzz_c_api.py
+      - tests/test_cef_harfbuzz_includes.py
       - tests/test_cef_harfbuzz_uploaded_proof.py
       - tests/test_cef_harfbuzz_metadata_alias.py
       - tests/test_cef_harfbuzz_archive_alias.py
@@ -147,6 +148,9 @@ jobs:
       - name: Verify pinned HarfBuzz C boundary before archive replay
         env:
           REQUIRE_CEF_HARFBUZZ_BOUNDARY: '1'
+          REQUIRE_CEF_FREETYPE_INCLUDE_FIXTURE: '1'
+          CEF_FREETYPE_SOURCE_ARCHIVE: ${{ runner.temp }}/cef-freetype-source.tar.gz
+          CEF_FREETYPE_PORT_FIXTURE: ${{ github.workspace }}/private-vcpkg/.full-upstream/ports/freetype/portfile.cmake
           CEF_HARFBUZZ_SOURCE_FIXTURE: ${{ runner.temp }}/cef-harfbuzz-source/harfbuzz-14.2.1
         shell: bash
         run: |
@@ -156,6 +160,9 @@ jobs:
           echo "b7642a81eb021bf96cf8c91c5ebdde7f4fdfd40c76db722f00cf001125f4b81b954d08485774d2b23318d49b1e954fa0189ba8f10db56d148f33f9d90891d0cb  $archive" | sha512sum -c -
           mkdir "$RUNNER_TEMP/cef-harfbuzz-source"
           tar -xzf "$archive" -C "$RUNNER_TEMP/cef-harfbuzz-source"
+          curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o "$CEF_FREETYPE_SOURCE_ARCHIVE" https://gitlab.freedesktop.org/freetype/freetype/-/archive/VER-2-14-3/freetype-VER-2-14-3.tar.gz
+          echo "c3b6b0cc4b428c9c647ab2148386901dfd315273b68051940e8fea6010d46fdd2913467c3ef58be0d499b8e2ef5a0f1a4cc5e739756155587f4f7dff08ef9695  $CEF_FREETYPE_SOURCE_ARCHIVE" | sha512sum -c -
+          python -m unittest discover -s tests -p test_cef_harfbuzz_includes.py -v
           python -m unittest discover -s tests -p test_cef_harfbuzz_boundary.py -v
           python -m unittest discover -s tests -p test_cef_harfbuzz_c_api.py -v
           python -m unittest discover -s tests -p test_cef_harfbuzz_uploaded_proof.py -v

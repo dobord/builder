@@ -109,7 +109,8 @@ class Boundary(unittest.TestCase):
         self.value={'schema':1,'kind':'linux-x64-static-platform-build-inputs','runtime_verified':False,
                     'files':{**headers,'lib/libharfbuzz.a':{'size':self.source.stat().st_size,'sha256':replay.sha(self.source)}},
                     'archive_objects':{'lib/libharfbuzz.a':2},
-                    'modules':{'harfbuzz':{'libraries':['lib/libharfbuzz.a'],'link_options':['-pthread']}}}
+                    'modules':{'harfbuzz':{'libraries':['lib/libharfbuzz.a'],'link_options':['-pthread'],
+                                             'includes':['include/harfbuzz','include']}}}
         self.review={'archive_sha256':replay.sha(self.source),'headers_sha256':hashlib.sha256(replay.canonical(headers)).hexdigest()}
         for label,names in [('built_only',self.built-self.frozen),('frozen_only',self.frozen-self.built)]:
             self.review[label+'_sha256']=hb.digest_names(names);self.review[label+'_count']=len(names)
