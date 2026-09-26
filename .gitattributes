@@ -25,3 +25,6 @@ tests/fixtures/cef-qualified-export/portfile.cmake text eol=lf
 
 # Full pinned protoc target source for the native packaging fixture.
 /tests/fixtures/cef-sdk-protoc/** text eol=lf
+
+# The byte-bound FFmpeg/Xtrans source-interface inventory is platform-independent.
+/ci/cef-sdk-source-interfaces.json text eol=lf
