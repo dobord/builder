@@ -182,6 +182,15 @@ class CombinedOrchestrationTests(unittest.TestCase):
             stack.enter_context(mock.patch.object(combined.cef_sdk_protoc, "validate_sources"))
             stack.enter_context(mock.patch.object(combined.cef_sdk_xz, "validate_sources"))
             stack.enter_context(mock.patch.object(combined.cef_sdk_source_interfaces, "validate_sources"))
+            def consumer_linker(_root):
+                events.append("consumer-linker")
+                return {
+                    "kind": "lld",
+                    "version": "Ubuntu LLD 18.1.3 (compatible with GNU linkers)",
+                    "sha256": "c" * 64,
+                }
+            linker = stack.enter_context(mock.patch.object(
+                combined.cef_consumer_linker, "verify", side_effect=consumer_linker))
             stack.enter_context(mock.patch.object(combined.cef_contract, "validate"))
             stack.enter_context(mock.patch.object(combined.cef_contract, "build_key", return_value="b"*64))
             stack.enter_context(mock.patch.object(engine, "qualification_lock", return_value={"checkpoint": api.selected}))
@@ -232,16 +241,22 @@ class CombinedOrchestrationTests(unittest.TestCase):
                 fetch.assert_not_called()
                 transport.assert_not_called()
                 step.assert_not_called()
+                linker.assert_not_called()
                 self.assertEqual(events, ["host"])
                 self.assertEqual(value["failure_stage"], "checkpoint-host-identity")
             elif source_unavailable:
                 transport.assert_not_called()
                 step.assert_not_called()
-                self.assertEqual(events, ["host", "source-prefetch"])
+                self.assertEqual(events, ["host", "consumer-linker", "source-prefetch"])
                 self.assertEqual(value["failure_stage"], "dependency-source-prefetch")
+                self.assertEqual(value["consumer_linker_kind"], "lld")
+                self.assertEqual(value["consumer_linker_sha256"], "c" * 64)
             else:
-                self.assertEqual(events, ["host", "source-prefetch", "authenticated-transport", "recipe", "unchanged-driver"])
+                self.assertEqual(events, ["host", "consumer-linker", "source-prefetch",
+                                          "authenticated-transport", "recipe", "unchanged-driver"])
                 self.assertEqual(value["failure_stage"], "checkpoint-restore")
+                self.assertEqual(value["consumer_linker_kind"], "lld")
+                self.assertEqual(value["consumer_linker_sha256"], "c" * 64)
                 self.assertEqual(value["runner_image_actual"], ACTUAL)
                 self.assertEqual(value["checkpoint_image_identity"], LOGICAL)
                 self.assertTrue(value["checkpoint_host_verified"])
