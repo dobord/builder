@@ -103,6 +103,24 @@ class CompositionTests(unittest.TestCase):
         self.assertIn("REQUIRE_CEF_COMBINED_SMOKE: '1'", flow)
         self.assertLess(flow.index('test_cef_combined_smoke.py -v'),
                         flow.index('Run checkpoint-resumed final combined SDK qualification'))
+
+    def test_production_builds_both_final_consumers_serially_with_separate_evidence(self):
+        from secure_release import cef_strict_combined as combined
+        import inspect
+        source = inspect.getsource(combined.main)
+        start = source.index('stage = "combined-consumer"')
+        end = source.index('stage = "lfc-ui-freerdp-cef-consumer"')
+        final = source[start:end]
+        sdk = final.index('"--target", "sdk_smoke", "--parallel", "1", "--verbose"')
+        cef = final.index('"--target", "cef_static_combined_smoke", "--parallel", "1", "--verbose"')
+        self.assertLess(sdk, cef)
+        self.assertIn('stage = "combined-consumer-sdk-build"', final)
+        self.assertIn('stage = "combined-consumer-cef-build"', final)
+        self.assertIn('consumer-sdk-build.log', final)
+        self.assertIn('consumer-cef-build.log', final)
+        self.assertIn('summary["combined_sdk_smoke_built"] = True', final)
+        self.assertIn('summary["combined_cef_smoke_built"] = True', final)
+        self.assertNotIn('"--parallel", "2"', final)
         self.assertEqual(combined.SDK_VCPKG, '936bbb0e7cb7d6d10f8f5ef5874521466278c799')
         self.assertEqual(combined.CEF, '2aff22e09daaa5c28780c5766a70ee13e61c93b6')
 

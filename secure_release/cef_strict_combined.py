@@ -836,12 +836,26 @@ def main() -> None:
             configure, cwd=root, env=build_env,
             log=root / "consumer-configure.log", timeout=900,
         )
+        # The two final consumers both carry a large static closure. Building
+        # the default target with --parallel 2 may overlap their link steps and
+        # makes a one-hour timeout ambiguous. Keep both consumers mandatory,
+        # but build them one at a time with independent evidence and budgets.
+        stage = "combined-consumer-sdk-build"
         run(
             ["cmake", "--build", smoke_build, "--config", "Release",
-             "--parallel", "2"],
+             "--target", "sdk_smoke", "--parallel", "1", "--verbose"],
             cwd=root, env=build_env,
-            log=root / "consumer-build.log", timeout=3600,
+            log=root / "consumer-sdk-build.log", timeout=3600,
         )
+        summary["combined_sdk_smoke_built"] = True
+        stage = "combined-consumer-cef-build"
+        run(
+            ["cmake", "--build", smoke_build, "--config", "Release",
+             "--target", "cef_static_combined_smoke", "--parallel", "1", "--verbose"],
+            cwd=root, env=build_env,
+            log=root / "consumer-cef-build.log", timeout=3600,
+        )
+        summary["combined_cef_smoke_built"] = True
         relocated_smokes = [
             path for path in smoke_build.rglob("cef_static_combined_smoke")
             if path.is_file() and not path.is_symlink()
