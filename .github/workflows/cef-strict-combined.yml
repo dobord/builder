@@ -11,6 +11,8 @@ on:
       - secure_release/cef_sdk_headers.py
       - secure_release/cef_sdk_aliases.py
       - secure_release/cef_sdk_protoc.py
+      - secure_release/cef_sdk_objects.py
+      - tests/test_cef_sdk_objects.py
       - secure_release/cef_sdk_source_interfaces.py
       - tests/test_cef_sdk_source_interfaces.py
       - ci/cef-sdk-source-interfaces.json
@@ -209,6 +211,21 @@ jobs:
           curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o "$CEF_SDK_XTRANS_ARCHIVE" https://gitlab.freedesktop.org/xorg/lib/libxtrans/-/archive/xtrans-1.6.0/libxtrans-xtrans-1.6.0.tar.gz
           echo "c7037cb6d2fb641486a43c9203949edec2038735ba758f8556add63598dbb3205166a2ec272700639884b1952642c171806e3dab566722cadd4c71ca98c0a1bf  $CEF_SDK_XTRANS_ARCHIVE" | sha512sum -c -
           python -m unittest discover -s tests -p test_cef_sdk_source_interfaces.py -v
+      - name: Verify installed FreeRDP objects through native CMake and vcpkg SDK transport
+        env:
+          CEF_SDK_OBJECTS_REGISTRY: ${{ github.workspace }}/private-vcpkg
+          CEF_SDK_OBJECTS_VCPKG: ${{ github.workspace }}/private-vcpkg/.full-upstream
+          CEF_SDK_OBJECTS_SOURCE: ${{ runner.temp }}/cef-sdk-freerdp/FreeRDP-63b948ca5cb94307fd5444ee6e73927a41ccdab4
+          REQUIRE_CEF_SDK_OBJECTS: '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/cef-sdk-freerdp.tar.gz"
+          curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o "$archive" https://github.com/FreeRDP/FreeRDP/archive/63b948ca5cb94307fd5444ee6e73927a41ccdab4.tar.gz
+          echo "964ec0d6f0e13a314384c18ddf4c3dffb05267a9e3800a0ae34a736f42542f8d92415358ee4ec9301eb907bd97e95c0d5e23af2ced7eac5deda1e0cf7d971aa0  $archive" | sha512sum -c -
+          mkdir "$RUNNER_TEMP/cef-sdk-freerdp"
+          tar -xzf "$archive" -C "$RUNNER_TEMP/cef-sdk-freerdp"
+          python -m unittest discover -s tests -p test_cef_sdk_objects.py -v
       - name: Verify pinned HarfBuzz C boundary before archive replay
         env:
           REQUIRE_CEF_HARFBUZZ_BOUNDARY: '1'

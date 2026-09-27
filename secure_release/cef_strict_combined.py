@@ -24,7 +24,7 @@ from . import (
 )
 from . import (
     cef_combined_identity, cef_combined_port, cef_dependency_source,
-    cef_freerdp_profile, cef_frozen_dependencies, cef_sdk_example, cef_sdk_headers, cef_sdk_aliases, cef_sdk_protoc, cef_sdk_xz, cef_sdk_source_interfaces, cef_strict_iteration,
+    cef_freerdp_profile, cef_frozen_dependencies, cef_sdk_example, cef_sdk_headers, cef_sdk_aliases, cef_sdk_protoc, cef_sdk_xz, cef_sdk_objects, cef_sdk_source_interfaces, cef_strict_iteration,
 )
 
 ENGINE_VCPKG = "b4bb281192ea8bb004542012ac804b988a4ff403"
@@ -389,6 +389,7 @@ def main() -> None:
         if git_head(path) != revision:
             raise ValueError("Strict combined SDK source revision mismatch")
     verify_engine_registry_delta(engine_registry, registry)
+    cef_sdk_objects.validate_sources(registry)
     example_review = cef_sdk_example.capture(lfc_ui, registry)
     cef_sdk_protoc.validate_sources(upstream)
     cef_sdk_xz.validate_sources(upstream)
@@ -698,6 +699,10 @@ def main() -> None:
         )
         summary["installed_isolation_bytes_verified"] = True
 
+        stage = "installed-object-review"
+        object_review = cef_sdk_objects.capture(installed)
+        summary["installed_object_count"] = len(object_review["objects"])
+        summary["installed_object_targets"] = len(object_review["bindings"])
         stage = "installed-protoc-review"
         protoc_review = cef_sdk_protoc.capture(installed, upstream, root / "protoc-install-proof")
         summary["installed_protoc_verified"] = True
@@ -750,14 +755,19 @@ def main() -> None:
             aliases=reviewed_aliases, diagnostics=root / "sdk-source-inventory.json",
             interfaces=reviewed_interfaces,
         )
+        stage = "sdk-object-review"
+        reviewed_objects = cef_sdk_objects.verify(sdk / "installed", object_review)
+        summary["sdk_objects_verified"] = True
         stage = "sdk-packaging"
         safeio.sdk_zip(sdk, sdk_zip, reviewed_sources=reviewed_sources,
                        reviewed_include_sources=reviewed_headers,
                        reviewed_aliases=reviewed_aliases, reviewed_doc_sources=reviewed_docs,
-                       reviewed_interface_sources=reviewed_interfaces)
+                       reviewed_interface_sources=reviewed_interfaces, reviewed_objects=reviewed_objects)
         consumer_sdk = root / "consumer-sdk"
         stage = "sdk-relocation"
         safeio.extract_zip(sdk_zip, consumer_sdk)
+        cef_sdk_objects.verify(consumer_sdk / "installed", object_review)
+        summary["relocated_sdk_objects_verified"] = True
         cef_sdk_example.verify(consumer_sdk, example_review)
         summary["relocated_sdk_example_source_verified"] = True
         cef_sdk_headers.verify(consumer_sdk, engine_work / "platform-inputs.json", platform_sha)
@@ -807,6 +817,7 @@ def main() -> None:
         cef_freerdp_profile.verify(consumer_sdk / "installed" / TRIPLET)
         summary["relocated_freerdp_profile_verified"] = True
 
+        cef_sdk_objects.verify(consumer_sdk / "installed", object_review)
         stage = "combined-consumer"
         smoke_build = root / "smoke-build"
         configure = build_support.consumer_configure_command(

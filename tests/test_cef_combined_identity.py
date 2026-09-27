@@ -178,6 +178,7 @@ class CombinedOrchestrationTests(unittest.TestCase):
             stack.enter_context(mock.patch.object(combined, "git_head", side_effect=heads.__getitem__))
             stack.enter_context(mock.patch.object(combined, "verify_engine_registry_delta"))
             stack.enter_context(mock.patch.object(combined.cef_sdk_example, "capture", return_value={}))
+            stack.enter_context(mock.patch.object(combined.cef_sdk_objects, "validate_sources"))
             stack.enter_context(mock.patch.object(combined.cef_sdk_protoc, "validate_sources"))
             stack.enter_context(mock.patch.object(combined.cef_sdk_xz, "validate_sources"))
             stack.enter_context(mock.patch.object(combined.cef_sdk_source_interfaces, "validate_sources"))

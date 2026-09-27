@@ -334,11 +334,78 @@ def _alias_bytes(path: Path, record: dict) -> bytes:
     return data
 
 
+MAX_REVIEWED_OBJECT_BYTES = 16 * 1024**2
+MAX_REVIEWED_OBJECT_TOTAL = 256 * 1024**2
+
+
+def object_member(name: str) -> bool:
+    """Only installed Release FreeRDP channel objects, never arbitrary .o files."""
+    parts(name)
+    return re.fullmatch(
+        r"installed/x64-linux-static-release/lib/freerdp3/objects-Release/"
+        r"[A-Za-z0-9_+.-]+/(?:[A-Za-z0-9_+.-]+/)*[A-Za-z0-9_+.-]+\.(?:c|cc|cpp|cxx)\.o",
+        name) is not None
+
+
+def _object_review(records: dict | None) -> dict:
+    if records is None:
+        return {}
+    if not isinstance(records, dict) or not 0 < len(records) <= 2048:
+        raise ValueError("invalid installed object review")
+    total = 0
+    index = _PathIndex()
+    for name, record in records.items():
+        if (not object_member(name) or not isinstance(record, dict)
+                or set(record) != {"size", "sha256"}
+                or type(record["size"]) is not int
+                or not 64 <= record["size"] <= MAX_REVIEWED_OBJECT_BYTES
+                or not isinstance(record["sha256"], str)
+                or re.fullmatch(r"[0-9a-f]{64}", record["sha256"]) is None):
+            raise ValueError("invalid installed object review")
+        index.add(name, False)
+        total += record["size"]
+    if total > MAX_REVIEWED_OBJECT_TOTAL:
+        raise ValueError("installed object review exceeds limit")
+    return {name: dict(record) for name, record in records.items()}
+
+
+def _object_bytes(path: Path, record: dict | None = None) -> bytes:
+    for parent in (path, *path.parents):
+        st = parent.lstat()
+        if stat.S_ISLNK(st.st_mode) or getattr(st, "st_file_attributes", 0) & 0x400:
+            raise ValueError("redirected installed object")
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    with os.fdopen(os.open(path, flags), "rb") as stream:
+        st = os.fstat(stream.fileno())
+        if not stat.S_ISREG(st.st_mode) or stat.S_IMODE(st.st_mode) != 0o644:
+            raise ValueError("invalid installed object kind or mode")
+        if not 64 <= st.st_size <= MAX_REVIEWED_OBJECT_BYTES:
+            raise ValueError("invalid installed object size")
+        data = stream.read(MAX_REVIEWED_OBJECT_BYTES + 1)
+    if (len(data) != st.st_size or data[:7] != b"\x7fELF\x02\x01\x01"
+            or int.from_bytes(data[16:18], "little") != 1
+            or int.from_bytes(data[18:20], "little") != 62
+            or int.from_bytes(data[20:24], "little") != 1
+            or int.from_bytes(data[32:40], "little") != 0
+            or int.from_bytes(data[56:58], "little") != 0):
+        raise ValueError("installed object is not native ELF relocatable code")
+    table = int.from_bytes(data[40:48], "little")
+    size = int.from_bytes(data[58:60], "little")
+    count = int.from_bytes(data[60:62], "little")
+    if table < 64 or size != 64 or not count or table + size * count > len(data):
+        raise ValueError("invalid installed object section table")
+    if record is not None and (len(data) != record["size"] or
+                              hashlib.sha256(data).hexdigest() != record["sha256"]):
+        raise ValueError("reviewed installed object bytes changed")
+    return data
+
+
 def sdk_zip(root: Path, archive: Path, *, reviewed_sources: dict | None = None,
             reviewed_include_sources: dict | None = None,
             reviewed_aliases: dict | None = None,
             reviewed_doc_sources: dict | None = None,
-            reviewed_interface_sources: dict | None = None) -> None:
+            reviewed_interface_sources: dict | None = None,
+            reviewed_objects: dict | None = None) -> None:
     """Package the export with portable metadata and deny-by-default sources.
 
     A reviewed source is read into a bounded buffer and hashed, and those SAME
@@ -361,7 +428,10 @@ def sdk_zip(root: Path, archive: Path, *, reviewed_sources: dict | None = None,
     canonical = {str(PurePosixPath(n).with_name(r["target"])): r for n, r in aliases.items()}
     for name in (*aliases, *canonical):
         index.add(name, False)
-    seen, alias_seen = set(), set()
+    objects = _object_review(reviewed_objects)
+    for name in objects:
+        index.add(name, False)
+    seen, alias_seen, object_seen = set(), set(), set()
     banned_suffix = {".pdb", ".ilk", ".obj", ".o", ".pch", ".idb", ".ipch", ".dmp", ".log"}
     banned_names = {"cmakecache.txt", "compile_commands.json", "credentials", ".git-credentials"}
     created = False
@@ -374,9 +444,17 @@ def sdk_zip(root: Path, archive: Path, *, reviewed_sources: dict | None = None,
                     raise ValueError("workspace or debug tree in SDK")
                 if shared_target_payload(name):
                     raise ValueError("shared target payload in static SDK")
-                if item.suffix.casefold() in banned_suffix or item.name.casefold() in banned_names:
+                is_object = item.suffix.casefold() in {".o", ".obj"}
+                if is_object and name not in objects:
+                    pieces = parts(name)
+                    if len(pieces) >= 4 and pieces[0] == "installed" and pieces[2] == "lib":
+                        raise ValueError("unreviewed installed object in SDK")
+                if (item.suffix.casefold() in banned_suffix or item.name.casefold() in banned_names) and name not in objects:
                     continue
                 approved = None
+                if name in objects:
+                    approved = _object_bytes(item, objects[name])
+                    object_seen.add(name)
                 if name in aliases:
                     record = aliases[name]
                     target_path = _alias_target(root, name, record)
@@ -415,6 +493,8 @@ def sdk_zip(root: Path, archive: Path, *, reviewed_sources: dict | None = None,
                     else:
                         with item.open("rb") as source:
                             shutil.copyfileobj(source, target, 1024 * 1024)
+            if object_seen != set(objects):
+                raise ValueError("reviewed installed object is missing")
             if seen != set(review):
                 raise ValueError("reviewed SDK example source is missing")
             if alias_seen != set(aliases) | set(canonical):
