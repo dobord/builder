@@ -28,7 +28,7 @@ from . import (
 )
 
 ENGINE_VCPKG = "b4bb281192ea8bb004542012ac804b988a4ff403"
-SDK_VCPKG = "936bbb0e7cb7d6d10f8f5ef5874521466278c799"
+SDK_VCPKG = "7824a49d523d8ad09e53dcedbd66a3a767bafdae"
 UPSTREAM = "9e593bb18ea69cc5095e012465dcd675a822ed0d"
 CEF = "2aff22e09daaa5c28780c5766a70ee13e61c93b6"
 LOCKFREECORO = "24038aed3a0be642adb60e71bd994ae8f0d90140"
@@ -75,6 +75,7 @@ def verify_engine_registry_delta(engine: Path, sdk: Path) -> None:
         "ports/freerdp/static-shadow-winpr-tools-dependency.patch",
         "ports/freerdp/vcpkg.json",
         "ports/lfc-ui/portfile.cmake",
+        "ports/lfc-ui/use-installed-freerdp.cmake",
         "ports/lfc-ui/use-installed-lockfreecoro.patch",
         "ports/lfc-ui/usage",
         "ports/lfc-ui/vcpkg.json",
@@ -97,7 +98,7 @@ def verify_engine_registry_delta(engine: Path, sdk: Path) -> None:
         raise ValueError("Registry baseline changed outside lfc-ui/FreeRDP")
     if (old_lfc.get("baseline"), old_lfc.get("port-version")) != ("0.3.0", 8):
         raise ValueError("Unexpected engine-registry lfc-ui baseline")
-    if (new_lfc.get("baseline"), new_lfc.get("port-version")) != ("0.3.0", 11):
+    if (new_lfc.get("baseline"), new_lfc.get("port-version")) != ("0.3.0", 12):
         raise ValueError("Unexpected final-registry lfc-ui baseline")
     if (old_freerdp.get("baseline"), old_freerdp.get("port-version")) != ("3.31.1", 23):
         raise ValueError("Unexpected engine-registry FreeRDP baseline")
@@ -110,7 +111,7 @@ def verify_engine_registry_delta(engine: Path, sdk: Path) -> None:
     new_port_version = new_manifest.pop("port-version")
     old_feature = old_manifest["features"].pop("freerdp")
     new_feature = new_manifest["features"].pop("freerdp")
-    if old_port_version != 8 or new_port_version != 11 or old_manifest != new_manifest:
+    if old_port_version != 8 or new_port_version != 12 or old_manifest != new_manifest:
         raise ValueError("lfc-ui registry delta changed outside the reviewed FreeRDP dependency request")
     if old_feature.get("supports") != "linux" or new_feature.get("supports") != "linux":
         raise ValueError("lfc-ui FreeRDP platform contract changed")
@@ -124,6 +125,39 @@ def verify_engine_registry_delta(engine: Path, sdk: Path) -> None:
     if (old_feature.get("dependencies") != expected_old
             or new_feature.get("dependencies") != expected_new):
         raise ValueError("Unexpected lfc-ui FreeRDP dependency transition")
+
+    old_freerdp_overlay = (engine / "ports/lfc-ui/use-installed-freerdp.cmake").read_text()
+    new_freerdp_overlay = (sdk / "ports/lfc-ui/use-installed-freerdp.cmake").read_text()
+    expected_freerdp_overlay = old_freerdp_overlay
+    overlay_replacements = (
+        (
+            "            freerdp-shadow)\n",
+            "            freerdp-shadow\n"
+            "            ainput-server\n"
+            "            cliprdr-server\n"
+            "            disp-server\n"
+            "            rdpgfx-server)\n",
+        ),
+        (
+            "        target_link_libraries(lfc-ui ${_lfc_ui_usage_scope} freerdp-shadow freerdp-server freerdp)\n",
+            "        target_link_libraries(lfc-ui ${_lfc_ui_usage_scope}\n"
+            "            freerdp-shadow freerdp-server freerdp\n"
+            "            ainput-server cliprdr-server disp-server rdpgfx-server)\n",
+        ),
+        (
+            "            freerdp-server-proxy freerdp-client freerdp-server freerdp)\n",
+            "            freerdp-server-proxy freerdp-client freerdp-server freerdp\n"
+            "            disp-server rdpgfx-server)\n",
+        ),
+    )
+    for before_text, after_text in overlay_replacements:
+        if expected_freerdp_overlay.count(before_text) != 1:
+            raise ValueError("Unexpected original lfc-ui installed FreeRDP overlay")
+        expected_freerdp_overlay = expected_freerdp_overlay.replace(
+            before_text, after_text, 1
+        )
+    if new_freerdp_overlay != expected_freerdp_overlay:
+        raise ValueError("Unexpected lfc-ui installed FreeRDP OBJECT-target delta")
 
     old_portfile = (engine / "ports/lfc-ui/portfile.cmake").read_text()
     new_portfile = (sdk / "ports/lfc-ui/portfile.cmake").read_text()
@@ -234,6 +268,8 @@ index 3a7f5aa..4bc04cf 100644
     old_lfc_versions = json.loads((engine / "versions/l-/lfc-ui.json").read_text())
     new_lfc_versions = json.loads((sdk / "versions/l-/lfc-ui.json").read_text())
     expected_lfc_entries = [
+        {"git-tree": "700498a2d6c2a33f652146e804eaeed359247a2d",
+         "version": "0.3.0", "port-version": 12},
         {"git-tree": "d635813c8ca3903f7300987e3d24d1c8c6cdea9a",
          "version": "0.3.0", "port-version": 11},
         {"git-tree": "9cc7498e3dd005babec671f17cc7dcea26797c45",
@@ -243,8 +279,8 @@ index 3a7f5aa..4bc04cf 100644
     ]
     if (not isinstance(old_lfc_versions.get("versions"), list)
             or not isinstance(new_lfc_versions.get("versions"), list)
-            or new_lfc_versions["versions"][:3] != expected_lfc_entries
-            or new_lfc_versions["versions"][3:] != old_lfc_versions["versions"]):
+            or new_lfc_versions["versions"][:4] != expected_lfc_entries
+            or new_lfc_versions["versions"][4:] != old_lfc_versions["versions"]):
         raise ValueError("Unexpected lfc-ui versions registry delta")
 
 
