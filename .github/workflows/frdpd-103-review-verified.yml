@@ -9,8 +9,8 @@ concurrency:
   group: review103-final-${{ github.ref }}
   cancel-in-progress: false
 env:
-  SOURCE_SHA: 6c45d776272ac3f30cf294229b9197d27d487df9
-  SOURCE_TREE: 57d9897e004890c1ddc04d01d19dfdab2cc8d89c
+  SOURCE_SHA: 2275acb5a724594fde0dc9156764753c8d5440b7
+  SOURCE_TREE: d3f3b80d463d72265b3ae94e253bba903bbe2f27
   REVIEW_BASE: d6e088b4473d6a5393ad09cf6300e8cd86c7aff1
   ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
 jobs:
@@ -32,7 +32,7 @@ jobs:
           python-version: '3.13'
       - run: |
           python -m pip install --require-hashes --only-binary=:all: -r requirements.lock
-      - name: Exact source, strict production assertions and isolated regression
+      - name: Exact source, strict production mode and isolated regression
         env:
           SOURCE_READ_TOKEN: ${{ secrets.SOURCE_READ_TOKEN }}
         run: |
