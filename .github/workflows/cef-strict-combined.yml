@@ -6,6 +6,8 @@ on:
     paths:
       - .github/workflows/cef-strict-combined.yml
       - secure_release/cef_strict_combined.py
+      - secure_release/cef_combined_smoke.py
+      - tests/test_cef_combined_smoke.py
       - secure_release/safeio.py
       - secure_release/cef_sdk_example.py
       - secure_release/cef_sdk_headers.py
@@ -153,6 +155,12 @@ jobs:
           df -h /
       - name: Validate final combined helper syntax
         run: python -m py_compile secure_release/cef_dependency_source.py secure_release/cef_strict_combined.py secure_release/cef_combined_identity.py secure_release/cef_nss_isolation.py secure_release/cef_native_link_static.py secure_release/cef_x11_static.py secure_release/cef_unwind_backtrace.py
+      - name: Verify exact combined consumer marker and native callback before restore
+        env:
+          CEF_COMBINED_SMOKE_PROJECT: ${{ github.workspace }}/private-vcpkg/ci/smoke
+          CEF_COMBINED_SMOKE_RECIPE: ${{ github.workspace }}/private-vcpkg/.full-cef/vcpkg/ports/cef-static/smoke.c
+          REQUIRE_CEF_COMBINED_SMOKE: '1'
+        run: python -m unittest discover -s tests -p test_cef_combined_smoke.py -v
       - name: Verify bounded pinned Git acquisition and vcpkg source cache
         run: python -m unittest discover -s tests -p test_cef_dependency_source.py -v
       - name: Verify combined host identity with the pinned checkpoint codec

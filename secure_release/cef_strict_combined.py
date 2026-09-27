@@ -23,7 +23,7 @@ from . import (
     cef_nss_isolation, cef_unwind_backtrace, cef_x11_static, crypto, safeio,
 )
 from . import (
-    cef_combined_identity, cef_combined_port, cef_dependency_source,
+    cef_combined_identity, cef_combined_port, cef_combined_smoke, cef_dependency_source,
     cef_freerdp_profile, cef_frozen_dependencies, cef_sdk_example, cef_sdk_headers, cef_sdk_aliases, cef_sdk_protoc, cef_sdk_xz, cef_sdk_objects, cef_sdk_source_interfaces, cef_strict_iteration,
 )
 
@@ -820,12 +820,17 @@ def main() -> None:
         cef_sdk_objects.verify(consumer_sdk / "installed", object_review)
         stage = "combined-consumer"
         smoke_build = root / "smoke-build"
+        consumer_source = cef_combined_smoke.prepare(
+            registry / plan["smoke_path"], recipe / "vcpkg/ports/cef-static/smoke.c",
+            root / "combined-consumer-source",
+        )
+        summary["combined_consumer_source_verified"] = True
+        summary["combined_consumer_project_sha256"] = crypto.digest(consumer_source / "CMakeLists.txt")
         configure = build_support.consumer_configure_command(
-            registry / plan["smoke_path"], smoke_build, consumer_sdk, TRIPLET
+            consumer_source, smoke_build, consumer_sdk, TRIPLET
         )
         configure.append(
-            "-DCEF_STATIC_SMOKE_SOURCE="
-            + str(recipe / "vcpkg/ports/cef-static/smoke.c")
+            "-DCEF_STATIC_SMOKE_SOURCE=" + str(consumer_source / "smoke.c")
         )
         run(
             configure, cwd=root, env=build_env,
