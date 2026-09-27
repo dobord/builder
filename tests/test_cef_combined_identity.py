@@ -182,6 +182,13 @@ class CombinedOrchestrationTests(unittest.TestCase):
             stack.enter_context(mock.patch.object(combined.cef_sdk_protoc, "validate_sources"))
             stack.enter_context(mock.patch.object(combined.cef_sdk_xz, "validate_sources"))
             stack.enter_context(mock.patch.object(combined.cef_sdk_source_interfaces, "validate_sources"))
+            # This orchestration test runs the Linux-only main path on Windows.
+            # The real LLD18 proof has its own Linux-native tests; isolate it
+            # here so host/source/checkpoint ordering remains the subject.
+            stack.enter_context(mock.patch.object(
+                combined.cef_consumer_linker, "verify",
+                return_value={"kind": "lld", "version": "18.1.3", "sha256": "c" * 64},
+            ))
             stack.enter_context(mock.patch.object(combined.cef_contract, "validate"))
             stack.enter_context(mock.patch.object(combined.cef_contract, "build_key", return_value="b"*64))
             stack.enter_context(mock.patch.object(engine, "qualification_lock", return_value={"checkpoint": api.selected}))
