@@ -1,5 +1,6 @@
 """Strict publication ABI binding tests; no network or native build required."""
 import json
+import subprocess
 from pathlib import Path
 import tempfile
 import unittest
@@ -99,7 +100,8 @@ def write_registry_fixture(root: Path, lfc_port_version: int, minimal: bool) -> 
             rdpgfx-server)
         target_link_libraries(lfc-ui ${_lfc_ui_usage_scope}
             freerdp-shadow freerdp-server freerdp
-            ainput-server cliprdr-server disp-server rdpgfx-server)
+            ainput-server cliprdr-server disp-server rdpgfx-server
+            "$<TARGET_OBJECTS:disp-server>")
             freerdp-server-proxy freerdp-client freerdp-server freerdp
             disp-server rdpgfx-server)
 """
@@ -206,6 +208,10 @@ index 3a7f5aa..4bc04cf 100644
         "versions/l-/lfc-ui.json": json.dumps({
             "versions": (
                 [{
+                    "git-tree": "456adaca80fe88da3f23fb7c103f20fab2003fd7",
+                    "version": "0.3.0",
+                    "port-version": 13,
+                }, {
                     "git-tree": "700498a2d6c2a33f652146e804eaeed359247a2d",
                     "version": "0.3.0",
                     "port-version": 12,
@@ -255,7 +261,7 @@ class StrictPublicationContractTests(unittest.TestCase):
             root = Path(folder)
             engine, sdk = root / "engine", root / "sdk"
             write_registry_fixture(engine, 8, False)
-            write_registry_fixture(sdk, 12, True)
+            write_registry_fixture(sdk, 13, True)
             engine_sha, sdk_sha = "1" * 40, "2" * 40
 
             def fake_head(path):
@@ -271,7 +277,7 @@ class StrictPublicationContractTests(unittest.TestCase):
             root = Path(folder)
             engine, sdk = root / "engine", root / "sdk"
             write_registry_fixture(engine, 8, False)
-            write_registry_fixture(sdk, 12, True)
+            write_registry_fixture(sdk, 13, True)
             (sdk / "ports/cef-static/vcpkg.json").write_text(
                 "changed-engine-port\n", encoding="utf-8"
             )
@@ -285,6 +291,129 @@ class StrictPublicationContractTests(unittest.TestCase):
                  patch.object(cef_strict_combined, "git_head", side_effect=fake_head):
                 with self.assertRaisesRegex(ValueError, "outside the reviewed lfc-ui/FreeRDP dependency delta"):
                     cef_strict_combined.verify_engine_registry_delta(engine, sdk)
+
+    def test_reviewed_sdk_registry_child_tree_replay_is_exact(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            files = {
+                "ports/lfc-ui/use-installed-freerdp.cmake": (
+                    "prefix\n"
+                    "            ainput-server cliprdr-server disp-server rdpgfx-server)\n"
+                    "suffix\n"
+                ),
+                "ports/lfc-ui/vcpkg.json": (
+                    '{\n  "name": "lfc-ui",\n  "port-version": 12\n}\n'
+                ),
+                "versions/baseline.json": (
+                    '{\n  "default": {\n'
+                    '    "lfc-ui": {\n'
+                    '      "baseline": "0.3.0",\n'
+                    '      "port-version": 12\n'
+                    '    },\n'
+                    '    "other": {"baseline": "1"}\n'
+                    '  }\n}\n'
+                ),
+                "versions/l-/lfc-ui.json": (
+                    '{\n'
+                    '  "versions": [\n'
+                    '    {\n'
+                    '      "git-tree": "700498a2d6c2a33f652146e804eaeed359247a2d",\n'
+                    '      "version": "0.3.0",\n'
+                    '      "port-version": 12\n'
+                    '    },\n'
+                    '    {"git-tree": "old", "version": "0.3.0", "port-version": 11}\n'
+                    '  ]\n}\n'
+                ),
+            }
+            for relative, data in files.items():
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                with path.open("w", encoding="utf-8", newline="") as stream:
+                    stream.write(data)
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(["git", "config", "core.autocrlf", "false"], cwd=root, check=True)
+            subprocess.run(["git", "config", "user.name", "fixture"], cwd=root, check=True)
+            subprocess.run(["git", "config", "user.email", "fixture@example.invalid"], cwd=root, check=True)
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "parent"], cwd=root, check=True)
+            parent = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=root, text=True
+            ).strip()
+            parent_tree = subprocess.check_output(
+                ["git", "rev-parse", "HEAD^{tree}"], cwd=root, text=True
+            ).strip()
+
+            replacements = {
+                "ports/lfc-ui/use-installed-freerdp.cmake": (
+                    "            ainput-server cliprdr-server disp-server rdpgfx-server)\n",
+                    "            ainput-server cliprdr-server disp-server rdpgfx-server\n"
+                    "            \"$<TARGET_OBJECTS:disp-server>\")\n",
+                ),
+                "ports/lfc-ui/vcpkg.json": (
+                    '  "port-version": 12\n}\n',
+                    '  "port-version": 13\n}\n',
+                ),
+                "versions/baseline.json": (
+                    '    "lfc-ui": {\n'
+                    '      "baseline": "0.3.0",\n'
+                    '      "port-version": 12\n'
+                    '    },\n',
+                    '    "lfc-ui": {\n'
+                    '      "baseline": "0.3.0",\n'
+                    '      "port-version": 13\n'
+                    '    },\n',
+                ),
+                "versions/l-/lfc-ui.json": (
+                    '  "versions": [\n'
+                    '    {\n'
+                    '      "git-tree": "700498a2d6c2a33f652146e804eaeed359247a2d",\n'
+                    '      "version": "0.3.0",\n'
+                    '      "port-version": 12\n'
+                    '    },\n',
+                    '  "versions": [\n'
+                    '    {\n'
+                    '      "git-tree": "456adaca80fe88da3f23fb7c103f20fab2003fd7",\n'
+                    '      "version": "0.3.0",\n'
+                    '      "port-version": 13\n'
+                    '    },\n'
+                    '    {\n'
+                    '      "git-tree": "700498a2d6c2a33f652146e804eaeed359247a2d",\n'
+                    '      "version": "0.3.0",\n'
+                    '      "port-version": 12\n'
+                    '    },\n',
+                ),
+            }
+            for relative, (before, after) in replacements.items():
+                path = root / relative
+                data = path.read_text(encoding="utf-8")
+                self.assertEqual(data.count(before), 1)
+                with path.open("w", encoding="utf-8", newline="") as stream:
+                    stream.write(data.replace(before, after, 1))
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            expected_tree = subprocess.check_output(
+                ["git", "write-tree"], cwd=root, text=True
+            ).strip()
+            subprocess.run(["git", "reset", "--hard", "-q", parent], cwd=root, check=True)
+
+            with patch.object(cef_strict_combined, "SDK_VCPKG_CHECKOUT", parent), \
+                 patch.object(cef_strict_combined, "SDK_VCPKG_CHECKOUT_TREE", parent_tree), \
+                 patch.object(cef_strict_combined, "SDK_VCPKG", "f" * 40), \
+                 patch.object(cef_strict_combined, "SDK_VCPKG_TREE", expected_tree):
+                result = cef_strict_combined.materialize_sdk_registry(root)
+
+            self.assertEqual(result["mode"], "reviewed-child-tree-replay")
+            self.assertEqual(result["checkout_commit"], parent)
+            self.assertEqual(result["tree"], expected_tree)
+            self.assertEqual(
+                subprocess.check_output(
+                    ["git", "write-tree"], cwd=root, text=True
+                ).strip(),
+                expected_tree,
+            )
+            self.assertIn(
+                "$<TARGET_OBJECTS:disp-server>",
+                (root / "ports/lfc-ui/use-installed-freerdp.cmake").read_text(),
+            )
 
     def test_strict_linux_capture_requires_complete_signed_preflight(self):
         cfg = self.strict()

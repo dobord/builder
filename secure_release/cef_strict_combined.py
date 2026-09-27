@@ -28,7 +28,11 @@ from . import (
 )
 
 ENGINE_VCPKG = "b4bb281192ea8bb004542012ac804b988a4ff403"
-SDK_VCPKG = "7824a49d523d8ad09e53dcedbd66a3a767bafdae"
+SDK_VCPKG_CHECKOUT = "7824a49d523d8ad09e53dcedbd66a3a767bafdae"
+SDK_VCPKG_CHECKOUT_TREE = "1b2f0d884548b72b6a7a50a9c29a567050887e75"
+SDK_VCPKG = "1e0d7db7127a2395fe73bc83c88d5f92b20ec33a"
+SDK_VCPKG_TREE = "b624cd8aea07fd502074881c05b1bf9de5cac3ca"
+SDK_LFC_UI_TREE = "456adaca80fe88da3f23fb7c103f20fab2003fd7"
 UPSTREAM = "9e593bb18ea69cc5095e012465dcd675a822ed0d"
 CEF = "2aff22e09daaa5c28780c5766a70ee13e61c93b6"
 LOCKFREECORO = "24038aed3a0be642adb60e71bd994ae8f0d90140"
@@ -40,6 +44,108 @@ def git_head(path: Path) -> str:
     return subprocess.check_output(
         ["git", "-C", str(path), "rev-parse", "HEAD"], text=True, timeout=30
     ).strip()
+
+
+def _git_value(path: Path, *args: str) -> str:
+    return subprocess.check_output(
+        ["git", "-C", str(path), *args], text=True, timeout=30
+    ).strip()
+
+
+def materialize_sdk_registry(root: Path) -> dict[str, str]:
+    """Replay only the reviewed child tree when CI checked out its pinned parent."""
+    root = root.resolve()
+    checkout = git_head(root)
+    head_tree = _git_value(root, "rev-parse", "HEAD^{tree}")
+    tracked = _git_value(root, "status", "--porcelain=v1", "--untracked-files=no")
+    if tracked:
+        raise ValueError("Final SDK registry checkout is not tracked-clean")
+    if checkout == SDK_VCPKG:
+        if head_tree != SDK_VCPKG_TREE:
+            raise ValueError("Final SDK registry commit tree mismatch")
+        return {
+            "mode": "direct-checkout",
+            "checkout_commit": checkout,
+            "tree": head_tree,
+        }
+    if checkout != SDK_VCPKG_CHECKOUT or head_tree != SDK_VCPKG_CHECKOUT_TREE:
+        raise ValueError("Final SDK registry checkout is not the reviewed replay parent")
+
+    edits = (
+        (
+            "ports/lfc-ui/use-installed-freerdp.cmake",
+            "            ainput-server cliprdr-server disp-server rdpgfx-server)\n",
+            "            ainput-server cliprdr-server disp-server rdpgfx-server\n"
+            "            \"$<TARGET_OBJECTS:disp-server>\")\n",
+        ),
+        (
+            "ports/lfc-ui/vcpkg.json",
+            '  "port-version": 12\n}\n',
+            '  "port-version": 13\n}\n',
+        ),
+        (
+            "versions/baseline.json",
+            '    "lfc-ui": {\n'
+            '      "baseline": "0.3.0",\n'
+            '      "port-version": 12\n'
+            '    },\n',
+            '    "lfc-ui": {\n'
+            '      "baseline": "0.3.0",\n'
+            '      "port-version": 13\n'
+            '    },\n',
+        ),
+        (
+            "versions/l-/lfc-ui.json",
+            '  "versions": [\n'
+            '    {\n'
+            '      "git-tree": "700498a2d6c2a33f652146e804eaeed359247a2d",\n'
+            '      "version": "0.3.0",\n'
+            '      "port-version": 12\n'
+            '    },\n',
+            '  "versions": [\n'
+            '    {\n'
+            '      "git-tree": "' + SDK_LFC_UI_TREE + '",\n'
+            '      "version": "0.3.0",\n'
+            '      "port-version": 13\n'
+            '    },\n'
+            '    {\n'
+            '      "git-tree": "700498a2d6c2a33f652146e804eaeed359247a2d",\n'
+            '      "version": "0.3.0",\n'
+            '      "port-version": 12\n'
+            '    },\n',
+        ),
+    )
+    rendered: dict[Path, str] = {}
+    for relative, before, after in edits:
+        path = root / relative
+        if not path.is_file() or path.is_symlink():
+            raise ValueError("Final SDK registry replay input is invalid")
+        data = path.read_text(encoding="utf-8")
+        if data.count(before) != 1:
+            raise ValueError("Final SDK registry replay anchor changed")
+        rendered[path] = data.replace(before, after, 1)
+    for path, data in rendered.items():
+        with path.open("w", encoding="utf-8", newline="") as stream:
+            stream.write(data)
+
+    relative_paths = [path.relative_to(root).as_posix() for path in rendered]
+    subprocess.run(
+        ["git", "-C", str(root), "add", "--", *relative_paths],
+        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30,
+    )
+    if _git_value(root, "diff", "--name-only"):
+        raise ValueError("Final SDK registry replay left unstaged tracked changes")
+    staged = _git_value(root, "diff", "--cached", "--name-only").splitlines()
+    if staged != sorted(relative_paths):
+        raise ValueError("Final SDK registry replay changed unexpected paths")
+    tree = _git_value(root, "write-tree")
+    if tree != SDK_VCPKG_TREE:
+        raise ValueError("Final SDK registry replay did not reproduce the reviewed child tree")
+    return {
+        "mode": "reviewed-child-tree-replay",
+        "checkout_commit": checkout,
+        "tree": tree,
+    }
 
 
 def registry_snapshot(root: Path) -> dict[str, str]:
@@ -57,7 +163,8 @@ def registry_snapshot(root: Path) -> dict[str, str]:
 
 
 def verify_engine_registry_delta(engine: Path, sdk: Path) -> None:
-    if git_head(engine) != ENGINE_VCPKG or git_head(sdk) != SDK_VCPKG:
+    if (git_head(engine) != ENGINE_VCPKG
+            or git_head(sdk) not in {SDK_VCPKG_CHECKOUT, SDK_VCPKG}):
         raise ValueError("Strict combined registry provenance mismatch")
     before, after = registry_snapshot(engine), registry_snapshot(sdk)
     if ENGINE_VCPKG == SDK_VCPKG:
@@ -98,7 +205,7 @@ def verify_engine_registry_delta(engine: Path, sdk: Path) -> None:
         raise ValueError("Registry baseline changed outside lfc-ui/FreeRDP")
     if (old_lfc.get("baseline"), old_lfc.get("port-version")) != ("0.3.0", 8):
         raise ValueError("Unexpected engine-registry lfc-ui baseline")
-    if (new_lfc.get("baseline"), new_lfc.get("port-version")) != ("0.3.0", 12):
+    if (new_lfc.get("baseline"), new_lfc.get("port-version")) != ("0.3.0", 13):
         raise ValueError("Unexpected final-registry lfc-ui baseline")
     if (old_freerdp.get("baseline"), old_freerdp.get("port-version")) != ("3.31.1", 23):
         raise ValueError("Unexpected engine-registry FreeRDP baseline")
@@ -111,7 +218,7 @@ def verify_engine_registry_delta(engine: Path, sdk: Path) -> None:
     new_port_version = new_manifest.pop("port-version")
     old_feature = old_manifest["features"].pop("freerdp")
     new_feature = new_manifest["features"].pop("freerdp")
-    if old_port_version != 8 or new_port_version != 12 or old_manifest != new_manifest:
+    if old_port_version != 8 or new_port_version != 13 or old_manifest != new_manifest:
         raise ValueError("lfc-ui registry delta changed outside the reviewed FreeRDP dependency request")
     if old_feature.get("supports") != "linux" or new_feature.get("supports") != "linux":
         raise ValueError("lfc-ui FreeRDP platform contract changed")
@@ -142,7 +249,8 @@ def verify_engine_registry_delta(engine: Path, sdk: Path) -> None:
             "        target_link_libraries(lfc-ui ${_lfc_ui_usage_scope} freerdp-shadow freerdp-server freerdp)\n",
             "        target_link_libraries(lfc-ui ${_lfc_ui_usage_scope}\n"
             "            freerdp-shadow freerdp-server freerdp\n"
-            "            ainput-server cliprdr-server disp-server rdpgfx-server)\n",
+            "            ainput-server cliprdr-server disp-server rdpgfx-server\n"
+            "            \"$<TARGET_OBJECTS:disp-server>\")\n",
         ),
         (
             "            freerdp-server-proxy freerdp-client freerdp-server freerdp)\n",
@@ -268,6 +376,8 @@ index 3a7f5aa..4bc04cf 100644
     old_lfc_versions = json.loads((engine / "versions/l-/lfc-ui.json").read_text())
     new_lfc_versions = json.loads((sdk / "versions/l-/lfc-ui.json").read_text())
     expected_lfc_entries = [
+        {"git-tree": SDK_LFC_UI_TREE,
+         "version": "0.3.0", "port-version": 13},
         {"git-tree": "700498a2d6c2a33f652146e804eaeed359247a2d",
          "version": "0.3.0", "port-version": 12},
         {"git-tree": "d635813c8ca3903f7300987e3d24d1c8c6cdea9a",
@@ -279,8 +389,8 @@ index 3a7f5aa..4bc04cf 100644
     ]
     if (not isinstance(old_lfc_versions.get("versions"), list)
             or not isinstance(new_lfc_versions.get("versions"), list)
-            or new_lfc_versions["versions"][:4] != expected_lfc_entries
-            or new_lfc_versions["versions"][4:] != old_lfc_versions["versions"]):
+            or new_lfc_versions["versions"][:5] != expected_lfc_entries
+            or new_lfc_versions["versions"][5:] != old_lfc_versions["versions"]):
         raise ValueError("Unexpected lfc-ui versions registry delta")
 
 
@@ -485,8 +595,8 @@ def main() -> None:
     recipe_checkout = registry / ".full-cef"
     lockfree = workspace / "private-lockfreecoro"
     lfc_ui = workspace / "private-lfc-ui"
+    sdk_registry = materialize_sdk_registry(registry)
     expected_heads = {
-        registry: SDK_VCPKG,
         engine_registry: ENGINE_VCPKG,
         upstream: UPSTREAM,
         recipe_checkout: CEF,
@@ -541,6 +651,9 @@ def main() -> None:
         "platform": "linux",
         "engine_vcpkg_commit": ENGINE_VCPKG,
         "sdk_vcpkg_commit": SDK_VCPKG,
+        "sdk_vcpkg_checkout_commit": sdk_registry["checkout_commit"],
+        "sdk_vcpkg_tree": sdk_registry["tree"],
+        "sdk_vcpkg_materialization": sdk_registry["mode"],
         "upstream_commit": UPSTREAM,
         "cef_recipe_commit": CEF,
         "build_contract_sha256": build_key,
