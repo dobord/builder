@@ -88,6 +88,21 @@ def write_registry_fixture(root: Path, lfc_port_version: int, minimal: bool) -> 
             "cef": {"description": "unchanged"},
         },
     }
+    old_freerdp_overlay = """            freerdp-shadow)
+        target_link_libraries(lfc-ui ${_lfc_ui_usage_scope} freerdp-shadow freerdp-server freerdp)
+            freerdp-server-proxy freerdp-client freerdp-server freerdp)
+"""
+    new_freerdp_overlay = """            freerdp-shadow
+            ainput-server
+            cliprdr-server
+            disp-server
+            rdpgfx-server)
+        target_link_libraries(lfc-ui ${_lfc_ui_usage_scope}
+            freerdp-shadow freerdp-server freerdp
+            ainput-server cliprdr-server disp-server rdpgfx-server)
+            freerdp-server-proxy freerdp-client freerdp-server freerdp
+            disp-server rdpgfx-server)
+"""
     files = {
         "ports/freerdp/vcpkg.json": json.dumps({
             "name": "freerdp",
@@ -117,6 +132,9 @@ index 3a7f5aa..4bc04cf 100644
 """ if minimal else None
         ),
         "ports/lfc-ui/vcpkg.json": json.dumps(lfc_manifest, sort_keys=True) + "\n",
+        "ports/lfc-ui/use-installed-freerdp.cmake": (
+            new_freerdp_overlay if minimal else old_freerdp_overlay
+        ),
         "ports/lfc-ui/use-installed-lockfreecoro.patch": (
             """@@ -1,7 +1,11 @@
  @PACKAGE_INIT@
@@ -188,6 +206,10 @@ index 3a7f5aa..4bc04cf 100644
         "versions/l-/lfc-ui.json": json.dumps({
             "versions": (
                 [{
+                    "git-tree": "700498a2d6c2a33f652146e804eaeed359247a2d",
+                    "version": "0.3.0",
+                    "port-version": 12,
+                }, {
                     "git-tree": "d635813c8ca3903f7300987e3d24d1c8c6cdea9a",
                     "version": "0.3.0",
                     "port-version": 11,
@@ -233,7 +255,7 @@ class StrictPublicationContractTests(unittest.TestCase):
             root = Path(folder)
             engine, sdk = root / "engine", root / "sdk"
             write_registry_fixture(engine, 8, False)
-            write_registry_fixture(sdk, 11, True)
+            write_registry_fixture(sdk, 12, True)
             engine_sha, sdk_sha = "1" * 40, "2" * 40
 
             def fake_head(path):
@@ -249,7 +271,7 @@ class StrictPublicationContractTests(unittest.TestCase):
             root = Path(folder)
             engine, sdk = root / "engine", root / "sdk"
             write_registry_fixture(engine, 8, False)
-            write_registry_fixture(sdk, 11, True)
+            write_registry_fixture(sdk, 12, True)
             (sdk / "ports/cef-static/vcpkg.json").write_text(
                 "changed-engine-port\n", encoding="utf-8"
             )
