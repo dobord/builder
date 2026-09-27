@@ -312,6 +312,78 @@ def run(command, *, cwd: Path, env: dict, log: Path, timeout: int) -> None:
         raise RuntimeError("strict combined SDK subprocess failed at " + log.stem)
 
 
+def summarize_consumer_sdk_build_failure(log: Path, installed: Path, object_review: dict) -> dict:
+    """Return only bounded error class/counts and reviewed OBJECT target names."""
+    if not log.is_file() or log.is_symlink() or log.stat().st_size > 32 * 1024**2:
+        raise ValueError("Invalid final consumer build log")
+    data = log.read_text(encoding="utf-8", errors="replace")
+    missing = set()
+    for pattern in (
+        r"undefined symbol:\s*([^\r\n]+)",
+        r"undefined reference to [`']([^`'\r\n]+)[`']",
+    ):
+        for match in re.finditer(pattern, data):
+            name = match.group(1).strip()
+            if not name or len(name) > 1024 or len(missing) >= 4096:
+                raise ValueError("Invalid undefined-symbol diagnostic")
+            missing.add(name)
+    result = {
+        "consumer_sdk_build_log_sha256": crypto.digest(log),
+        "consumer_sdk_build_log_bytes": log.stat().st_size,
+        "consumer_sdk_build_undefined_symbol_count": len(missing),
+    }
+    if not missing:
+        result["consumer_sdk_build_error_kind"] = (
+            "duplicate-symbols" if "duplicate symbol:" in data
+            else "linker-error" if ("ld.lld: error:" in data or "collect2: error:" in data)
+            else "build-error"
+        )
+        return result
+    bindings = object_review.get("bindings") if isinstance(object_review, dict) else None
+    if not isinstance(bindings, dict) or not bindings or len(bindings) > 256:
+        raise ValueError("Invalid OBJECT binding receipt")
+    nm = shutil.which("nm") or shutil.which("llvm-nm")
+    if not nm:
+        raise ValueError("Symbol inspector unavailable")
+    prefix = (installed / TRIPLET).resolve()
+    providers, matched = set(), set()
+    for target, paths in sorted(bindings.items()):
+        if (not isinstance(target, str) or re.fullmatch(r"[A-Za-z0-9_+.-]+", target) is None
+                or not isinstance(paths, list) or not paths or len(paths) > 256):
+            raise ValueError("Invalid OBJECT binding")
+        names = set()
+        for relative in paths:
+            if not isinstance(relative, str) or len(relative) > 4096:
+                raise ValueError("Invalid OBJECT path")
+            path = (prefix / relative).resolve()
+            if not path.is_relative_to(prefix) or not path.is_file() or path.is_symlink():
+                raise ValueError("Missing relocated OBJECT")
+            for demangle in (False, True):
+                command = [nm, "-g", "--defined-only"]
+                if demangle:
+                    command.append("-C")
+                command.append(str(path))
+                inspected = subprocess.run(command, capture_output=True, text=True, timeout=30)
+                if inspected.returncode or len(inspected.stdout) > 8 * 1024**2:
+                    raise ValueError("Symbol inspection failed")
+                for line in inspected.stdout.splitlines():
+                    item = re.match(r"^\s*(?:[0-9A-Fa-f]+\s+)?[A-Za-z]\s+(.+?)\s*$", line)
+                    if item:
+                        names.add(item.group(1))
+        hits = missing.intersection(names)
+        if hits:
+            providers.add(target)
+            matched.update(hits)
+    result.update({
+        "consumer_sdk_build_error_kind": "undefined-symbols",
+        "consumer_sdk_build_object_provider_targets": sorted(providers),
+        "consumer_sdk_build_object_provider_count": len(providers),
+        "consumer_sdk_build_object_provider_symbol_count": len(matched),
+        "consumer_sdk_build_unmatched_undefined_symbol_count": len(missing - matched),
+    })
+    return result
+
+
 def verify_relocated_metadata(sdk: Path, forbidden_roots: list[Path]) -> None:
     """Reject exported CMake/pkg-config metadata tied to producer-only roots."""
     needles = [
@@ -883,12 +955,22 @@ def main() -> None:
         # makes a one-hour timeout ambiguous. Keep both consumers mandatory,
         # but build them one at a time with independent evidence and budgets.
         stage = "combined-consumer-sdk-build"
-        run(
-            ["cmake", "--build", smoke_build, "--config", "Release",
-             "--target", "sdk_smoke", "--parallel", "1", "--verbose"],
-            cwd=root, env=build_env,
-            log=root / "consumer-sdk-build.log", timeout=3600,
-        )
+        consumer_sdk_log = root / "consumer-sdk-build.log"
+        try:
+            run(
+                ["cmake", "--build", smoke_build, "--config", "Release",
+                 "--target", "sdk_smoke", "--parallel", "1", "--verbose"],
+                cwd=root, env=build_env,
+                log=consumer_sdk_log, timeout=3600,
+            )
+        except BaseException:
+            try:
+                summary.update(summarize_consumer_sdk_build_failure(
+                    consumer_sdk_log, consumer_sdk / "installed", object_review
+                ))
+            except (OSError, ValueError, TypeError, subprocess.SubprocessError):
+                summary["consumer_sdk_build_diagnostic_invalid"] = True
+            raise
         summary["combined_sdk_smoke_built"] = True
         stage = "combined-consumer-cef-build"
         run(

@@ -125,6 +125,82 @@ class CompositionTests(unittest.TestCase):
         self.assertEqual(combined.CEF, '2aff22e09daaa5c28780c5766a70ee13e61c93b6')
 
 
+class ConsumerFailureDiagnosticTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+
+    def fixture(self):
+        from secure_release import cef_strict_combined as combined
+        installed = self.root / "installed"
+        prefix = installed / combined.TRIPLET
+        bindings = {
+            "needed-target": ["lib/freerdp3/objects-Release/needed-target/needed.o"],
+            "other-target": ["lib/freerdp3/objects-Release/other-target/other.o"],
+        }
+        for paths in bindings.values():
+            for relative in paths:
+                path = prefix / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"fixture")
+        return combined, installed, {"bindings": bindings}
+
+    def test_undefined_symbols_publish_only_provider_names_and_counts(self):
+        combined, installed, review = self.fixture()
+        log = self.root / "consumer-sdk-build.log"
+        required = "fixture_missing_symbol"
+        unmatched = "fixture_unmatched_symbol"
+        log.write_text(
+            "ld.lld: error: undefined symbol: " + required + "\n"
+            "ld.lld: error: undefined symbol: " + unmatched + "\n",
+            encoding="utf-8",
+        )
+
+        def inspect(command, **kwargs):
+            output = (
+                "0000000000000000 T " + required + "\n"
+                if "needed-target" in command[-1] else
+                "0000000000000000 T unrelated_provider\n"
+            )
+            return subprocess.CompletedProcess(command, 0, output, "")
+
+        with mock.patch.object(combined.shutil, "which", return_value="/usr/bin/nm"), \
+             mock.patch.object(combined.subprocess, "run", side_effect=inspect):
+            summary = combined.summarize_consumer_sdk_build_failure(log, installed, review)
+
+        self.assertEqual(summary["consumer_sdk_build_error_kind"], "undefined-symbols")
+        self.assertEqual(summary["consumer_sdk_build_undefined_symbol_count"], 2)
+        self.assertEqual(summary["consumer_sdk_build_object_provider_targets"], ["needed-target"])
+        self.assertEqual(summary["consumer_sdk_build_object_provider_count"], 1)
+        self.assertEqual(summary["consumer_sdk_build_object_provider_symbol_count"], 1)
+        self.assertEqual(summary["consumer_sdk_build_unmatched_undefined_symbol_count"], 1)
+        self.assertNotIn(required, json.dumps(summary))
+        self.assertNotIn(unmatched, json.dumps(summary))
+
+    def test_non_undefined_linker_failure_does_not_scan_objects(self):
+        combined, installed, review = self.fixture()
+        log = self.root / "consumer-sdk-build.log"
+        log.write_text("ld.lld: error: duplicate symbol: fixture_name\n", encoding="utf-8")
+        with mock.patch.object(combined.subprocess, "run") as inspect:
+            summary = combined.summarize_consumer_sdk_build_failure(log, installed, review)
+        inspect.assert_not_called()
+        self.assertEqual(summary["consumer_sdk_build_error_kind"], "duplicate-symbols")
+        self.assertEqual(summary["consumer_sdk_build_undefined_symbol_count"], 0)
+        self.assertNotIn("fixture_name", json.dumps(summary))
+
+    def test_production_failure_path_records_bounded_diagnostic_then_reraises(self):
+        from secure_release import cef_strict_combined as combined
+        import inspect
+        source = inspect.getsource(combined.main)
+        start = source.index('stage = "combined-consumer-sdk-build"')
+        end = source.index('summary["combined_sdk_smoke_built"] = True', start)
+        failure = source[start:end]
+        self.assertIn("summarize_consumer_sdk_build_failure(", failure)
+        self.assertIn('consumer_sdk_build_diagnostic_invalid', failure)
+        self.assertIn("raise", failure)
+
+
 @unittest.skipUnless(shutil.which("cmake"), "CMake required")
 class PinnedTests(unittest.TestCase):
     def setUp(self):
