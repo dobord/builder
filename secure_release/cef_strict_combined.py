@@ -23,7 +23,7 @@ from . import (
     cef_nss_isolation, cef_unwind_backtrace, cef_x11_static, crypto, safeio,
 )
 from . import (
-    cef_combined_identity, cef_combined_port, cef_combined_smoke, cef_dependency_source,
+    cef_combined_identity, cef_combined_port, cef_combined_smoke, cef_consumer_linker, cef_dependency_source,
     cef_freerdp_profile, cef_frozen_dependencies, cef_sdk_example, cef_sdk_headers, cef_sdk_aliases, cef_sdk_protoc, cef_sdk_xz, cef_sdk_objects, cef_sdk_source_interfaces, cef_strict_iteration,
 )
 
@@ -445,6 +445,11 @@ def main() -> None:
         recipe_env = cef_combined_identity.prepare_environment(
             selected, clean_environment(), summary
         )
+        stage = "consumer-linker"
+        consumer_linker = cef_consumer_linker.verify(root)
+        summary["consumer_linker_kind"] = consumer_linker["kind"]
+        summary["consumer_linker_version"] = consumer_linker["version"]
+        summary["consumer_linker_sha256"] = consumer_linker["sha256"]
         stage = "dependency-source-prefetch"
         cef_dependency_source.prefetch(
             registry, upstream, root, clean_environment(), summary
@@ -832,6 +837,7 @@ def main() -> None:
         configure.append(
             "-DCEF_STATIC_SMOKE_SOURCE=" + str(consumer_source / "smoke.c")
         )
+        configure.append(cef_consumer_linker.cmake_flag())
         run(
             configure, cwd=root, env=build_env,
             log=root / "consumer-configure.log", timeout=900,
@@ -932,6 +938,7 @@ def main() -> None:
         proxy_configure = build_support.consumer_configure_command(
             proxy_source, proxy_build, consumer_sdk, TRIPLET
         )
+        proxy_configure.append(cef_consumer_linker.cmake_flag())
         run(
             proxy_configure, cwd=root, env=build_env,
             log=root / "lfc-ui-freerdp-cef-configure.log", timeout=900,
