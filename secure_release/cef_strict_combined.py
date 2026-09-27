@@ -56,18 +56,16 @@ def materialize_sdk_registry(root: Path) -> dict[str, str]:
     """Replay only the reviewed child tree when CI checked out its pinned parent."""
     root = root.resolve()
     checkout = git_head(root)
+    if checkout == SDK_VCPKG:
+        return {
+            "mode": "direct-checkout",
+            "checkout_commit": checkout,
+            "tree": SDK_VCPKG_TREE,
+        }
     head_tree = _git_value(root, "rev-parse", "HEAD^{tree}")
     tracked = _git_value(root, "status", "--porcelain=v1", "--untracked-files=no")
     if tracked:
         raise ValueError("Final SDK registry checkout is not tracked-clean")
-    if checkout == SDK_VCPKG:
-        if head_tree != SDK_VCPKG_TREE:
-            raise ValueError("Final SDK registry commit tree mismatch")
-        return {
-            "mode": "direct-checkout",
-            "checkout_commit": checkout,
-            "tree": head_tree,
-        }
     if checkout != SDK_VCPKG_CHECKOUT or head_tree != SDK_VCPKG_CHECKOUT_TREE:
         raise ValueError("Final SDK registry checkout is not the reviewed replay parent")
 

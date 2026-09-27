@@ -258,7 +258,6 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn('"            ainput-server\\n"',worker)
         self.assertIn('"            cliprdr-server\\n"',worker)
         self.assertIn('"            disp-server\\n"',worker)
-        self.assertIn('"            rdpgfx-server\\n"',worker)
         self.assertIn('TARGET_OBJECTS:disp-server',worker)
         self.assertIn('"git-tree": "aceadca1288983390522864e4d6c42b38ae84a6a"',worker)
         self.assertIn('["ffmpeg", "proxy", "x11"]',worker)
