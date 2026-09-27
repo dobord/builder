@@ -9,8 +9,9 @@ concurrency:
   group: review103-final-${{ github.ref }}
   cancel-in-progress: false
 env:
-  SOURCE_SHA: e1de36ccf833c0e5d14e8c088cd52417df1d9c47
-  SOURCE_TREE: 3ca8e0d5a916f0548e6dababa68f240ef72e994b
+  SOURCE_SHA: 36ebbe69c3f90dddec0499ee7286ab553c1d7833
+  SOURCE_TREE: 91c7f7dccf803c0ed953814508647811e04c78ae
+  REVIEW_BASE: d6e088b4473d6a5393ad09cf6300e8cd86c7aff1
   ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
 jobs:
   regression:
@@ -31,7 +32,7 @@ jobs:
           python-version: '3.13'
       - run: |
           python -m pip install --require-hashes --only-binary=:all: -r requirements.lock
-      - name: Exact source, production assertions and isolated regression
+      - name: Exact source, strict production assertions and isolated regression
         env:
           SOURCE_READ_TOKEN: ${{ secrets.SOURCE_READ_TOKEN }}
         run: |
@@ -40,7 +41,6 @@ jobs:
           api=runpy.run_path('investigations/frdpd-103/review-ci.py')
           original=api['docker']
           def verified(name,script,timeout=900):
-              # Same assertion mode as the canonical Docker build, not NDEBUG.
               script=script.replace('-DWITH_FRDPD_STRICT_WARNINGS=ON','-DWITH_FRDPD_STRICT_WARNINGS=ON -DWITH_VERBOSE_WINPR_ASSERT=OFF')
               if name=='focused':
                   script="grep -q '^#define WITH_GFX_H264' /opt/freerdp-build/include/freerdp/config.h && "+script
@@ -48,10 +48,43 @@ jobs:
                   positive="grep -q '^#define WITH_GFX_H264' /tmp/review-prod/include/freerdp/config.h"
                   gate=('! '+positive) if os.environ['REVIEW_VARIANT']=='noavc' else positive
                   script=script.replace('ctest --test-dir /tmp/review-prod',gate+'\nctest --test-dir /tmp/review-prod')
+                  script=script.replace('--target frdpd frdp-session-agent TestFreeRDPFrdp','--target frdpd frdp-session-agent TestFreeRDPFrdp -- -k 0')
               script=script.replace('--output-on-failure --timeout','--output-on-failure --verbose --timeout')
               return original(name,script,timeout)
           api['main'].__globals__['docker']=verified
           sys.exit(api['main']())
+          PY
+      - name: Export exact committed corrections without publishing private source
+        if: always() && matrix.variant == 'full'
+        env:
+          SOURCE_READ_TOKEN: ${{ secrets.SOURCE_READ_TOKEN }}
+        run: |
+          python - <<'PY'
+          import os,subprocess,json,hashlib
+          from pathlib import Path
+          os.umask(0o077)
+          root=Path(os.environ['RUNNER_TEMP'])/'review-validation'; source=root/'source'
+          if not (source/'.git').exists(): raise SystemExit('Source checkout unavailable')
+          ask=root/'askpass-export'
+          ask.write_text('#!/bin/sh\ncase "$1" in *Username*) echo x-access-token ;; *) printf "%s\\n" "$SOURCE_READ_TOKEN" ;; esac\n'); ask.chmod(0o700)
+          try:
+              env=dict(os.environ,GIT_ASKPASS=str(ask),GIT_TERMINAL_PROMPT='0')
+              base=os.environ['REVIEW_BASE']; head=os.environ['SOURCE_SHA']
+              with (root/'patch-export.log').open('w') as log:
+                  def git(*args): subprocess.run(['git','-C',str(source),*args],env=env,stdout=log,stderr=log,check=True,timeout=300)
+                  git('fetch','--depth=16','origin',head)
+                  git('merge-base','--is-ancestor',base,head)
+                  output=root/'corrections'; output.mkdir(exist_ok=True)
+                  git('format-patch','--full-index','--binary','--no-signature','--output-directory',str(output),base+'..'+head)
+                  with (output/'combined.patch').open('wb') as patch:
+                      subprocess.run(['git','-C',str(source),'diff','--full-index','--binary',base,head],env=env,stdout=patch,stderr=log,check=True,timeout=60)
+                  files=subprocess.check_output(['git','-C',str(source),'diff','--name-only',base,head],text=True).splitlines()
+                  metadata={'base':base,'head':head,'tree':os.environ['SOURCE_TREE'],'files':files}
+                  (output/'provenance.json').write_text(json.dumps(metadata,indent=2))
+                  manifest={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in output.iterdir() if p.is_file()}
+                  (output/'sha256.json').write_text(json.dumps(manifest,sort_keys=True,indent=2))
+          finally:
+              ask.unlink(missing_ok=True)
           PY
       - name: Encrypt complete diagnostics
         if: always()
@@ -63,7 +96,7 @@ jobs:
           root=Path(os.environ['RUNNER_TEMP']);archive=root/'review-evidence.tar.gz'
           with tarfile.open(archive,'w:gz') as out:
               for p in (root/'review-validation').glob('*'):
-                  if p.name not in ('source','askpass'):out.add(p,arcname=p.name)
+                  if p.name not in ('source','askpass','askpass-export'):out.add(p,arcname=p.name)
           encrypt_file(archive,root/'review.enc',os.environ['ARTIFACT_ENCRYPTION_PUBLIC_KEY'],{'purpose':'frdpd-103-review-validation','source_sha':os.environ['SOURCE_SHA'],'tree_sha':os.environ['SOURCE_TREE'],'run_id':os.environ['GITHUB_RUN_ID'],'variant':os.environ['REVIEW_VARIANT']})
           archive.unlink()
           PY
