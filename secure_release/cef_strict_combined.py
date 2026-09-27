@@ -30,9 +30,9 @@ from . import (
 ENGINE_VCPKG = "b4bb281192ea8bb004542012ac804b988a4ff403"
 SDK_VCPKG_CHECKOUT = "7824a49d523d8ad09e53dcedbd66a3a767bafdae"
 SDK_VCPKG_CHECKOUT_TREE = "1b2f0d884548b72b6a7a50a9c29a567050887e75"
-SDK_VCPKG = "1e0d7db7127a2395fe73bc83c88d5f92b20ec33a"
-SDK_VCPKG_TREE = "b624cd8aea07fd502074881c05b1bf9de5cac3ca"
-SDK_LFC_UI_TREE = "456adaca80fe88da3f23fb7c103f20fab2003fd7"
+SDK_VCPKG = "bc9fa678a7f7cb2b1f29c0e34c251cf4ae061438"
+SDK_VCPKG_TREE = "c755f345d8def011f2a19612f60593093dfff57a"
+SDK_LFC_UI_TREE = "cb1a947459fe788d6d697e9e62bb87edec24f3e2"
 UPSTREAM = "9e593bb18ea69cc5095e012465dcd675a822ed0d"
 CEF = "2aff22e09daaa5c28780c5766a70ee13e61c93b6"
 LOCKFREECORO = "24038aed3a0be642adb60e71bd994ae8f0d90140"
@@ -73,13 +73,13 @@ def materialize_sdk_registry(root: Path) -> dict[str, str]:
         (
             "ports/lfc-ui/use-installed-freerdp.cmake",
             "            ainput-server cliprdr-server disp-server rdpgfx-server)\n",
-            "            ainput-server cliprdr-server disp-server rdpgfx-server\n"
-            "            \"$<TARGET_OBJECTS:disp-server>\")\n",
+            "            ainput-server cliprdr-server disp-server rdpgfx-server)\n"
+            "        target_link_libraries(lfc-ui INTERFACE \"$<TARGET_OBJECTS:disp-server>\")\n",
         ),
         (
             "ports/lfc-ui/vcpkg.json",
             '  "port-version": 12\n}\n',
-            '  "port-version": 13\n}\n',
+            '  "port-version": 14\n}\n',
         ),
         (
             "versions/baseline.json",
@@ -89,7 +89,7 @@ def materialize_sdk_registry(root: Path) -> dict[str, str]:
             '    },\n',
             '    "lfc-ui": {\n'
             '      "baseline": "0.3.0",\n'
-            '      "port-version": 13\n'
+            '      "port-version": 14\n'
             '    },\n',
         ),
         (
@@ -103,6 +103,11 @@ def materialize_sdk_registry(root: Path) -> dict[str, str]:
             '  "versions": [\n'
             '    {\n'
             '      "git-tree": "' + SDK_LFC_UI_TREE + '",\n'
+            '      "version": "0.3.0",\n'
+            '      "port-version": 14\n'
+            '    },\n'
+            '    {\n'
+            '      "git-tree": "456adaca80fe88da3f23fb7c103f20fab2003fd7",\n'
             '      "version": "0.3.0",\n'
             '      "port-version": 13\n'
             '    },\n'
@@ -203,7 +208,7 @@ def verify_engine_registry_delta(engine: Path, sdk: Path) -> None:
         raise ValueError("Registry baseline changed outside lfc-ui/FreeRDP")
     if (old_lfc.get("baseline"), old_lfc.get("port-version")) != ("0.3.0", 8):
         raise ValueError("Unexpected engine-registry lfc-ui baseline")
-    if (new_lfc.get("baseline"), new_lfc.get("port-version")) != ("0.3.0", 13):
+    if (new_lfc.get("baseline"), new_lfc.get("port-version")) != ("0.3.0", 14):
         raise ValueError("Unexpected final-registry lfc-ui baseline")
     if (old_freerdp.get("baseline"), old_freerdp.get("port-version")) != ("3.31.1", 23):
         raise ValueError("Unexpected engine-registry FreeRDP baseline")
@@ -216,7 +221,7 @@ def verify_engine_registry_delta(engine: Path, sdk: Path) -> None:
     new_port_version = new_manifest.pop("port-version")
     old_feature = old_manifest["features"].pop("freerdp")
     new_feature = new_manifest["features"].pop("freerdp")
-    if old_port_version != 8 or new_port_version != 13 or old_manifest != new_manifest:
+    if old_port_version != 8 or new_port_version != 14 or old_manifest != new_manifest:
         raise ValueError("lfc-ui registry delta changed outside the reviewed FreeRDP dependency request")
     if old_feature.get("supports") != "linux" or new_feature.get("supports") != "linux":
         raise ValueError("lfc-ui FreeRDP platform contract changed")
@@ -375,6 +380,8 @@ index 3a7f5aa..4bc04cf 100644
     new_lfc_versions = json.loads((sdk / "versions/l-/lfc-ui.json").read_text())
     expected_lfc_entries = [
         {"git-tree": SDK_LFC_UI_TREE,
+         "version": "0.3.0", "port-version": 14},
+        {"git-tree": "456adaca80fe88da3f23fb7c103f20fab2003fd7",
          "version": "0.3.0", "port-version": 13},
         {"git-tree": "700498a2d6c2a33f652146e804eaeed359247a2d",
          "version": "0.3.0", "port-version": 12},
@@ -387,8 +394,8 @@ index 3a7f5aa..4bc04cf 100644
     ]
     if (not isinstance(old_lfc_versions.get("versions"), list)
             or not isinstance(new_lfc_versions.get("versions"), list)
-            or new_lfc_versions["versions"][:5] != expected_lfc_entries
-            or new_lfc_versions["versions"][5:] != old_lfc_versions["versions"]):
+            or new_lfc_versions["versions"][:6] != expected_lfc_entries
+            or new_lfc_versions["versions"][6:] != old_lfc_versions["versions"]):
         raise ValueError("Unexpected lfc-ui versions registry delta")
 
 
