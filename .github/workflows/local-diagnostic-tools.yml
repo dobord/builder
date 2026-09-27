@@ -1,6 +1,6 @@
 name: Offline local diagnostic tools
 # No private inputs or decryption in Actions. Public source fixtures only.
-# Capture the public relocated-consumer baseline after combined SDK transport.
+# Capture the public combined-consumer marker baseline after OBJECT transport.
 on:
   push:
     branches: [feature/cef-static-integration]
