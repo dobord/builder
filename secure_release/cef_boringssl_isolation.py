@@ -135,33 +135,95 @@ def _cef_archives(prefix: Path) -> list[tuple[str, Path]]:
     return [(name, regular(prefix, name)) for name in unique]
 
 
-def _owner(installed: Path, pattern: str, required: set[str]) -> None:
-    regular(installed, "vcpkg/status")
+def _status_records(installed: Path) -> list[dict[str, str]]:
+    status = regular(installed, "vcpkg/status")
+    require(status.stat().st_size <= 32 * 1024**2,
+            "Oversized vcpkg status database")
+    text = status.read_text(encoding="utf-8")
+    records: list[dict[str, str]] = []
+    for block in re.split(r"\r?\n\r?\n+", text.strip()):
+        if not block:
+            continue
+        fields: dict[str, str] = {}
+        for line in block.splitlines():
+            if line.startswith((" ", "\t")):
+                continue
+            require(": " in line, "Malformed vcpkg status record")
+            key, value = line.split(": ", 1)
+            require(key and key not in fields,
+                    "Duplicate vcpkg status field")
+            fields[key] = value
+        records.append(fields)
+    require(records, "Empty vcpkg status database")
+    return records
+
+
+def _installed_identity(installed: Path, package: str, version: str,
+                        port_version: int) -> None:
+    candidates = []
+    for fields in _status_records(installed):
+        if (fields.get("Package") == package
+                and fields.get("Architecture") == TRIPLET
+                and fields.get("Status") == "install ok installed"
+                and fields.get("Feature") in (None, "core")):
+            candidates.append(fields)
+    require(len(candidates) == 1,
+            "Expected one installed package identity for BoringSSL isolation")
+    fields = candidates[0]
+    raw_version = fields.get("Version")
+    port_field = fields.get("Port-Version")
+    valid_version = raw_version in {
+        version,
+        version + "#" + str(port_version),
+    }
+    valid_port = (
+        port_field is None
+        or (port_field.isdigit() and int(port_field) == port_version)
+    )
+    require(valid_version and valid_port,
+            "Installed package version changed for BoringSSL isolation")
+
+
+def _owner(installed: Path, package: str, version: str, port_version: int,
+           required: set[str]) -> None:
+    require(required, "Empty package ownership proof")
+    _installed_identity(installed, package, version, port_version)
     info = installed / "vcpkg/info"
     require(info.is_dir() and not info.is_symlink(),
             "Missing vcpkg package ownership inventory")
-    matches = [
-        path for path in info.glob("*_" + TRIPLET + ".list")
-        if re.fullmatch(pattern, path.name)
-    ]
-    require(len(matches) == 1 and not matches[0].is_symlink(),
-            "Expected one package owner list for BoringSSL isolation")
-    lines = set(matches[0].read_text(encoding="utf-8").splitlines())
-    require(required <= lines,
-            "Static archive lost its vcpkg package ownership")
+    lists = sorted(info.glob("*_" + TRIPLET + ".list"))
+    require(0 < len(lists) <= 4096,
+            "Invalid vcpkg package ownership inventory")
+    owners: dict[str, list[Path]] = {name: [] for name in required}
+    total = 0
+    for listing in lists:
+        require(listing.is_file() and not listing.is_symlink(),
+                "Redirected vcpkg package ownership list")
+        size = listing.stat().st_size
+        total += size
+        require(size <= 32 * 1024**2 and total <= 128 * 1024**2,
+                "Oversized vcpkg package ownership inventory")
+        lines = set(listing.read_text(encoding="utf-8").splitlines())
+        for name in required.intersection(lines):
+            owners[name].append(listing)
+    require(all(len(value) == 1 for value in owners.values()),
+            "Static archive lost its unique vcpkg package owner")
+    unique = {value[0] for value in owners.values()}
+    require(len(unique) == 1,
+            "Static archives are split across vcpkg package owners")
+    owner = next(iter(unique))
+    require(owner.name.startswith(package + "_")
+            and owner.name.endswith("_" + TRIPLET + ".list"),
+            "Static archive owner package changed")
 
 
 def _ownership(installed: Path, cef_names: list[str]) -> None:
     _owner(
-        installed,
-        r"cef-static_" + re.escape(CEF_VERSION) + r"#" + str(CEF_PORT_VERSION)
-        + r"_" + re.escape(TRIPLET) + r"\.list",
+        installed, "cef-static", CEF_VERSION, CEF_PORT_VERSION,
         {TRIPLET + "/" + name for name in cef_names},
     )
     _owner(
-        installed,
-        r"openssl_" + re.escape(OPENSSL_VERSION)
-        + r"_" + re.escape(TRIPLET) + r"\.list",
+        installed, "openssl", OPENSSL_VERSION, 0,
         {TRIPLET + "/" + name for name in OPENSSL_ARCHIVES},
     )
 
