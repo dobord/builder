@@ -233,7 +233,7 @@ class NativeTests(unittest.TestCase):
         )
 
         chunk = self.root / "cef_0000_aaaaaaaaaaaa.a"
-        chunk.write_bytes(huge.read_bytes()[:8])
+        chunk.write_bytes(b"!<arch>\\n")
         with chunk.open("r+b") as stream:
             stream.seek(isolation.MAX_SOURCE_ARCHIVE_BYTES + 4096 - 1)
             stream.write(b"\\0")
