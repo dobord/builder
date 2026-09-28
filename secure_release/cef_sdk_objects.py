@@ -15,8 +15,8 @@ from . import cef_sdk_example as checked, safeio
 
 TRIPLET = "x64-linux-static-release"
 ORIGINS = {
-    "ports/freerdp/portfile.cmake": "723a82ebfb393c70d66b7da070da79d7a5902873",
-    "ports/freerdp/vcpkg.json": "564dd0baa4a3e5fa96cee934c96d42dfceaabf02",
+    "ports/freerdp/portfile.cmake": "8d68d304ce0a117c7237418a3d65fcf1588834f4",
+    "ports/freerdp/vcpkg.json": "cde94ab640afd287a20a56b94098f651fc78557c",
     "ports/freerdp/install-layout.patch": "8514875506f93a9370e27cc03618619891b07113",
 }
 EXPORTS = (
