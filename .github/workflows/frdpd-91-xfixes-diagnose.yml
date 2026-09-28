@@ -1,0 +1,65 @@
+name: FRDPD issue 91 XFixes build diagnosis
+on:
+  push:
+    branches: [test/frdpd-91-window-capture-20260928]
+    paths: ['.github/workflows/frdpd-91-xfixes-diagnose.yml']
+permissions:
+  contents: read
+env:
+  SOURCE_SHA: ceb8e8bcc4799ea382ffe6e1edf5c0895810762c
+  SOURCE_TREE: 817b0d56f2bff19080f7678dc53989d10cb9583c
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Fetch exact private source
+        env:
+          SOURCE_READ_TOKEN: ${{ secrets.SOURCE_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/diag"
+          mkdir -m 700 "$root"
+          ask="$root/askpass"
+          printf '%s\n' '#!/bin/sh' 'case "$1" in *Username*) echo x-access-token ;; *) printf "%s\\n" "$SOURCE_READ_TOKEN" ;; esac' >"$ask"
+          chmod 700 "$ask"
+          export GIT_ASKPASS="$ask" GIT_TERMINAL_PROMPT=0
+          git init "$root/source" >/dev/null
+          git -C "$root/source" remote add origin https://github.com/dobord/frdpd.git
+          git -C "$root/source" fetch --depth=1 origin "$SOURCE_SHA" >/dev/null
+          git -C "$root/source" checkout --detach FETCH_HEAD >/dev/null
+          test "$(git -C "$root/source" rev-parse HEAD^{tree})" = "$SOURCE_TREE"
+          git -C "$root/source" -c url.https://github.com/.insteadOf=git@github.com: submodule update --init --recursive --depth=1 >/dev/null
+          rm -f "$ask"
+      - name: Classify exact Docker build
+        run: |
+          set +e
+          root="$RUNNER_TEMP/diag"
+          docker build --build-arg FRDP_BUILD_COMPONENT_TESTS=ON -f "$root/source/server/frdp/test/e2e/Dockerfile" -t frdpd91-xfixes:exact "$root/source" >"$root/build.log" 2>&1
+          rc=$?
+          set -e
+          if [ "$rc" -eq 0 ]; then
+            echo "category=success"
+            exit 0
+          fi
+          if grep -Fq 'XFixes is required for independent RemoteApp window capture' "$root/build.log"; then
+            echo "category=cmake-xfixes-not-found"
+          elif grep -Fq 'X11/extensions/Xfixes.h' "$root/build.log"; then
+            echo "category=xfixes-header"
+          elif grep -Eq 'undefined reference.*XFixes(QueryExtension|QueryVersion)' "$root/build.log"; then
+            echo "category=xfixes-link"
+          elif grep -Eq 'XFixes(QueryExtension|QueryVersion)' "$root/build.log"; then
+            echo "category=xfixes-compile"
+          elif grep -Fq 'frdp-window-capture-test' "$root/build.log"; then
+            echo "category=window-capture-test-build"
+          elif grep -Fq 'frdp-session-agent' "$root/build.log"; then
+            echo "category=session-agent-build"
+          else
+            echo "category=unrelated-or-unknown"
+          fi
+          exit "$rc"
+      - if: always()
+        run: sudo rm -rf "$RUNNER_TEMP/diag"
