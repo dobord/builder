@@ -114,10 +114,10 @@ def consumer(root: Path, prefix: Path, names: list[str], label: str, *, ok=True)
     )
     run(["cc", "-c", main, "-o", obj], root)
     command = [
-        "cc", obj, "-Wl,--start-group",
+        "cc", obj, "-Wl,--whole-archive",
         *(prefix / name for name in names),
         prefix / "lib/libssl.a", prefix / "lib/libcrypto.a",
-        "-Wl,--end-group", "-o", exe,
+        "-Wl,--no-whole-archive", "-o", exe,
     ]
     result = run(command, root, ok=ok)
     if ok:
