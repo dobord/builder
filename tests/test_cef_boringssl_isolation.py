@@ -279,7 +279,8 @@ class PolicyTests(unittest.TestCase):
         import inspect
         text = inspect.getsource(isolation)
         self.assertIn('"--redefine-syms="', text)
-        self.assertIn("intersection(openssl_defined)", text)
+        self.assertIn("watch=openssl_defined", text)
+        self.assertIn('kind not in {"U", "w", "v"}', text)
         self.assertNotIn("--allow-multiple-definition", text)
         self.assertNotIn("--unresolved-symbols", text)
         self.assertNotIn("--exclude-libs", text)
