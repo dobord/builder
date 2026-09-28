@@ -10,7 +10,7 @@ env:
   SOURCE_TREE: c9cc4013a6f800c4d62b1c9ab2eceadb1534f0b7
   BASE_SHA: 3c9171929662704418ed989cb46aa2c021234c76
   PR_NUMBER: '124'
-  KEY_COMMENT_ID: '5862917925'
+  KEY_REF: internal/91-patch-export-key-20260928
 jobs:
   export:
     runs-on: ubuntu-24.04
@@ -55,7 +55,119 @@ jobs:
 
           git init "$source" >/dev/null
           git -C "$source" remote add origin https://github.com/dobord/frdpd.git
-          git -C "$source" fetch --depth=16 origin "$SOURCE_SHA" "$BASE_SHA" >/dev/null
+          git -C "$source" fetch --depth=16 origin "$SOURCE_SHA" "$BASE_SHA" "$KEY_REF" >/dev/null
+          PATCH_KEY="$(git -C "$source" show FETCH_HEAD:.internal/frdpd-91-patch-export-key.txt 2>/dev/null || true)"
+          if ! printf '%s' "$PATCH_KEY" | grep -Eq '^[0-9a-f]{64}          test "$(git -C "$source" rev-parse HEAD^{tree})" = "$SOURCE_TREE"
+          git -C "$source" merge-base --is-ancestor "$BASE_SHA" "$SOURCE_SHA"
+
+          git -C "$source" format-patch --full-index --binary --no-signature             --output-directory "$output/commits" "$BASE_SHA..$SOURCE_SHA" >/dev/null
+          git -C "$source" diff --full-index --binary "$BASE_SHA" "$SOURCE_SHA"             >"$output/frdpd-issue-91-pr124.patch"
+          git -C "$source" diff --check "$BASE_SHA" "$SOURCE_SHA"
+
+          python - "$output" <<'PY'
+          import hashlib, json, os, pathlib, sys, zipfile
+          out=pathlib.Path(sys.argv[1])
+          meta={
+            "repository":"dobord/frdpd",
+            "issue":91,
+            "pull_request":124,
+            "base_sha":os.environ["BASE_SHA"],
+            "head_sha":os.environ["SOURCE_SHA"],
+            "head_tree":os.environ["SOURCE_TREE"],
+            "builder_run_id":os.environ["GITHUB_RUN_ID"],
+            "freeRDP_pin":"aa8650b300aa4cabd85d9c72b431301509b9043f",
+          }
+          (out/"PROVENANCE.json").write_text(json.dumps(meta,indent=2)+"\n")
+          (out/"README.md").write_text(
+            "# frdpd issue #91 / PR #124 patch archive\n\n"
+            f"Base: `{meta['base_sha']}`\n\n"
+            f"Head: `{meta['head_sha']}`\n\n"
+            f"Tree: `{meta['head_tree']}`\n\n"
+            f"Builder validation run: `{meta['builder_run_id']}` (separate run 36373659968 validated the exact source).\n\n"
+            "Contents: combined binary-capable diff plus seven ordered git format-patch commits.\n"
+            "The PR implements the core #91 capture/damage/generation work; #91 remains open for dependent and broader evidence gates.\n"
+          )
+          files=sorted(p for p in out.rglob("*") if p.is_file() and p.name!="SHA256SUMS")
+          lines=[f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.relative_to(out)}" for p in files]
+          (out/"SHA256SUMS").write_text("\n".join(lines)+"\n")
+          zip_path=out.parent/"frdpd-91-pr124-patch.zip"
+          with zipfile.ZipFile(zip_path,"w",zipfile.ZIP_DEFLATED) as z:
+              for p in sorted(out.rglob("*")):
+                  if p.is_file():
+                      z.write(p,p.relative_to(out))
+          print(hashlib.sha256(zip_path.read_bytes()).hexdigest())
+          PY
+
+          openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt             -in "$root/frdpd-91-pr124-patch.zip"             -out "$RUNNER_TEMP/frdpd-91-pr124-patch.zip.enc"             -pass env:PATCH_KEY
+          rm -rf "$root"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: encrypted-frdpd-91-patch-${{ github.run_id }}
+          path: ${{ runner.temp }}/frdpd-91-pr124-patch.zip.enc
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+      - if: always()
+        run: rm -f "$RUNNER_TEMP/frdpd-91-pr124-patch.zip.enc"
+; then
+            # FETCH_HEAD may point at another requested ref; resolve the named key ref explicitly.
+            git -C "$source" fetch --depth=1 origin "$KEY_REF:refs/remotes/origin/patch-key" >/dev/null
+            PATCH_KEY="$(git -C "$source" show refs/remotes/origin/patch-key:.internal/frdpd-91-patch-export-key.txt | tr -d '\r\n')"
+          fi
+          printf '%s' "$PATCH_KEY" | grep -Eq '^[0-9a-f]{64}          test "$(git -C "$source" rev-parse HEAD^{tree})" = "$SOURCE_TREE"
+          git -C "$source" merge-base --is-ancestor "$BASE_SHA" "$SOURCE_SHA"
+
+          git -C "$source" format-patch --full-index --binary --no-signature             --output-directory "$output/commits" "$BASE_SHA..$SOURCE_SHA" >/dev/null
+          git -C "$source" diff --full-index --binary "$BASE_SHA" "$SOURCE_SHA"             >"$output/frdpd-issue-91-pr124.patch"
+          git -C "$source" diff --check "$BASE_SHA" "$SOURCE_SHA"
+
+          python - "$output" <<'PY'
+          import hashlib, json, os, pathlib, sys, zipfile
+          out=pathlib.Path(sys.argv[1])
+          meta={
+            "repository":"dobord/frdpd",
+            "issue":91,
+            "pull_request":124,
+            "base_sha":os.environ["BASE_SHA"],
+            "head_sha":os.environ["SOURCE_SHA"],
+            "head_tree":os.environ["SOURCE_TREE"],
+            "builder_run_id":os.environ["GITHUB_RUN_ID"],
+            "freeRDP_pin":"aa8650b300aa4cabd85d9c72b431301509b9043f",
+          }
+          (out/"PROVENANCE.json").write_text(json.dumps(meta,indent=2)+"\n")
+          (out/"README.md").write_text(
+            "# frdpd issue #91 / PR #124 patch archive\n\n"
+            f"Base: `{meta['base_sha']}`\n\n"
+            f"Head: `{meta['head_sha']}`\n\n"
+            f"Tree: `{meta['head_tree']}`\n\n"
+            f"Builder validation run: `{meta['builder_run_id']}` (separate run 36373659968 validated the exact source).\n\n"
+            "Contents: combined binary-capable diff plus seven ordered git format-patch commits.\n"
+            "The PR implements the core #91 capture/damage/generation work; #91 remains open for dependent and broader evidence gates.\n"
+          )
+          files=sorted(p for p in out.rglob("*") if p.is_file() and p.name!="SHA256SUMS")
+          lines=[f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.relative_to(out)}" for p in files]
+          (out/"SHA256SUMS").write_text("\n".join(lines)+"\n")
+          zip_path=out.parent/"frdpd-91-pr124-patch.zip"
+          with zipfile.ZipFile(zip_path,"w",zipfile.ZIP_DEFLATED) as z:
+              for p in sorted(out.rglob("*")):
+                  if p.is_file():
+                      z.write(p,p.relative_to(out))
+          print(hashlib.sha256(zip_path.read_bytes()).hexdigest())
+          PY
+
+          openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt             -in "$root/frdpd-91-pr124-patch.zip"             -out "$RUNNER_TEMP/frdpd-91-pr124-patch.zip.enc"             -pass env:PATCH_KEY
+          rm -rf "$root"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: encrypted-frdpd-91-patch-${{ github.run_id }}
+          path: ${{ runner.temp }}/frdpd-91-pr124-patch.zip.enc
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+      - if: always()
+        run: rm -f "$RUNNER_TEMP/frdpd-91-pr124-patch.zip.enc"
+
+          export PATCH_KEY
           git -C "$source" checkout --detach "$SOURCE_SHA" >/dev/null
           test "$(git -C "$source" rev-parse HEAD^{tree})" = "$SOURCE_TREE"
           git -C "$source" merge-base --is-ancestor "$BASE_SHA" "$SOURCE_SHA"
