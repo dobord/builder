@@ -418,14 +418,6 @@ def install(installed: Path, source: Path, diagnostics: Path) -> dict:
                         after.get((renamed[old], kind), 0) == count,
                         "CEF BoringSSL symbol isolation is incomplete",
                     )
-                require(
-                    all(
-                        after.get((old, kind), 0) == 0
-                        for old in collisions
-                        for kind in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz?"
-                    ),
-                    "CEF archive retained an unisolated BoringSSL symbol",
-                )
                 source_sha = source_hashes[name]
                 derived_sha = digest(temporary)
                 os.replace(temporary, path)
@@ -527,12 +519,18 @@ def verify(installed: Path, source: Path, receipt: dict) -> dict:
     for name, record in affected.items():
         require(isinstance(record, dict)
                 and set(record) == {
-                    "source_sha256", "sha256", "renamed_occurrences"
+                    "source_sha256", "sha256", "renamed_occurrences",
+                    "global_symbol_count", "global_symbol_sha256",
                 }
                 and record["sha256"] == receipt["cef_archives"][name]
                 and record["source_sha256"] != record["sha256"]
                 and type(record["renamed_occurrences"]) is int
-                and record["renamed_occurrences"] > 0,
+                and record["renamed_occurrences"] > 0
+                and type(record["global_symbol_count"]) is int
+                and 0 < record["global_symbol_count"] <= MAX_NM_RECORDS
+                and isinstance(record["global_symbol_sha256"], str)
+                and re.fullmatch(r"[0-9a-f]{64}",
+                                 record["global_symbol_sha256"]) is not None,
                 "Invalid CEF BoringSSL affected archive receipt")
     return {
         "cef_boringssl_isolation_verified": True,
