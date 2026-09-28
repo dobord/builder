@@ -100,8 +100,8 @@ def write_registry_fixture(root: Path, lfc_port_version: int, minimal: bool) -> 
             rdpgfx-server)
         target_link_libraries(lfc-ui ${_lfc_ui_usage_scope}
             freerdp-shadow freerdp-server freerdp
-            ainput-server cliprdr-server disp-server rdpgfx-server
-            "$<TARGET_OBJECTS:disp-server>")
+            ainput-server cliprdr-server disp-server rdpgfx-server)
+        target_link_libraries(lfc-ui INTERFACE "$<TARGET_OBJECTS:disp-server>")
             freerdp-server-proxy freerdp-client freerdp-server freerdp
             disp-server rdpgfx-server)
 """
@@ -208,6 +208,10 @@ index 3a7f5aa..4bc04cf 100644
         "versions/l-/lfc-ui.json": json.dumps({
             "versions": (
                 [{
+                    "git-tree": "cb1a947459fe788d6d697e9e62bb87edec24f3e2",
+                    "version": "0.3.0",
+                    "port-version": 14,
+                }, {
                     "git-tree": "456adaca80fe88da3f23fb7c103f20fab2003fd7",
                     "version": "0.3.0",
                     "port-version": 13,
@@ -261,7 +265,7 @@ class StrictPublicationContractTests(unittest.TestCase):
             root = Path(folder)
             engine, sdk = root / "engine", root / "sdk"
             write_registry_fixture(engine, 8, False)
-            write_registry_fixture(sdk, 13, True)
+            write_registry_fixture(sdk, 14, True)
             engine_sha, sdk_sha = "1" * 40, "2" * 40
 
             def fake_head(path):
@@ -277,7 +281,7 @@ class StrictPublicationContractTests(unittest.TestCase):
             root = Path(folder)
             engine, sdk = root / "engine", root / "sdk"
             write_registry_fixture(engine, 8, False)
-            write_registry_fixture(sdk, 13, True)
+            write_registry_fixture(sdk, 14, True)
             (sdk / "ports/cef-static/vcpkg.json").write_text(
                 "changed-engine-port\n", encoding="utf-8"
             )
@@ -346,12 +350,12 @@ class StrictPublicationContractTests(unittest.TestCase):
             replacements = {
                 "ports/lfc-ui/use-installed-freerdp.cmake": (
                     "            ainput-server cliprdr-server disp-server rdpgfx-server)\n",
-                    "            ainput-server cliprdr-server disp-server rdpgfx-server\n"
-                    "            \"$<TARGET_OBJECTS:disp-server>\")\n",
+                    "            ainput-server cliprdr-server disp-server rdpgfx-server)\n"
+                    "        target_link_libraries(lfc-ui INTERFACE \"$<TARGET_OBJECTS:disp-server>\")\n",
                 ),
                 "ports/lfc-ui/vcpkg.json": (
                     '  "port-version": 12\n}\n',
-                    '  "port-version": 13\n}\n',
+                    '  "port-version": 14\n}\n',
                 ),
                 "versions/baseline.json": (
                     '    "lfc-ui": {\n'
@@ -360,7 +364,7 @@ class StrictPublicationContractTests(unittest.TestCase):
                     '    },\n',
                     '    "lfc-ui": {\n'
                     '      "baseline": "0.3.0",\n'
-                    '      "port-version": 13\n'
+                    '      "port-version": 14\n'
                     '    },\n',
                 ),
                 "versions/l-/lfc-ui.json": (
@@ -371,6 +375,11 @@ class StrictPublicationContractTests(unittest.TestCase):
                     '      "port-version": 12\n'
                     '    },\n',
                     '  "versions": [\n'
+                    '    {\n'
+                    '      "git-tree": "cb1a947459fe788d6d697e9e62bb87edec24f3e2",\n'
+                    '      "version": "0.3.0",\n'
+                    '      "port-version": 14\n'
+                    '    },\n'
                     '    {\n'
                     '      "git-tree": "456adaca80fe88da3f23fb7c103f20fab2003fd7",\n'
                     '      "version": "0.3.0",\n'

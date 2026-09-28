@@ -252,8 +252,8 @@ def verify_engine_registry_delta(engine: Path, sdk: Path) -> None:
             "        target_link_libraries(lfc-ui ${_lfc_ui_usage_scope} freerdp-shadow freerdp-server freerdp)\n",
             "        target_link_libraries(lfc-ui ${_lfc_ui_usage_scope}\n"
             "            freerdp-shadow freerdp-server freerdp\n"
-            "            ainput-server cliprdr-server disp-server rdpgfx-server\n"
-            "            \"$<TARGET_OBJECTS:disp-server>\")\n",
+            "            ainput-server cliprdr-server disp-server rdpgfx-server)\n"
+            "        target_link_libraries(lfc-ui INTERFACE \"$<TARGET_OBJECTS:disp-server>\")\n",
         ),
         (
             "            freerdp-server-proxy freerdp-client freerdp-server freerdp)\n",
