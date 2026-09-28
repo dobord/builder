@@ -6,7 +6,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: review103-final-${{ github.ref }}
+  group: frdpd-91-final-${{ github.sha }}
   cancel-in-progress: false
 env:
   SOURCE_SHA: 6d4e22fd14e1552f065c77e8d80c595f976d6435
