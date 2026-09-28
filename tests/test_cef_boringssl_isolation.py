@@ -193,7 +193,7 @@ class NativeTests(unittest.TestCase):
         )
         data = owner.read_text()
         owner.write_text(data.replace(T + "/lib/libssl.a\n", ""))
-        with self.assertRaisesRegex(ValueError, "ownership"):
+        with self.assertRaisesRegex(ValueError, "unique vcpkg package owner"):
             isolation.verify(self.installed, self.source, receipt)
 
     def test_status_version_duplicate_owner_and_wrong_package_fail_closed(self):
