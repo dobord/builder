@@ -6,8 +6,8 @@ on:
 permissions:
   contents: read
 env:
-  SOURCE_SHA: f567c77c2d655b266dacf263d3b0016a555f0fb3
-  SOURCE_TREE: c9cc4013a6f800c4d62b1c9ab2eceadb1534f0b7
+  SOURCE_SHA: c81948de0dfff46c76e15b35d07cf00fb01e1c0c
+  SOURCE_TREE: 29a3de393c32e932a50f817662c50f5b3dbaf80b
   BASE_SHA: 3c9171929662704418ed989cb46aa2c021234c76
   KEY_REF: internal/91-patch-export-key-20260928
 jobs:
