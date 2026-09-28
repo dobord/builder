@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from collections import Counter
 import hashlib
+import heapq
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -40,6 +41,7 @@ MAX_NM_OUTPUT_BYTES = 2 * 1024**3
 MAX_NM_ERROR_BYTES = 16 * 1024**2
 MAX_NM_RECORDS = 20_000_000
 MAX_NM_LINE_BYTES = 8192
+PROFILE_CHUNK_RECORDS = 100_000
 ANCHORS = frozenset({"SSL_new", "SSL_use_certificate", "PEM_read_PrivateKey"})
 
 
@@ -178,6 +180,72 @@ def _defined(table: Counter) -> set[str]:
     return {name for name, kind in table if kind not in {"U", "w", "v"}}
 
 
+def _profile_records(
+    records,
+    *,
+    watch: set[str],
+    reverse: dict[str, str] | None = None,
+    forbidden: set[str] | None = None,
+    forbidden_prefix: str | None = None,
+) -> tuple[dict[str, int | str], Counter]:
+    """Canonicalize the complete global-symbol multiset with bounded memory."""
+    reverse = reverse or {}
+    forbidden = forbidden or set()
+    relevant: Counter = Counter()
+    count = 0
+    canonical_bytes = 0
+    with tempfile.TemporaryDirectory(prefix=".cef-bssl-profile-") as folder:
+        root = Path(folder)
+        chunks: list[Path] = []
+        pending: list[bytes] = []
+
+        def flush() -> None:
+            if not pending:
+                return
+            pending.sort()
+            path = root / f"{len(chunks):06d}.symbols"
+            with path.open("wb") as stream:
+                stream.writelines(pending)
+            chunks.append(path)
+            pending.clear()
+
+        for name, kind in records:
+            if name in forbidden or (
+                forbidden_prefix is not None and name.startswith(forbidden_prefix)
+            ):
+                raise ValueError("BoringSSL isolation namespace already exists")
+            if name in watch:
+                relevant[(name, kind)] += 1
+            normalized = reverse.get(name, name)
+            require(SYMBOL.fullmatch(normalized) is not None,
+                    "Invalid normalized BoringSSL symbol")
+            record = (normalized + "\t" + kind + "\n").encode("ascii")
+            canonical_bytes += len(record)
+            require(canonical_bytes <= MAX_NM_OUTPUT_BYTES,
+                    "Canonical BoringSSL symbol inventory exceeds byte budget")
+            pending.append(record)
+            count += 1
+            require(count <= MAX_NM_RECORDS,
+                    "BoringSSL symbol inventory exceeds bounded records")
+            if len(pending) >= PROFILE_CHUNK_RECORDS:
+                flush()
+        flush()
+
+        digestor = hashlib.sha256()
+        streams = [path.open("rb") for path in chunks]
+        try:
+            for record in heapq.merge(*streams):
+                digestor.update(record)
+        finally:
+            for stream in streams:
+                stream.close()
+
+    return {
+        "count": count,
+        "sha256": digestor.hexdigest(),
+    }, relevant
+
+
 def _profile_symbols(
     nm: Path,
     archive: Path,
@@ -188,28 +256,13 @@ def _profile_symbols(
     forbidden_prefix: str | None = None,
     archive_limit: int | None = None,
 ) -> tuple[dict[str, int | str], Counter]:
-    reverse = reverse or {}
-    forbidden = forbidden or set()
-    digestor = hashlib.sha256()
-    relevant: Counter = Counter()
-    count = 0
-    for name, kind in _symbol_records(
-            nm, archive, archive_limit=archive_limit):
-        if name in forbidden or (
-            forbidden_prefix is not None and name.startswith(forbidden_prefix)
-        ):
-            raise ValueError("BoringSSL isolation namespace already exists")
-        if name in watch:
-            relevant[(name, kind)] += 1
-        normalized = reverse.get(name, name).encode("ascii")
-        digestor.update(len(normalized).to_bytes(4, "big"))
-        digestor.update(normalized)
-        digestor.update(kind.encode("ascii"))
-        count += 1
-    return {
-        "count": count,
-        "sha256": digestor.hexdigest(),
-    }, relevant
+    return _profile_records(
+        _symbol_records(nm, archive, archive_limit=archive_limit),
+        watch=watch,
+        reverse=reverse,
+        forbidden=forbidden,
+        forbidden_prefix=forbidden_prefix,
+    )
 
 
 def _cef_archives(prefix: Path) -> list[tuple[str, Path]]:
