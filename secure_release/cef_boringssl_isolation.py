@@ -307,7 +307,7 @@ def _status_records(installed: Path) -> list[dict[str, str]]:
 
 
 def _installed_identity(installed: Path, package: str, version: str,
-                        port_version: int) -> None:
+                        port_version: int) -> dict[str, object]:
     candidates = []
     for fields in _status_records(installed):
         if (fields.get("Package") == package
@@ -330,12 +330,39 @@ def _installed_identity(installed: Path, package: str, version: str,
     )
     require(valid_version and valid_port,
             "Installed package version changed for BoringSSL isolation")
+    return {
+        "package": package,
+        "version": version,
+        "port_version": port_version,
+        "triplet": TRIPLET,
+    }
 
 
-def _owner(installed: Path, package: str, version: str, port_version: int,
-           required: set[str]) -> None:
+def _owner(
+    installed: Path,
+    package: str,
+    version: str,
+    port_version: int,
+    required: set[str],
+    *,
+    expected: dict | None = None,
+    require_status: bool = True,
+) -> dict:
     require(required, "Empty package ownership proof")
-    _installed_identity(installed, package, version, port_version)
+    status = installed / "vcpkg/status"
+    if require_status or status.exists():
+        identity = _installed_identity(
+            installed, package, version, port_version
+        )
+    else:
+        require(expected is not None,
+                "Missing installed package identity receipt")
+        identity = {
+            "package": package,
+            "version": version,
+            "port_version": port_version,
+            "triplet": TRIPLET,
+        }
     info = installed / "vcpkg/info"
     require(info.is_dir() and not info.is_symlink(),
             "Missing vcpkg package ownership inventory")
@@ -363,17 +390,49 @@ def _owner(installed: Path, package: str, version: str, port_version: int,
     require(owner.name.startswith(package + "_")
             and owner.name.endswith("_" + TRIPLET + ".list"),
             "Static archive owner package changed")
+    result = {
+        **identity,
+        "owner": owner.name,
+        "owner_sha256": digest(owner),
+        "required_count": len(required),
+    }
+    if expected is not None:
+        require(result == expected,
+                "Static archive ownership receipt changed in transport")
+    return result
 
 
-def _ownership(installed: Path, cef_names: list[str]) -> None:
-    _owner(
-        installed, "cef-static", CEF_VERSION, CEF_PORT_VERSION,
-        {TRIPLET + "/" + name for name in cef_names},
-    )
-    _owner(
-        installed, "openssl", OPENSSL_VERSION, 0,
-        {TRIPLET + "/" + name for name in OPENSSL_ARCHIVES},
-    )
+def _ownership(
+    installed: Path,
+    cef_names: list[str],
+    *,
+    expected: dict | None = None,
+    require_status: bool = True,
+) -> dict:
+    if expected is not None:
+        require(
+            isinstance(expected, dict)
+            and set(expected) == {"cef-static", "openssl"},
+            "Invalid BoringSSL ownership receipt",
+        )
+    result = {
+        "cef-static": _owner(
+            installed, "cef-static", CEF_VERSION, CEF_PORT_VERSION,
+            {TRIPLET + "/" + name for name in cef_names},
+            expected=None if expected is None else expected["cef-static"],
+            require_status=require_status,
+        ),
+        "openssl": _owner(
+            installed, "openssl", OPENSSL_VERSION, 0,
+            {TRIPLET + "/" + name for name in OPENSSL_ARCHIVES},
+            expected=None if expected is None else expected["openssl"],
+            require_status=require_status,
+        ),
+    }
+    if expected is not None:
+        require(result == expected,
+                "BoringSSL package ownership changed in SDK transport")
+    return result
 
 
 def _mapping_bytes(symbols: list[str]) -> bytes:
@@ -396,7 +455,7 @@ def install(installed: Path, source: Path, diagnostics: Path) -> dict:
     nm, objcopy = _tools(source)
     cef = _cef_archives(prefix)
     cef_names = [name for name, _ in cef]
-    _ownership(installed, cef_names)
+    ownership_receipt = _ownership(installed, cef_names)
 
     providers = [(name, regular(prefix, name)) for name in OPENSSL_ARCHIVES]
     provider_hashes = {name: digest(path) for name, path in providers}
@@ -524,6 +583,7 @@ def install(installed: Path, source: Path, diagnostics: Path) -> dict:
             "archives": provider_hashes,
         },
         "cef_archives": final_hashes,
+        "ownership": ownership_receipt,
         "affected": affected,
         "nm_sha256": digest(nm),
         "objcopy_sha256": digest(objcopy),
@@ -565,7 +625,13 @@ def verify(installed: Path, source: Path, receipt: dict) -> dict:
     names = [name for name, _ in cef]
     require(set(names) == set(receipt.get("cef_archives", {})),
             "CEF archive inventory changed in SDK transport")
-    _ownership(installed, names)
+    ownership = receipt.get("ownership")
+    _ownership(
+        installed,
+        names,
+        expected=ownership,
+        require_status=False,
+    )
     for name, path in cef:
         require(digest(path) == receipt["cef_archives"][name],
                 "CEF BoringSSL-isolated archive changed in transport")
