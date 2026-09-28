@@ -48,7 +48,17 @@ def fixture(root: Path):
     installed = root / "installed"
     prefix = installed / T
     (installed / "vcpkg/info").mkdir(parents=True)
-    (installed / "vcpkg/status").write_text("fixture\n", encoding="utf-8")
+    (installed / "vcpkg/status").write_text(
+        "Package: cef-static\n"
+        "Version: 152.0.6#15\n"
+        "Architecture: " + T + "\n"
+        "Status: install ok installed\n\n"
+        "Package: openssl\n"
+        "Version: 3.6.3\n"
+        "Architecture: " + T + "\n"
+        "Status: install ok installed\n",
+        encoding="utf-8",
+    )
     (prefix / "lib/cef-static").mkdir(parents=True)
     (prefix / "share/cef-static").mkdir(parents=True)
     source = root / "chromium"
@@ -84,8 +94,10 @@ def fixture(root: Path):
     )
     (prefix / isolation.CEF_CONFIG).write_text(config, encoding="utf-8")
 
+    # vcpkg info-list filenames are an ownership transport detail; the
+    # authoritative version/port-version identity comes from vcpkg/status.
     cef_list = installed / "vcpkg/info" / (
-        "cef-static_152.0.6#15_" + T + ".list"
+        "cef-static_152.0.6_" + T + ".list"
     )
     cef_list.write_text(
         "".join(T + "/" + name + "\n" for name in names)
@@ -182,6 +194,31 @@ class NativeTests(unittest.TestCase):
         data = owner.read_text()
         owner.write_text(data.replace(T + "/lib/libssl.a\n", ""))
         with self.assertRaisesRegex(ValueError, "ownership"):
+            isolation.verify(self.installed, self.source, receipt)
+
+    def test_status_version_duplicate_owner_and_wrong_package_fail_closed(self):
+        receipt = isolation.install(
+            self.installed, self.source, self.root / "diagnostics"
+        )
+        status = self.installed / "vcpkg/status"
+        original = status.read_text()
+        status.write_text(original.replace("Version: 152.0.6#15", "Version: 152.0.6#14"))
+        with self.assertRaisesRegex(ValueError, "version changed"):
+            isolation.verify(self.installed, self.source, receipt)
+        status.write_text(original)
+
+        cef_owner = self.installed / "vcpkg/info" / (
+            "cef-static_152.0.6_" + T + ".list"
+        )
+        duplicate = cef_owner.with_name("cef-static_stale_" + T + ".list")
+        duplicate.write_text(cef_owner.read_text())
+        with self.assertRaisesRegex(ValueError, "unique vcpkg package owner"):
+            isolation.verify(self.installed, self.source, receipt)
+        duplicate.unlink()
+
+        renamed = cef_owner.with_name("other_152.0.6_" + T + ".list")
+        cef_owner.rename(renamed)
+        with self.assertRaisesRegex(ValueError, "owner package changed"):
             isolation.verify(self.installed, self.source, receipt)
 
     def test_config_duplicate_archive_reference_is_rejected(self):
