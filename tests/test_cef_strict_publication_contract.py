@@ -109,13 +109,27 @@ def write_registry_fixture(root: Path, lfc_port_version: int, minimal: bool) -> 
         "ports/freerdp/vcpkg.json": json.dumps({
             "name": "freerdp",
             "version": "3.31.1",
-            "port-version": 24 if minimal else 23,
+            "port-version": 25 if minimal else 23,
             "features": {"proxy": {"description": "unchanged"}},
         }, sort_keys=True) + "\n",
         "ports/freerdp/portfile.cmake": (
             "PATCHES\n        static-libusb-client.patch\n"
             + ("        static-shadow-winpr-tools-dependency.patch\n" if minimal else "")
             + "        install-layout.patch\n"
+            + "if (NOT HAS_SHADOW_SUBSYSTEM)\n"
+            + "    list(APPEND FEATURE_OPTIONS -DWITH_SHADOW_SUBSYSTEM=OFF -DWITH_SERVER_SHADOW_CLI=OFF)\n"
+            + "endif()\n\n"
+            + (
+                "# Installed static channel OBJECT libraries are part of the exported SDK link\n"
+                "# interface. GCC LTO objects are discoverable by nm through liblto_plugin but\n"
+                "# cannot be consumed by the qualified LLD linker used by the final CEF SDK.\n"
+                "# Keep Linux static FreeRDP link inputs as native ELF relocatables.\n"
+                "if(VCPKG_TARGET_IS_LINUX AND VCPKG_LIBRARY_LINKAGE STREQUAL \"static\")\n"
+                "    list(APPEND FEATURE_OPTIONS -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=OFF)\n"
+                "endif()\n\n"
+                if minimal else ""
+            )
+            + "vcpkg_find_acquire_program(PKGCONFIG)\n"
         ),
         "ports/freerdp/static-shadow-winpr-tools-dependency.patch": (
             """diff --git a/server/shadow/FreeRDP-ShadowConfig.cmake.in b/server/shadow/FreeRDP-ShadowConfig.cmake.in
@@ -182,13 +196,17 @@ index 3a7f5aa..4bc04cf 100644
         "versions/baseline.json": json.dumps({
             "default": {
                 "lfc-ui": {"baseline": "0.3.0", "port-version": lfc_port_version},
-                "freerdp": {"baseline": "3.31.1", "port-version": 24 if minimal else 23},
+                "freerdp": {"baseline": "3.31.1", "port-version": 25 if minimal else 23},
                 "cef-static": {"baseline": "152.0.6", "port-version": 15},
             }
         }, sort_keys=True) + "\n",
         "versions/f-/freerdp.json": json.dumps({
             "versions": (
                 [{
+                    "git-tree": "2c8bdcad32d778ff2ff280db0efe3e1eefabf162",
+                    "version": "3.31.1",
+                    "port-version": 25,
+                }, {
                     "git-tree": "aceadca1288983390522864e4d6c42b38ae84a6a",
                     "version": "3.31.1",
                     "port-version": 24,
@@ -299,33 +317,35 @@ class StrictPublicationContractTests(unittest.TestCase):
     def test_reviewed_sdk_registry_child_tree_replay_is_exact(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
+            native_anchor = (
+                "if (NOT HAS_SHADOW_SUBSYSTEM)\n"
+                "    list(APPEND FEATURE_OPTIONS -DWITH_SHADOW_SUBSYSTEM=OFF -DWITH_SERVER_SHADOW_CLI=OFF)\n"
+                "endif()\n\n"
+                "vcpkg_find_acquire_program(PKGCONFIG)\n"
+            )
             files = {
-                "ports/lfc-ui/use-installed-freerdp.cmake": (
-                    "prefix\n"
-                    "            ainput-server cliprdr-server disp-server rdpgfx-server)\n"
-                    "suffix\n"
-                ),
-                "ports/lfc-ui/vcpkg.json": (
-                    '{\n  "name": "lfc-ui",\n  "port-version": 12\n}\n'
+                "ports/freerdp/portfile.cmake": native_anchor,
+                "ports/freerdp/vcpkg.json": (
+                    '{\n  "name": "freerdp",\n  "port-version": 24\n}\n'
                 ),
                 "versions/baseline.json": (
                     '{\n  "default": {\n'
-                    '    "lfc-ui": {\n'
-                    '      "baseline": "0.3.0",\n'
-                    '      "port-version": 12\n'
+                    '    "freerdp": {\n'
+                    '      "baseline": "3.31.1",\n'
+                    '      "port-version": 24\n'
                     '    },\n'
                     '    "other": {"baseline": "1"}\n'
                     '  }\n}\n'
                 ),
-                "versions/l-/lfc-ui.json": (
+                "versions/f-/freerdp.json": (
                     '{\n'
                     '  "versions": [\n'
                     '    {\n'
-                    '      "git-tree": "700498a2d6c2a33f652146e804eaeed359247a2d",\n'
-                    '      "version": "0.3.0",\n'
-                    '      "port-version": 12\n'
+                    '      "git-tree": "aceadca1288983390522864e4d6c42b38ae84a6a",\n'
+                    '      "version": "3.31.1",\n'
+                    '      "port-version": 24\n'
                     '    },\n'
-                    '    {"git-tree": "old", "version": "0.3.0", "port-version": 11}\n'
+                    '    {"git-tree": "old", "version": "3.31.1", "port-version": 23}\n'
                     '  ]\n}\n'
                 ),
             }
@@ -347,48 +367,52 @@ class StrictPublicationContractTests(unittest.TestCase):
                 ["git", "rev-parse", "HEAD^{tree}"], cwd=root, text=True
             ).strip()
 
+            native_policy = (
+                "if (NOT HAS_SHADOW_SUBSYSTEM)\n"
+                "    list(APPEND FEATURE_OPTIONS -DWITH_SHADOW_SUBSYSTEM=OFF -DWITH_SERVER_SHADOW_CLI=OFF)\n"
+                "endif()\n\n"
+                "# Installed static channel OBJECT libraries are part of the exported SDK link\n"
+                "# interface. GCC LTO objects are discoverable by nm through liblto_plugin but\n"
+                "# cannot be consumed by the qualified LLD linker used by the final CEF SDK.\n"
+                "# Keep Linux static FreeRDP link inputs as native ELF relocatables.\n"
+                "if(VCPKG_TARGET_IS_LINUX AND VCPKG_LIBRARY_LINKAGE STREQUAL \"static\")\n"
+                "    list(APPEND FEATURE_OPTIONS -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=OFF)\n"
+                "endif()\n\n"
+                "vcpkg_find_acquire_program(PKGCONFIG)\n"
+            )
             replacements = {
-                "ports/lfc-ui/use-installed-freerdp.cmake": (
-                    "            ainput-server cliprdr-server disp-server rdpgfx-server)\n",
-                    "            ainput-server cliprdr-server disp-server rdpgfx-server)\n"
-                    "        target_link_libraries(lfc-ui INTERFACE \"$<TARGET_OBJECTS:disp-server>\")\n",
-                ),
-                "ports/lfc-ui/vcpkg.json": (
-                    '  "port-version": 12\n}\n',
-                    '  "port-version": 14\n}\n',
+                "ports/freerdp/portfile.cmake": (native_anchor, native_policy),
+                "ports/freerdp/vcpkg.json": (
+                    '  "port-version": 24\n}\n',
+                    '  "port-version": 25\n}\n',
                 ),
                 "versions/baseline.json": (
-                    '    "lfc-ui": {\n'
-                    '      "baseline": "0.3.0",\n'
-                    '      "port-version": 12\n'
+                    '    "freerdp": {\n'
+                    '      "baseline": "3.31.1",\n'
+                    '      "port-version": 24\n'
                     '    },\n',
-                    '    "lfc-ui": {\n'
-                    '      "baseline": "0.3.0",\n'
-                    '      "port-version": 14\n'
+                    '    "freerdp": {\n'
+                    '      "baseline": "3.31.1",\n'
+                    '      "port-version": 25\n'
                     '    },\n',
                 ),
-                "versions/l-/lfc-ui.json": (
+                "versions/f-/freerdp.json": (
                     '  "versions": [\n'
                     '    {\n'
-                    '      "git-tree": "700498a2d6c2a33f652146e804eaeed359247a2d",\n'
-                    '      "version": "0.3.0",\n'
-                    '      "port-version": 12\n'
+                    '      "git-tree": "aceadca1288983390522864e4d6c42b38ae84a6a",\n'
+                    '      "version": "3.31.1",\n'
+                    '      "port-version": 24\n'
                     '    },\n',
                     '  "versions": [\n'
                     '    {\n'
-                    '      "git-tree": "cb1a947459fe788d6d697e9e62bb87edec24f3e2",\n'
-                    '      "version": "0.3.0",\n'
-                    '      "port-version": 14\n'
+                    '      "git-tree": "2c8bdcad32d778ff2ff280db0efe3e1eefabf162",\n'
+                    '      "version": "3.31.1",\n'
+                    '      "port-version": 25\n'
                     '    },\n'
                     '    {\n'
-                    '      "git-tree": "456adaca80fe88da3f23fb7c103f20fab2003fd7",\n'
-                    '      "version": "0.3.0",\n'
-                    '      "port-version": 13\n'
-                    '    },\n'
-                    '    {\n'
-                    '      "git-tree": "700498a2d6c2a33f652146e804eaeed359247a2d",\n'
-                    '      "version": "0.3.0",\n'
-                    '      "port-version": 12\n'
+                    '      "git-tree": "aceadca1288983390522864e4d6c42b38ae84a6a",\n'
+                    '      "version": "3.31.1",\n'
+                    '      "port-version": 24\n'
                     '    },\n',
                 ),
             }
@@ -420,8 +444,8 @@ class StrictPublicationContractTests(unittest.TestCase):
                 expected_tree,
             )
             self.assertIn(
-                "$<TARGET_OBJECTS:disp-server>",
-                (root / "ports/lfc-ui/use-installed-freerdp.cmake").read_text(),
+                "-DCMAKE_INTERPROCEDURAL_OPTIMIZATION=OFF",
+                (root / "ports/freerdp/portfile.cmake").read_text(),
             )
 
     def test_strict_linux_capture_requires_complete_signed_preflight(self):
