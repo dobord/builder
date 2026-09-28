@@ -136,7 +136,10 @@ def _cef_archives(prefix: Path) -> list[tuple[str, Path]]:
 
 
 def _owner(installed: Path, pattern: str, required: set[str]) -> None:
-    info = regular(installed, "vcpkg/status").parent
+    regular(installed, "vcpkg/status")
+    info = installed / "vcpkg/info"
+    require(info.is_dir() and not info.is_symlink(),
+            "Missing vcpkg package ownership inventory")
     matches = [
         path for path in info.glob("*_" + TRIPLET + ".list")
         if re.fullmatch(pattern, path.name)
@@ -245,6 +248,12 @@ def install(installed: Path, source: Path, diagnostics: Path) -> dict:
                 )
                 temporary.chmod(old_mode)
                 after = _symbols(nm, temporary)
+                reverse = {new: old for old, new in renamed.items()}
+                normalized = Counter()
+                for (symbol, kind), count in after.items():
+                    normalized[(reverse.get(symbol, symbol), kind)] += count
+                require(normalized == before,
+                        "CEF archive global symbol table changed outside namespace mapping")
                 for (old, kind), count in relevant.items():
                     require(after.get((old, kind), 0) == 0
                             and after.get((renamed[old], kind), 0) == count,
