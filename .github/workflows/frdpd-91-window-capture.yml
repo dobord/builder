@@ -1,0 +1,95 @@
+name: FRDPD #91 window capture validation
+on:
+  push:
+    branches: [test/frdpd-91-window-capture-20260928]
+    paths: ['.github/workflows/frdpd-91-window-capture.yml']
+permissions:
+  contents: read
+concurrency:
+  group: frdpd-91-window-capture-${{ github.ref }}
+  cancel-in-progress: false
+env:
+  SOURCE_SHA: f567c77c2d655b266dacf263d3b0016a555f0fb3
+  SOURCE_TREE: c9cc4013a6f800c4d62b1c9ab2eceadb1534f0b7
+  ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
+jobs:
+  regression:
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [full, asan, noavc]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    env:
+      REVIEW_VARIANT: ${{ matrix.variant }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.13'
+      - name: Install encrypted-evidence tooling
+        run: python -m pip install --require-hashes --only-binary=:all: -r requirements.lock
+      - name: Exact source, strict production variants, focused and end-to-end regression
+        env:
+          SOURCE_READ_TOKEN: ${{ secrets.SOURCE_READ_TOKEN }}
+        run: |
+          python - <<'PY'
+          import os, runpy, sys
+          api = runpy.run_path('investigations/frdpd-103/review-ci.py')
+          original = api['docker']
+
+          def issue91(name, script, timeout=900):
+              # Keep the established PR103 validation harness, but extend its
+              # focused production selection to the source-contract test that
+              # asserts window damage delivery ordering and DIRTY_ONLY behavior.
+              script = script.replace(
+                  'X11WindowTracker|RemoteAppContract',
+                  'X11WindowTracker|NativePath|RemoteAppContract')
+              script = script.replace(
+                  '--output-on-failure --timeout',
+                  '--output-on-failure --verbose --timeout')
+              return original(name, script, timeout)
+
+          api['main'].__globals__['docker'] = issue91
+          sys.exit(api['main']())
+          PY
+      - name: Encrypt complete diagnostics
+        if: always()
+        run: |
+          python - <<'PY'
+          import os, tarfile
+          from pathlib import Path
+          from secure_release.crypto import encrypt_file
+          root = Path(os.environ['RUNNER_TEMP'])
+          private = root / 'review-validation'
+          archive = root / 'frdpd-91-evidence.tar.gz'
+          with tarfile.open(archive, 'w:gz') as out:
+              if private.exists():
+                  for p in private.glob('*'):
+                      if p.name not in ('source', 'askpass'):
+                          out.add(p, arcname=p.name)
+          encrypt_file(
+              archive,
+              root / 'frdpd-91-evidence.enc',
+              os.environ['ARTIFACT_ENCRYPTION_PUBLIC_KEY'],
+              {
+                  'purpose': 'frdpd-91-window-capture-validation',
+                  'source_sha': os.environ['SOURCE_SHA'],
+                  'tree_sha': os.environ['SOURCE_TREE'],
+                  'run_id': os.environ['GITHUB_RUN_ID'],
+                  'variant': os.environ['REVIEW_VARIANT'],
+              })
+          archive.unlink()
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: encrypted-frdpd-91-${{ matrix.variant }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/frdpd-91-evidence.enc
+          retention-days: 3
+          compression-level: 0
+          if-no-files-found: error
+      - if: always()
+        run: sudo rm -rf "$RUNNER_TEMP/review-validation" "$RUNNER_TEMP/frdpd-91-evidence.enc"
