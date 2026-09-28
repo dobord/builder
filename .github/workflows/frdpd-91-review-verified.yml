@@ -74,7 +74,7 @@ jobs:
               base=os.environ['REVIEW_BASE']; head=os.environ['SOURCE_SHA']
               with (root/'patch-export.log').open('w') as log:
                   def git(*args): subprocess.run(['git','-C',str(source),*args],env=env,stdout=log,stderr=log,check=True,timeout=300)
-                  git('fetch','--depth=16','origin',head)
+                  git('fetch','--depth=64','origin',head,base)
                   git('merge-base','--is-ancestor',base,head)
                   output=root/'corrections'; output.mkdir(exist_ok=True)
                   git('format-patch','--full-index','--binary','--no-signature','--output-directory',str(output),base+'..'+head)
