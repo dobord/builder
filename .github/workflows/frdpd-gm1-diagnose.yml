@@ -1,0 +1,52 @@
+name: FRDPD GM1 compile diagnosis
+on:
+  push:
+    branches: [test/frdpd-gm1-scene-v2-20260928]
+    paths: ['.github/workflows/frdpd-gm1-diagnose.yml']
+permissions:
+  contents: read
+env:
+  SOURCE_SHA: 6c0631a5bf74171dbc53dd78fc4b4238616dbd1b
+  SOURCE_TREE: 1dfd315b14e1337a83d5c2efa2857ac4528d8f87
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Build exact source and classify strict compiler failures
+        env:
+          SOURCE_READ_TOKEN: ${{ secrets.SOURCE_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/gm1-diagnose"
+          src="$root/source"
+          mkdir -p "$root"
+          ask="$root/askpass"
+          cat >"$ask" <<'SH'
+          #!/bin/sh
+          case "$1" in *Username*) echo x-access-token ;; *) printf '%s
+' "$SOURCE_READ_TOKEN" ;; esac
+          SH
+          chmod 700 "$ask"
+          export GIT_ASKPASS="$ask" GIT_TERMINAL_PROMPT=0
+          git init "$src" >/dev/null
+          git -C "$src" remote add origin https://github.com/dobord/frdpd.git
+          git -C "$src" fetch --depth=1 origin "$SOURCE_SHA" >"$root/fetch.log" 2>&1
+          git -C "$src" checkout --detach FETCH_HEAD >>"$root/fetch.log" 2>&1
+          test "$(git -C "$src" rev-parse HEAD^{tree})" = "$SOURCE_TREE"
+          git -C "$src" -c url.https://github.com/.insteadOf=git@github.com: submodule update --init --recursive --depth=1 >>"$root/fetch.log" 2>&1
+          set +e
+          docker build --build-arg FRDP_BUILD_COMPONENT_TESTS=ON -f "$src/server/frdp/test/e2e/Dockerfile" -t gm1-diag "$src" >"$root/build.log" 2>&1
+          rc=$?
+          set -e
+          echo "docker-build=$rc"
+          if [ "$rc" -ne 0 ]; then
+            grep -E 'frdp-scene-v2\.(c|h):[0-9]+|TestFreeRDPFrdpSceneV2\.c:[0-9]+|damage-source\.(c|h):[0-9]+|TestFreeRDPFrdpDamageSource\.c:[0-9]+' "$root/build.log" |
+              sed -E 's#^.*(frdp-scene-v2|TestFreeRDPFrdpSceneV2|damage-source|TestFreeRDPFrdpDamageSource)(\.[ch])?:[0-9]+:[0-9]+: #\1: #' |
+              grep -E '(error:|warning:)' | tail -80 || true
+          fi
+          rm -rf "$root"
+          exit "$rc"
