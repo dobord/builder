@@ -1,0 +1,59 @@
+name: FRDPD issue 91 focused test classifier
+on:
+  push:
+    branches: [test/frdpd-91-window-capture-20260928]
+    paths: ['.github/workflows/frdpd-91-diagnose.yml']
+permissions:
+  contents: read
+env:
+  SOURCE_SHA: 04c24ec7aad461e791cbc4ff865d0c2068492580
+  SOURCE_TREE: c3b73c85a940c48537d39f8528a8e6aa9a105cb1
+jobs:
+  classify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Fetch exact source
+        env:
+          SOURCE_READ_TOKEN: ${{ secrets.SOURCE_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/frdpd91diag"
+          mkdir -m 700 "$root"
+          ask="$root/askpass"
+          cat >"$ask" <<'SH'
+          #!/bin/sh
+          case "$1" in *Username*) echo x-access-token ;; *) printf '%s\n' "$SOURCE_READ_TOKEN" ;; esac
+          SH
+          chmod 700 "$ask"
+          export GIT_ASKPASS="$ask" GIT_TERMINAL_PROMPT=0
+          git init "$root/source" >/dev/null
+          git -C "$root/source" remote add origin https://github.com/dobord/frdpd.git
+          git -C "$root/source" fetch --depth=1 origin "$SOURCE_SHA" >/dev/null
+          git -C "$root/source" checkout --detach FETCH_HEAD >/dev/null
+          test "$(git -C "$root/source" rev-parse HEAD^{tree})" = "$SOURCE_TREE"
+          git -C "$root/source" -c url.https://github.com/.insteadOf=git@github.com: submodule update --init --recursive --depth=1 >/dev/null
+          rm -f "$ask"
+      - name: Build exact candidate
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/frdpd91diag"
+          docker build --build-arg FRDP_BUILD_COMPONENT_TESTS=ON             -f "$root/source/server/frdp/test/e2e/Dockerfile"             -t frdpd91diag:exact "$root/source" >"$root/build.log" 2>&1
+      - name: Classify focused tests without publishing diagnostics
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/frdpd91diag"
+          failed=0
+          for test in             TestFreeRDPFrdpNativePath             TestFreeRDPFrdpGfxPolicy             TestFreeRDPFrdpCursorAdapter             TestFreeRDPFrdpZGfxHistory             TestFreeRDPFrdpX11WindowTracker             TestFreeRDPFrdpRemoteAppContract             TestFreeRDPFrdpTransportPolicy             TestFreeRDPFrdpListenerPolicyBoundary             TestFreeRDPFrdpGraphicsAdapter             TestFreeRDPFrdpX11WindowCapture             TestFreeRDPFrdpX11WindowCaptureNoComposite             TestFreeRDPFrdpX11WindowCaptureNoDamage
+          do
+            rc=0
+            docker run --rm --init --network none --entrypoint bash frdpd91diag:exact -lc               "ctest --test-dir /opt/freerdp-build --no-tests=error --timeout 180 -R '^${test}$'"               >"$root/${test}.log" 2>&1 || rc=$?
+            printf '%s=%s\n' "$test" "$rc"
+            if [ "$rc" -ne 0 ]; then failed=1; fi
+          done
+          exit "$failed"
+      - if: always()
+        run: sudo rm -rf "$RUNNER_TEMP/frdpd91diag"
