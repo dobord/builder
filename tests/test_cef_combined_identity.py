@@ -182,6 +182,9 @@ class CombinedOrchestrationTests(unittest.TestCase):
             stack.enter_context(mock.patch.object(combined.cef_sdk_protoc, "validate_sources"))
             stack.enter_context(mock.patch.object(combined.cef_sdk_xz, "validate_sources"))
             stack.enter_context(mock.patch.object(combined.cef_sdk_source_interfaces, "validate_sources"))
+            stack.enter_context(mock.patch.object(
+                combined.cef_boringssl_isolation, "validate_sources"
+            ))
             # This orchestration test runs the Linux-only main path on Windows.
             # The real LLD18 proof has its own Linux-native tests; isolate it
             # here so host/source/checkpoint ordering remains the subject.
