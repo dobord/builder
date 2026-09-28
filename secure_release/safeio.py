@@ -394,6 +394,26 @@ def _object_bytes(path: Path, record: dict | None = None) -> bytes:
     count = int.from_bytes(data[60:62], "little")
     if table < 64 or size != 64 or not count or table + size * count > len(data):
         raise ValueError("invalid installed object section table")
+    shstr_index = int.from_bytes(data[62:64], "little")
+    if not 0 < shstr_index < count:
+        raise ValueError("invalid installed object section-name table")
+    shstr_header = table + size * shstr_index
+    shstr_offset = int.from_bytes(data[shstr_header + 24:shstr_header + 32], "little")
+    shstr_size = int.from_bytes(data[shstr_header + 32:shstr_header + 40], "little")
+    if (not shstr_size or shstr_offset < 64
+            or shstr_offset + shstr_size > len(data)):
+        raise ValueError("invalid installed object section-name table")
+    shstr = data[shstr_offset:shstr_offset + shstr_size]
+    for index in range(count):
+        header = table + size * index
+        name_offset = int.from_bytes(data[header:header + 4], "little")
+        if name_offset >= len(shstr):
+            raise ValueError("invalid installed object section name")
+        end = shstr.find(b"\0", name_offset)
+        if end < 0:
+            raise ValueError("invalid installed object section name")
+        if shstr[name_offset:end].startswith(b".gnu.lto_"):
+            raise ValueError("installed object contains GCC LTO sections")
     if record is not None and (len(data) != record["size"] or
                               hashlib.sha256(data).hexdigest() != record["sha256"]):
         raise ValueError("reviewed installed object bytes changed")
