@@ -1,4 +1,4 @@
-name: FRDPD issue 91 focused test classifier
+name: FRDPD issue 91 focused failure diagnosis
 on:
   push:
     branches: [test/frdpd-91-window-capture-20260928]
@@ -6,10 +6,10 @@ on:
 permissions:
   contents: read
 env:
-  SOURCE_SHA: 04c24ec7aad461e791cbc4ff865d0c2068492580
-  SOURCE_TREE: c3b73c85a940c48537d39f8528a8e6aa9a105cb1
+  SOURCE_SHA: b13b4db731ace4ed154e26c9fe938a19d3027758
+  SOURCE_TREE: c2358de677655a22db083a6c381d66455f271f83
 jobs:
-  classify:
+  diagnose:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
@@ -42,17 +42,20 @@ jobs:
           set -euo pipefail
           root="$RUNNER_TEMP/frdpd91diag"
           docker build --build-arg FRDP_BUILD_COMPONENT_TESTS=ON             -f "$root/source/server/frdp/test/e2e/Dockerfile"             -t frdpd91diag:exact "$root/source" >"$root/build.log" 2>&1
-      - name: Classify focused tests without publishing diagnostics
+      - name: Diagnose focused failures
         run: |
           set -euo pipefail
           root="$RUNNER_TEMP/frdpd91diag"
           failed=0
-          for test in             TestFreeRDPFrdpNativePath             TestFreeRDPFrdpGfxPolicy             TestFreeRDPFrdpCursorAdapter             TestFreeRDPFrdpZGfxHistory             TestFreeRDPFrdpX11WindowTracker             TestFreeRDPFrdpRemoteAppContract             TestFreeRDPFrdpTransportPolicy             TestFreeRDPFrdpListenerPolicyBoundary             TestFreeRDPFrdpGraphicsAdapter             TestFreeRDPFrdpX11WindowCapture             TestFreeRDPFrdpX11WindowCaptureNoComposite             TestFreeRDPFrdpX11WindowCaptureNoDamage
+          for test in TestFreeRDPFrdpNativePath TestFreeRDPFrdpX11WindowCapture
           do
             rc=0
-            docker run --rm --init --network none --entrypoint bash frdpd91diag:exact -lc               "ctest --test-dir /opt/freerdp-build --no-tests=error --timeout 180 -R '^${test}$'"               >"$root/${test}.log" 2>&1 || rc=$?
+            docker run --rm --init --network none --entrypoint bash frdpd91diag:exact -lc               "ctest --test-dir /opt/freerdp-build --no-tests=error --output-on-failure --timeout 180 -R '^${test}$'"               >"$root/${test}.log" 2>&1 || rc=$?
             printf '%s=%s\n' "$test" "$rc"
-            if [ "$rc" -ne 0 ]; then failed=1; fi
+            if [ "$rc" -ne 0 ]; then
+              tail -n 24 "$root/${test}.log" | sed -E 's#(/home/runner|/tmp|/src)[^ ]*#<path>#g'
+              failed=1
+            fi
           done
           exit "$failed"
       - if: always()
