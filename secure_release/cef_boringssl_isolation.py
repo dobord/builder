@@ -277,7 +277,7 @@ def install(installed: Path, source: Path, diagnostics: Path) -> dict:
             path.relative_to(prefix).as_posix()
         ], "OpenSSL provider changed during CEF BoringSSL isolation")
 
-    return {
+    receipt = {
         "schema": 1,
         "kind": "cef-chromium-boringssl-isolation",
         "namespace": NAMESPACE,
@@ -293,6 +293,11 @@ def install(installed: Path, source: Path, diagnostics: Path) -> dict:
         "nm_sha256": digest(nm),
         "objcopy_sha256": digest(objcopy),
     }
+    (diagnostics / "receipt.json").write_text(
+        json.dumps(receipt, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+    return receipt
 
 
 def verify(installed: Path, source: Path, receipt: dict) -> dict:
