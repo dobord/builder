@@ -221,6 +221,25 @@ class NativeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "owner package changed"):
             isolation.verify(self.installed, self.source, receipt)
 
+    def test_cef_objects_uses_existing_sdk_budget_but_source_archives_keep_cap(self):
+        huge = self.root / "cef_objects.a"
+        with huge.open("wb") as stream:
+            stream.write(b"!<arch>\\n")
+            stream.seek(isolation.MAX_SOURCE_ARCHIVE_BYTES + 4096 - 1)
+            stream.write(b"\\0")
+        self.assertEqual(
+            isolation._archive_size(huge),
+            isolation.MAX_SOURCE_ARCHIVE_BYTES + 4096,
+        )
+
+        chunk = self.root / "cef_0000_aaaaaaaaaaaa.a"
+        chunk.write_bytes(huge.read_bytes()[:8])
+        with chunk.open("r+b") as stream:
+            stream.seek(isolation.MAX_SOURCE_ARCHIVE_BYTES + 4096 - 1)
+            stream.write(b"\\0")
+        with self.assertRaisesRegex(ValueError, "Invalid static archive"):
+            isolation._archive_size(chunk)
+
     def test_config_duplicate_archive_reference_is_rejected(self):
         config = self.prefix / isolation.CEF_CONFIG
         config.write_text(
