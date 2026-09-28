@@ -9,8 +9,8 @@ concurrency:
   group: frdpd-91-final-${{ github.sha }}
   cancel-in-progress: false
 env:
-  SOURCE_SHA: 6c0631a5bf74171dbc53dd78fc4b4238616dbd1b
-  SOURCE_TREE: 1dfd315b14e1337a83d5c2efa2857ac4528d8f87
+  SOURCE_SHA: ce3c31cf99cf6238c3d6af8cefbae667a3074d50
+  SOURCE_TREE: 2543943ff6f0545ce190f161bc22500c36e9b8dc
   REVIEW_BASE: 3c9171929662704418ed989cb46aa2c021234c76
   ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
 jobs:
@@ -45,11 +45,12 @@ jobs:
               if name=='docker-build' and rc:
                   import re
                   log=(api['ROOT']/'docker-build.log').read_text(errors='replace')
-                  pat=re.compile(r'(frdp-scene-v2|TestFreeRDPFrdpSceneV2|damage-source|TestFreeRDPFrdpDamageSource)(?:\\.[ch])?:\\d+:\\d+: (?:fatal )?(?:error|warning): [^\\n]+')
-                  for line in pat.findall(log):
-                      pass
-                  for match in pat.finditer(log):
-                      print('compiler-diagnostic: '+match.group(0),flush=True)
+                  for raw in log.splitlines():
+                      if 'error:' not in raw and 'warning:' not in raw and 'CMake Error' not in raw and 'FAILED:' not in raw:
+                          continue
+                      line=re.sub(r'^.*?([^/ ]+\\.(?:c|h|cmake)):(\\d+):(\\d+):', r'\\1:\\2:\\3:', raw)
+                      line=re.sub(r'/[^ ]*/([^/ ]+)', r'\\1', line)
+                      print('build-diagnostic: '+line[-500:],flush=True)
               return rc
           api['main'].__globals__['run']=diagnostic_run
           original=api['docker']
