@@ -176,9 +176,7 @@ def _archive_hashes(archives: list[tuple[str, Path]]) -> dict[str, str]:
 def install(installed: Path, source: Path, diagnostics: Path) -> dict:
     """Rewrite CEF-owned collision symbols after vcpkg install, before export."""
     installed = installed.resolve(strict=True)
-    prefix = regular(installed, TRIPLET + "/vcpkg/status").parents[1]
-    # regular() above proves the installed root path without trusting a supplied
-    # prefix; convert back to the actual triplet root.
+    regular(installed, "vcpkg/status")
     prefix = installed / TRIPLET
     require(prefix.is_dir() and not prefix.is_symlink(),
             "Invalid installed triplet for BoringSSL isolation")
