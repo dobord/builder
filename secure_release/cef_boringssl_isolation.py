@@ -96,15 +96,23 @@ def _tools(source: Path) -> tuple[Path, Path]:
     return nm, objcopy
 
 
-def _archive_size(archive: Path) -> int:
-    require(archive.is_file() and not archive.is_symlink(),
-            "Invalid static archive for BoringSSL isolation")
-    size = archive.stat().st_size
-    limit = (
+def _archive_limit(archive: Path) -> int:
+    return (
         safeio.MAX_BYTES
         if archive.name == "cef_objects.a"
         else MAX_SOURCE_ARCHIVE_BYTES
     )
+
+
+def _archive_size(archive: Path, *, limit: int | None = None) -> int:
+    require(archive.is_file() and not archive.is_symlink(),
+            "Invalid static archive for BoringSSL isolation")
+    if limit is None:
+        limit = _archive_limit(archive)
+    require(type(limit) is int
+            and MAX_SOURCE_ARCHIVE_BYTES <= limit <= safeio.MAX_BYTES,
+            "Invalid static archive byte budget for BoringSSL isolation")
+    size = archive.stat().st_size
     require(8 <= size <= limit,
             "Invalid static archive for BoringSSL isolation")
     with archive.open("rb") as stream:
@@ -113,9 +121,9 @@ def _archive_size(archive: Path) -> int:
     return size
 
 
-def _symbol_records(nm: Path, archive: Path):
+def _symbol_records(nm: Path, archive: Path, *, archive_limit: int | None = None):
     """Stream bounded llvm-nm output through disk, never one giant Python string."""
-    _archive_size(archive)
+    _archive_size(archive, limit=archive_limit)
     with tempfile.TemporaryDirectory(prefix=".cef-bssl-nm-") as folder:
         root = Path(folder)
         stdout = root / "stdout"
@@ -160,8 +168,10 @@ def _symbol_records(nm: Path, archive: Path):
                 yield name, kind
 
 
-def _symbols(nm: Path, archive: Path) -> Counter:
-    return Counter(_symbol_records(nm, archive))
+def _symbols(
+    nm: Path, archive: Path, *, archive_limit: int | None = None
+) -> Counter:
+    return Counter(_symbol_records(nm, archive, archive_limit=archive_limit))
 
 
 def _defined(table: Counter) -> set[str]:
@@ -176,13 +186,15 @@ def _profile_symbols(
     reverse: dict[str, str] | None = None,
     forbidden: set[str] | None = None,
     forbidden_prefix: str | None = None,
+    archive_limit: int | None = None,
 ) -> tuple[dict[str, int | str], Counter]:
     reverse = reverse or {}
     forbidden = forbidden or set()
     digestor = hashlib.sha256()
     relevant: Counter = Counter()
     count = 0
-    for name, kind in _symbol_records(nm, archive):
+    for name, kind in _symbol_records(
+            nm, archive, archive_limit=archive_limit):
         if name in forbidden or (
             forbidden_prefix is not None and name.startswith(forbidden_prefix)
         ):
@@ -408,6 +420,7 @@ def install(installed: Path, source: Path, diagnostics: Path) -> dict:
                     watch=watched,
                     reverse=reverse,
                     forbidden=collisions,
+                    archive_limit=_archive_limit(path),
                 )
                 require(
                     after_profile == profiles[name],
