@@ -36,6 +36,10 @@ SYMBOL = re.compile(r"[A-Za-z_.$][A-Za-z0-9_.$@]*\Z")
 MAX_CEF_ARCHIVES = 4096
 MAX_COLLISIONS = 8192
 MAX_SOURCE_ARCHIVE_BYTES = 1024**3
+MAX_NM_OUTPUT_BYTES = 2 * 1024**3
+MAX_NM_ERROR_BYTES = 16 * 1024**2
+MAX_NM_RECORDS = 20_000_000
+MAX_NM_LINE_BYTES = 8192
 ANCHORS = frozenset({"SSL_new", "SSL_use_certificate", "PEM_read_PrivateKey"})
 
 
@@ -109,28 +113,91 @@ def _archive_size(archive: Path) -> int:
     return size
 
 
-def _symbols(nm: Path, archive: Path) -> Counter:
+def _symbol_records(nm: Path, archive: Path):
+    """Stream bounded llvm-nm output through disk, never one giant Python string."""
     _archive_size(archive)
-    result = subprocess.run(
-        [str(nm), "-P", "-g", "--no-demangle", str(archive)],
-        capture_output=True, text=True, timeout=180,
-    )
-    require(result.returncode == 0 and len(result.stdout) <= 128 * 1024**2,
-            "Cannot inspect static symbols for BoringSSL isolation")
-    found: Counter = Counter()
-    for line in result.stdout.splitlines():
-        if not line.strip() or line.rstrip().endswith(":"):
-            continue
-        fields = line.split()
-        require(len(fields) >= 2 and SYMBOL.fullmatch(fields[0]) is not None
-                and re.fullmatch(r"[A-Za-z?]", fields[1]) is not None,
-                "Unrecognized BoringSSL symbol record")
-        found[(fields[0], fields[1])] += 1
-    return found
+    with tempfile.TemporaryDirectory(prefix=".cef-bssl-nm-") as folder:
+        root = Path(folder)
+        stdout = root / "stdout"
+        stderr = root / "stderr"
+        with stdout.open("wb") as out, stderr.open("wb") as err:
+            result = subprocess.run(
+                [str(nm), "-P", "-g", "--no-demangle", str(archive)],
+                stdout=out, stderr=err, timeout=900,
+            )
+        require(
+            result.returncode == 0
+            and stdout.stat().st_size <= MAX_NM_OUTPUT_BYTES
+            and stderr.stat().st_size <= MAX_NM_ERROR_BYTES,
+            "Cannot inspect static symbols for BoringSSL isolation",
+        )
+        count = 0
+        with stdout.open("rb") as stream:
+            for raw in stream:
+                require(len(raw) <= MAX_NM_LINE_BYTES,
+                        "Oversized BoringSSL symbol record")
+                line = raw.rstrip(b"\r\n")
+                if not line.strip() or line.rstrip().endswith(b":"):
+                    continue
+                fields = line.split()
+                require(len(fields) >= 2,
+                        "Unrecognized BoringSSL symbol record")
+                try:
+                    name = fields[0].decode("ascii")
+                    kind = fields[1].decode("ascii")
+                except UnicodeDecodeError as exc:
+                    raise ValueError(
+                        "Unrecognized BoringSSL symbol record"
+                    ) from exc
+                require(
+                    SYMBOL.fullmatch(name) is not None
+                    and re.fullmatch(r"[A-Za-z?]", kind) is not None,
+                    "Unrecognized BoringSSL symbol record",
+                )
+                count += 1
+                require(count <= MAX_NM_RECORDS,
+                        "BoringSSL symbol inventory exceeds bounded records")
+                yield name, kind
+
+
+def _symbols(nm: Path, archive: Path) -> Counter:
+    return Counter(_symbol_records(nm, archive))
 
 
 def _defined(table: Counter) -> set[str]:
     return {name for name, kind in table if kind not in {"U", "w", "v"}}
+
+
+def _profile_symbols(
+    nm: Path,
+    archive: Path,
+    *,
+    watch: set[str],
+    reverse: dict[str, str] | None = None,
+    forbidden: set[str] | None = None,
+    forbidden_prefix: str | None = None,
+) -> tuple[dict[str, int | str], Counter]:
+    reverse = reverse or {}
+    forbidden = forbidden or set()
+    digestor = hashlib.sha256()
+    relevant: Counter = Counter()
+    count = 0
+    for name, kind in _symbol_records(nm, archive):
+        if name in forbidden or (
+            forbidden_prefix is not None and name.startswith(forbidden_prefix)
+        ):
+            raise ValueError("BoringSSL isolation namespace already exists")
+        if name in watch:
+            relevant[(name, kind)] += 1
+        normalized = reverse.get(name, name).encode("ascii")
+        digestor.update(len(normalized).to_bytes(4, "big"))
+        digestor.update(normalized)
+        digestor.update(kind.encode("ascii"))
+        count += 1
+    return {
+        "count": count,
+        "sha256": digestor.hexdigest(),
+    }, relevant
 
 
 def _cef_archives(prefix: Path) -> list[tuple[str, Path]]:
@@ -276,13 +343,19 @@ def install(installed: Path, source: Path, diagnostics: Path) -> dict:
         openssl_names.update(name for name, _ in table)
 
     collisions: set[str] = set()
-    cef_names_seen: set[str] = set()
     source_hashes = _archive_hashes(cef)
-    for _, path in cef:
-        table = _symbols(nm, path)
-        names = {name for name, _ in table}
-        cef_names_seen.update(names)
-        collisions.update(_defined(table).intersection(openssl_defined))
+    profiles: dict[str, dict[str, int | str]] = {}
+    candidates: dict[str, Counter] = {}
+    for name, path in cef:
+        profile, relevant = _profile_symbols(
+            nm, path, watch=openssl_defined, forbidden_prefix=NAMESPACE
+        )
+        profiles[name] = profile
+        candidates[name] = relevant
+        collisions.update(
+            symbol for (symbol, kind), count in relevant.items()
+            if count and kind not in {"U", "w", "v"}
+        )
 
     ordered = sorted(collisions)
     require(ANCHORS <= collisions
@@ -292,7 +365,7 @@ def install(installed: Path, source: Path, diagnostics: Path) -> dict:
                 for name in ordered),
             "Invalid Chromium/OpenSSL collision symbol")
     renamed = {name: NAMESPACE + name for name in ordered}
-    require(not set(renamed.values()).intersection(openssl_names | cef_names_seen),
+    require(not set(renamed.values()).intersection(openssl_names),
             "BoringSSL isolation namespace already exists")
 
     diagnostics.mkdir(parents=True, exist_ok=False)
@@ -303,11 +376,15 @@ def install(installed: Path, source: Path, diagnostics: Path) -> dict:
 
     affected: dict[str, dict] = {}
     try:
+        reverse = {new: old for old, new in renamed.items()}
+        watched = collisions | set(renamed.values())
         for name, path in cef:
-            before = _symbols(nm, path)
             relevant = Counter(
-                {(symbol, kind): count for (symbol, kind), count in before.items()
-                 if symbol in collisions}
+                {
+                    (symbol, kind): count
+                    for (symbol, kind), count in candidates[name].items()
+                    if symbol in collisions
+                }
             )
             if not relevant:
                 continue
@@ -325,19 +402,30 @@ def install(installed: Path, source: Path, diagnostics: Path) -> dict:
                     check=True, timeout=600,
                 )
                 temporary.chmod(old_mode)
-                after = _symbols(nm, temporary)
-                reverse = {new: old for old, new in renamed.items()}
-                normalized = Counter()
-                for (symbol, kind), count in after.items():
-                    normalized[(reverse.get(symbol, symbol), kind)] += count
-                require(normalized == before,
-                        "CEF archive global symbol table changed outside namespace mapping")
+                after_profile, after = _profile_symbols(
+                    nm,
+                    temporary,
+                    watch=watched,
+                    reverse=reverse,
+                    forbidden=collisions,
+                )
+                require(
+                    after_profile == profiles[name],
+                    "CEF archive global symbol table changed outside namespace mapping",
+                )
                 for (old, kind), count in relevant.items():
-                    require(after.get((old, kind), 0) == 0
-                            and after.get((renamed[old], kind), 0) == count,
-                            "CEF BoringSSL symbol isolation is incomplete")
-                require(not {sym for sym, _ in after}.intersection(collisions),
-                        "CEF archive retained an unisolated BoringSSL symbol")
+                    require(
+                        after.get((renamed[old], kind), 0) == count,
+                        "CEF BoringSSL symbol isolation is incomplete",
+                    )
+                require(
+                    all(
+                        after.get((old, kind), 0) == 0
+                        for old in collisions
+                        for kind in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz?"
+                    ),
+                    "CEF archive retained an unisolated BoringSSL symbol",
+                )
                 source_sha = source_hashes[name]
                 derived_sha = digest(temporary)
                 os.replace(temporary, path)
@@ -345,6 +433,8 @@ def install(installed: Path, source: Path, diagnostics: Path) -> dict:
                     "source_sha256": source_sha,
                     "sha256": derived_sha,
                     "renamed_occurrences": sum(relevant.values()),
+                    "global_symbol_count": profiles[name]["count"],
+                    "global_symbol_sha256": profiles[name]["sha256"],
                 }
             finally:
                 temporary.unlink(missing_ok=True)
