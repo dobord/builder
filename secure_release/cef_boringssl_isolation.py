@@ -21,7 +21,7 @@ import stat
 import subprocess
 import tempfile
 
-from . import cef_gtk_codecs as codecs
+from . import safeio
 
 TRIPLET = "x64-linux-static-release"
 OPENSSL_VERSION = "3.6.3"
@@ -35,7 +35,7 @@ CEF_ARCHIVE = re.compile(r"lib/cef-static/(?:cef_objects|cef_[0-9]{4}_[0-9a-f]{1
 SYMBOL = re.compile(r"[A-Za-z_.$][A-Za-z0-9_.$@]*\Z")
 MAX_CEF_ARCHIVES = 4096
 MAX_COLLISIONS = 8192
-MAX_ARCHIVE_BYTES = 1024**3
+MAX_SOURCE_ARCHIVE_BYTES = 1024**3
 ANCHORS = frozenset({"SSL_new", "SSL_use_certificate", "PEM_read_PrivateKey"})
 
 
@@ -92,13 +92,25 @@ def _tools(source: Path) -> tuple[Path, Path]:
     return nm, objcopy
 
 
-def _symbols(nm: Path, archive: Path) -> Counter:
-    require(archive.is_file() and not archive.is_symlink()
-            and 8 <= archive.stat().st_size <= MAX_ARCHIVE_BYTES,
+def _archive_size(archive: Path) -> int:
+    require(archive.is_file() and not archive.is_symlink(),
+            "Invalid static archive for BoringSSL isolation")
+    size = archive.stat().st_size
+    limit = (
+        safeio.MAX_BYTES
+        if archive.name == "cef_objects.a"
+        else MAX_SOURCE_ARCHIVE_BYTES
+    )
+    require(8 <= size <= limit,
             "Invalid static archive for BoringSSL isolation")
     with archive.open("rb") as stream:
         require(stream.read(8) == b"!<arch>\n",
                 "BoringSSL isolation input is not a regular archive")
+    return size
+
+
+def _symbols(nm: Path, archive: Path) -> Counter:
+    _archive_size(archive)
     result = subprocess.run(
         [str(nm), "-P", "-g", "--no-demangle", str(archive)],
         capture_output=True, text=True, timeout=180,
@@ -132,7 +144,11 @@ def _cef_archives(prefix: Path) -> list[tuple[str, Path]]:
     require(names and len(unique) == len(names)
             and 1 < len(unique) <= MAX_CEF_ARCHIVES,
             "CEF static target archive inventory is ambiguous")
-    return [(name, regular(prefix, name)) for name in unique]
+    archives = [(name, regular(prefix, name)) for name in unique]
+    sizes = [_archive_size(path) for _, path in archives]
+    require(sum(sizes) <= safeio.MAX_BYTES,
+            "CEF static archive closure exceeds SDK byte budget")
+    return archives
 
 
 def _status_records(installed: Path) -> list[dict[str, str]]:
