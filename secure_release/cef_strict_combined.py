@@ -25,6 +25,7 @@ from . import (
 from . import (
     cef_combined_identity, cef_combined_port, cef_combined_smoke, cef_consumer_linker, cef_dependency_source,
     cef_freerdp_profile, cef_frozen_dependencies, cef_sdk_example, cef_sdk_headers, cef_sdk_aliases, cef_sdk_protoc, cef_sdk_xz, cef_sdk_objects, cef_sdk_source_interfaces, cef_strict_iteration,
+    cef_boringssl_isolation,
 )
 
 ENGINE_VCPKG = "b4bb281192ea8bb004542012ac804b988a4ff403"
@@ -655,6 +656,7 @@ def main() -> None:
     cef_sdk_protoc.validate_sources(upstream)
     cef_sdk_xz.validate_sources(upstream)
     cef_sdk_source_interfaces.validate_sources(upstream)
+    cef_boringssl_isolation.validate_sources(upstream)
 
     plan = json.loads((registry / "ci/release-plan.json").read_text(encoding="utf-8"))
     cfg = plan["cef"]
@@ -968,6 +970,25 @@ def main() -> None:
         )
         summary["installed_isolation_bytes_verified"] = True
 
+        stage = "installed-cef-boringssl-isolation"
+        boringssl_receipt = cef_boringssl_isolation.install(
+            installed, source, root / "cef-boringssl-isolation"
+        )
+        boringssl_proof = cef_boringssl_isolation.verify(
+            installed, source, boringssl_receipt
+        )
+        if boringssl_proof.get("cef_boringssl_isolation_verified") is not True:
+            raise RuntimeError("Installed CEF BoringSSL isolation proof is incomplete")
+        summary.update({
+            "installed_cef_boringssl_isolation_verified": True,
+            "cef_boringssl_collision_count":
+                boringssl_proof["cef_boringssl_collision_count"],
+            "cef_boringssl_affected_archive_count":
+                boringssl_proof["cef_boringssl_affected_archive_count"],
+            "cef_boringssl_mapping_sha256":
+                boringssl_proof["cef_boringssl_mapping_sha256"],
+        })
+
         stage = "installed-object-review"
         object_review = cef_sdk_objects.capture(installed)
         summary["installed_object_count"] = len(object_review["objects"])
@@ -992,6 +1013,11 @@ def main() -> None:
         build_support.copy_export_triplet(
             sdk, workspace / "triplets", TRIPLET
         )
+        stage = "sdk-cef-boringssl-isolation"
+        if cef_boringssl_isolation.verify(
+                sdk / "installed", source, boringssl_receipt) != boringssl_proof:
+            raise RuntimeError("CEF BoringSSL isolation changed during raw export")
+        summary["sdk_cef_boringssl_isolation_verified"] = True
         sdk_zip = root / "sdk.zip"
         stage = "sdk-example-review"
         reviewed_sources = cef_sdk_example.verify(sdk, example_review)
@@ -1037,6 +1063,11 @@ def main() -> None:
         safeio.extract_zip(sdk_zip, consumer_sdk)
         cef_sdk_objects.verify(consumer_sdk / "installed", object_review)
         summary["relocated_sdk_objects_verified"] = True
+        stage = "relocated-cef-boringssl-isolation"
+        if cef_boringssl_isolation.verify(
+                consumer_sdk / "installed", source, boringssl_receipt) != boringssl_proof:
+            raise RuntimeError("CEF BoringSSL isolation changed during relocation")
+        summary["relocated_cef_boringssl_isolation_verified"] = True
         cef_sdk_example.verify(consumer_sdk, example_review)
         summary["relocated_sdk_example_source_verified"] = True
         cef_sdk_headers.verify(consumer_sdk, engine_work / "platform-inputs.json", platform_sha)
