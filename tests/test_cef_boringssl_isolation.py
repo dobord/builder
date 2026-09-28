@@ -243,6 +243,22 @@ class NativeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid static archive"):
             isolation._archive_size(chunk)
 
+        derived = self.root / ".cef-bssl-derived.a"
+        derived.write_bytes(b"!<arch>\n")
+        with derived.open("r+b") as stream:
+            stream.seek(isolation.MAX_SOURCE_ARCHIVE_BYTES + 4096 - 1)
+            stream.write(b"\0")
+        with self.assertRaisesRegex(ValueError, "Invalid static archive"):
+            isolation._archive_size(derived)
+        self.assertEqual(
+            isolation._archive_size(
+                derived, limit=isolation._archive_limit(huge)
+            ),
+            isolation.MAX_SOURCE_ARCHIVE_BYTES + 4096,
+        )
+        with self.assertRaisesRegex(ValueError, "byte budget"):
+            isolation._archive_size(derived, limit=isolation.safeio.MAX_BYTES + 1)
+
     def test_config_duplicate_archive_reference_is_rejected(self):
         config = self.prefix / isolation.CEF_CONFIG
         config.write_text(
