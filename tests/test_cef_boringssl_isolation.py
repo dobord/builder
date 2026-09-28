@@ -224,19 +224,19 @@ class NativeTests(unittest.TestCase):
     def test_cef_objects_uses_existing_sdk_budget_but_source_archives_keep_cap(self):
         huge = self.root / "cef_objects.a"
         with huge.open("wb") as stream:
-            stream.write(b"!<arch>\\n")
+            stream.write(b"!<arch>\n")
             stream.seek(isolation.MAX_SOURCE_ARCHIVE_BYTES + 4096 - 1)
-            stream.write(b"\\0")
+            stream.write(b"\0")
         self.assertEqual(
             isolation._archive_size(huge),
             isolation.MAX_SOURCE_ARCHIVE_BYTES + 4096,
         )
 
         chunk = self.root / "cef_0000_aaaaaaaaaaaa.a"
-        chunk.write_bytes(b"!<arch>\\n")
+        chunk.write_bytes(b"!<arch>\n")
         with chunk.open("r+b") as stream:
             stream.seek(isolation.MAX_SOURCE_ARCHIVE_BYTES + 4096 - 1)
-            stream.write(b"\\0")
+            stream.write(b"\0")
         with self.assertRaisesRegex(ValueError, "Invalid static archive"):
             isolation._archive_size(chunk)
 
