@@ -1,18 +1,28 @@
-name: FRDPD GM1 scene-v2 focused
+name: FRDPD GM1 scene-v2 verification
 on:
   push:
     branches: [test/frdpd-gm1-scene-v2-20260928]
     paths: ['.github/workflows/frdpd-gm1-scene-v2.yml']
 permissions:
   contents: read
+concurrency:
+  group: frdpd-91-final-${{ github.sha }}
+  cancel-in-progress: false
 env:
   SOURCE_SHA: 513c2c3fdf467eabda7c842fb8ee652c03adf596
   SOURCE_TREE: 9081c2bef127905999a62c5f32e4ef316c9874b9
+  REVIEW_BASE: 3c9171929662704418ed989cb46aa2c021234c76
   ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
 jobs:
-  focused:
+  regression:
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [full, asan, noavc]
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 55
+    env:
+      REVIEW_VARIANT: ${{ matrix.variant }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -20,64 +30,85 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
         with:
           python-version: '3.13'
-      - run: python -m pip install --require-hashes --only-binary=:all: -r requirements.lock
-      - name: Build and run scene-v2 focused tests
+      - run: |
+          python -m pip install --require-hashes --only-binary=:all: -r requirements.lock
+      - name: Exact source, strict production mode and isolated regression
         env:
           SOURCE_READ_TOKEN: ${{ secrets.SOURCE_READ_TOKEN }}
         run: |
           python - <<'PY'
-          import os, pathlib, subprocess, json, sys
-          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'gm1-scene-v2'
-          src=root/'source'; root.mkdir(mode=0o700,exist_ok=True)
-          ask=root/'askpass'
-          ask.write_text('#!/bin/sh\ncase "$1" in *Username*) echo x-access-token ;; *) printf "%s\\n" "$SOURCE_READ_TOKEN" ;; esac\n')
-          ask.chmod(0o700)
-          env=dict(os.environ,GIT_ASKPASS=str(ask),GIT_TERMINAL_PROMPT='0')
-          status={}
-          def run(name,args,timeout):
-              with (root/(name+'.log')).open('w') as log:
-                  try: rc=subprocess.run(args,env=env,stdout=log,stderr=subprocess.STDOUT,timeout=timeout).returncode
-                  except subprocess.TimeoutExpired: rc=124
-              status[name]=rc; print(f'{name}: {rc}',flush=True); return rc
-          with (root/'fetch.log').open('w') as log:
-              subprocess.run(['git','init',str(src)],stdout=log,stderr=log,check=True)
-              subprocess.run(['git','-C',str(src),'remote','add','origin','https://github.com/dobord/frdpd.git'],stdout=log,stderr=log,check=True)
-              subprocess.run(['git','-C',str(src),'fetch','--depth=1','origin',os.environ['SOURCE_SHA']],env=env,stdout=log,stderr=log,check=True,timeout=300)
-              subprocess.run(['git','-C',str(src),'checkout','--detach','FETCH_HEAD'],stdout=log,stderr=log,check=True)
-              tree=subprocess.check_output(['git','-C',str(src),'rev-parse','HEAD^{tree}'],text=True).strip()
-              if tree != os.environ['SOURCE_TREE']: raise SystemExit('tree mismatch')
-              subprocess.run(['git','-C',str(src),'-c','url.https://github.com/.insteadOf=git@github.com:','submodule','update','--init','--recursive','--depth=1'],env=env,stdout=log,stderr=log,check=True,timeout=300)
-          ask.unlink(missing_ok=True)
-          image='frdpd-gm1-scene-v2:'+os.environ['GITHUB_RUN_ID']
-          if run('docker-build',['docker','build','--build-arg','FRDP_BUILD_COMPONENT_TESTS=ON','-f',str(src/'server/frdp/test/e2e/Dockerfile'),'-t',image,str(src)],1500)==0:
-              run('scene-v2',['docker','run','--rm','--init','--network','none','--entrypoint','bash',image,'-lc',
-                  'ctest --test-dir /opt/freerdp-build --no-tests=error --output-on-failure --timeout 120 -R "^TestFreeRDPFrdp(SceneV2|GraphicsControl|SharedBuffer)$"'],600)
-          (root/'status.json').write_text(json.dumps(status,indent=2))
-          sys.exit(1 if any(status.values()) else 0)
+          import runpy,sys,os
+          api=runpy.run_path('investigations/frdpd-103/review-ci.py')
+          original=api['docker']
+          def verified(name,script,timeout=900):
+              script=script.replace('-DWITH_FRDPD_STRICT_WARNINGS=ON','-DWITH_FRDPD_STRICT_WARNINGS=ON -DWITH_VERBOSE_WINPR_ASSERT=OFF')
+              script=script.replace('GfxPolicy|ZGfxHistory','GfxPolicy|CursorAdapter|ZGfxHistory')
+              script=script.replace('X11WindowTracker|RemoteAppContract','X11WindowTracker|SceneV2|GraphicsControl|SharedBuffer|NativePath|RemoteAppContract')
+              if name=='focused':
+                  script="grep -q '^#define WITH_GFX_H264' /opt/freerdp-build/include/freerdp/config.h && "+script
+              if name.startswith('production-'):
+                  positive="grep -q '^#define WITH_GFX_H264' /tmp/review-prod/include/freerdp/config.h"
+                  gate=('! '+positive) if os.environ['REVIEW_VARIANT']=='noavc' else positive
+                  script=script.replace('ctest --test-dir /tmp/review-prod',gate+'\nctest --test-dir /tmp/review-prod')
+                  script=script.replace('--target frdpd frdp-session-agent TestFreeRDPFrdp','--target frdpd frdp-session-agent TestFreeRDPFrdp -- -k 0')
+              script=script.replace('--output-on-failure --timeout','--output-on-failure --verbose --timeout')
+              return original(name,script,timeout)
+          api['main'].__globals__['docker']=verified
+          sys.exit(api['main']())
           PY
-      - name: Encrypt diagnostics
+      - name: Export exact committed corrections without publishing private source
+        if: always() && matrix.variant == 'full'
+        env:
+          SOURCE_READ_TOKEN: ${{ secrets.SOURCE_READ_TOKEN }}
+        run: |
+          python - <<'PY'
+          import os,subprocess,json,hashlib
+          from pathlib import Path
+          os.umask(0o077)
+          root=Path(os.environ['RUNNER_TEMP'])/'review-validation'; source=root/'source'
+          if not (source/'.git').exists(): raise SystemExit('Source checkout unavailable')
+          ask=root/'askpass-export'
+          ask.write_text('#!/bin/sh\ncase "$1" in *Username*) echo x-access-token ;; *) printf "%s\\n" "$SOURCE_READ_TOKEN" ;; esac\n'); ask.chmod(0o700)
+          try:
+              env=dict(os.environ,GIT_ASKPASS=str(ask),GIT_TERMINAL_PROMPT='0')
+              base=os.environ['REVIEW_BASE']; head=os.environ['SOURCE_SHA']
+              with (root/'patch-export.log').open('w') as log:
+                  def git(*args): subprocess.run(['git','-C',str(source),*args],env=env,stdout=log,stderr=log,check=True,timeout=300)
+                  git('fetch','--depth=64','origin',head,base)
+                  git('merge-base','--is-ancestor',base,head)
+                  output=root/'corrections'; output.mkdir(exist_ok=True)
+                  git('format-patch','--full-index','--binary','--no-signature','--output-directory',str(output),base+'..'+head)
+                  with (output/'combined.patch').open('wb') as patch:
+                      subprocess.run(['git','-C',str(source),'diff','--full-index','--binary',base,head],env=env,stdout=patch,stderr=log,check=True,timeout=60)
+                  files=subprocess.check_output(['git','-C',str(source),'diff','--name-only',base,head],text=True).splitlines()
+                  metadata={'base':base,'head':head,'tree':os.environ['SOURCE_TREE'],'files':files}
+                  (output/'provenance.json').write_text(json.dumps(metadata,indent=2))
+                  manifest={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in output.iterdir() if p.is_file()}
+                  (output/'sha256.json').write_text(json.dumps(manifest,sort_keys=True,indent=2))
+          finally:
+              ask.unlink(missing_ok=True)
+          PY
+      - name: Encrypt complete diagnostics
         if: always()
         run: |
           python - <<'PY'
           import os,tarfile
           from pathlib import Path
           from secure_release.crypto import encrypt_file
-          root=Path(os.environ['RUNNER_TEMP']); src=root/'gm1-scene-v2'; archive=root/'gm1-scene-v2.tar.gz'
+          root=Path(os.environ['RUNNER_TEMP']);archive=root/'review-evidence.tar.gz'
           with tarfile.open(archive,'w:gz') as out:
-              if src.exists():
-                  for p in src.glob('*'):
-                      if p.name not in ('source','askpass'): out.add(p,arcname=p.name)
-          encrypt_file(archive,root/'gm1-scene-v2.enc',os.environ['ARTIFACT_ENCRYPTION_PUBLIC_KEY'],
-              {'purpose':'frdpd-gm1-scene-v2','source_sha':os.environ['SOURCE_SHA'],'tree_sha':os.environ['SOURCE_TREE'],'run_id':os.environ['GITHUB_RUN_ID']})
+              for p in (root/'review-validation').glob('*'):
+                  if p.name not in ('source','askpass','askpass-export'):out.add(p,arcname=p.name)
+          encrypt_file(archive,root/'review.enc',os.environ['ARTIFACT_ENCRYPTION_PUBLIC_KEY'],{'purpose':'frdpd-gm1-scene-v2-validation','source_sha':os.environ['SOURCE_SHA'],'tree_sha':os.environ['SOURCE_TREE'],'run_id':os.environ['GITHUB_RUN_ID'],'variant':os.environ['REVIEW_VARIANT']})
           archive.unlink()
           PY
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
-          name: encrypted-gm1-scene-v2-${{ github.run_id }}
-          path: ${{ runner.temp }}/gm1-scene-v2.enc
+          name: encrypted-frdpd-gm1-scene-v2-${{ matrix.variant }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/review.enc
           retention-days: 3
           compression-level: 0
           if-no-files-found: error
       - if: always()
-        run: sudo rm -rf "$RUNNER_TEMP/gm1-scene-v2" "$RUNNER_TEMP/gm1-scene-v2.enc"
+        run: sudo rm -rf "$RUNNER_TEMP/review-validation" "$RUNNER_TEMP/review.enc"
