@@ -162,6 +162,10 @@ class NativeTests(unittest.TestCase):
         self.assertTrue(proof["cef_boringssl_isolation_verified"])
         self.assertEqual(proof["cef_boringssl_collision_count"], 3)
         self.assertEqual(set(receipt["symbols"]), isolation.ANCHORS)
+        self.assertEqual(set(receipt["ownership"]), {"cef-static", "openssl"})
+        for owner in receipt["ownership"].values():
+            self.assertRegex(owner["owner_sha256"], r"^[0-9a-f]{64}$")
+            self.assertGreater(owner["required_count"], 0)
         self.assertGreaterEqual(proof["cef_boringssl_affected_archive_count"], 2)
         for record in receipt["affected"].values():
             self.assertGreater(record["global_symbol_count"], 0)
@@ -175,6 +179,10 @@ class NativeTests(unittest.TestCase):
 
         moved = self.root / "relocated"
         shutil.copytree(self.installed, moved)
+        # vcpkg --raw export preserves package owner lists but does not promise
+        # the mutable install status database. Transport proof must therefore
+        # use the immutable owner receipt captured before export.
+        (moved / "vcpkg/status").unlink()
         self.assertEqual(
             isolation.verify(moved, self.source, receipt), proof
         )
@@ -197,6 +205,21 @@ class NativeTests(unittest.TestCase):
         data = owner.read_text()
         owner.write_text(data.replace(T + "/lib/libssl.a\n", ""))
         with self.assertRaisesRegex(ValueError, "unique vcpkg package owner"):
+            isolation.verify(self.installed, self.source, receipt)
+
+    def test_transport_without_status_still_requires_exact_owner_receipt(self):
+        receipt = isolation.install(
+            self.installed, self.source, self.root / "diagnostics"
+        )
+        (self.installed / "vcpkg/status").unlink()
+        proof = isolation.verify(self.installed, self.source, receipt)
+        self.assertTrue(proof["cef_boringssl_isolation_verified"])
+
+        owner = self.installed / "vcpkg/info" / (
+            "cef-static_152.0.6_" + T + ".list"
+        )
+        owner.write_text(owner.read_text() + T + "/unexpected\n")
+        with self.assertRaisesRegex(ValueError, "ownership receipt changed"):
             isolation.verify(self.installed, self.source, receipt)
 
     def test_status_version_duplicate_owner_and_wrong_package_fail_closed(self):
