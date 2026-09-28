@@ -281,6 +281,47 @@ class PolicyTests(unittest.TestCase):
             self.skipTest("Pinned upstream checkout supplied in CI")
         isolation.validate_sources(Path(raw))
 
+    def test_canonical_profile_is_order_independent_but_type_and_count_exact(self):
+        original = [
+            ("AAA", "T"),
+            ("SSL_new", "T"),
+            ("SSL_new", "U"),
+            ("ZZZ", "W"),
+        ]
+        rewritten = [
+            ("CEF_CHROMIUM_BSSL_SSL_new", "U"),
+            ("ZZZ", "W"),
+            ("AAA", "T"),
+            ("CEF_CHROMIUM_BSSL_SSL_new", "T"),
+        ]
+        before, before_hits = isolation._profile_records(
+            iter(original), watch={"SSL_new"}
+        )
+        after, after_hits = isolation._profile_records(
+            iter(rewritten),
+            watch={"CEF_CHROMIUM_BSSL_SSL_new"},
+            reverse={"CEF_CHROMIUM_BSSL_SSL_new": "SSL_new"},
+        )
+        self.assertEqual(before, after)
+        self.assertEqual(before_hits[("SSL_new", "T")], 1)
+        self.assertEqual(after_hits[("CEF_CHROMIUM_BSSL_SSL_new", "T")], 1)
+
+        changed_type, _ = isolation._profile_records(
+            iter([
+                ("AAA", "T"),
+                ("SSL_new", "W"),
+                ("SSL_new", "U"),
+                ("ZZZ", "W"),
+            ]),
+            watch=set(),
+        )
+        self.assertNotEqual(before, changed_type)
+
+        changed_count, _ = isolation._profile_records(
+            iter(original + [("AAA", "T")]), watch=set()
+        )
+        self.assertNotEqual(before, changed_count)
+
     def test_nm_inventory_is_streamed_and_bounded(self):
         import inspect
         text = inspect.getsource(isolation._symbol_records)
@@ -290,6 +331,10 @@ class PolicyTests(unittest.TestCase):
         self.assertGreater(isolation.MAX_NM_OUTPUT_BYTES, 128 * 1024**2)
         self.assertLessEqual(isolation.MAX_NM_OUTPUT_BYTES, isolation.safeio.MAX_BYTES)
         self.assertGreater(isolation.MAX_NM_RECORDS, 1_000_000)
+        profile_text = inspect.getsource(isolation._profile_records)
+        self.assertIn("heapq.merge", profile_text)
+        self.assertIn("pending.sort()", profile_text)
+        self.assertLess(isolation.PROFILE_CHUNK_RECORDS, isolation.MAX_NM_RECORDS)
 
     def test_policy_is_collision_derived_and_never_suppresses_linker_errors(self):
         import inspect
