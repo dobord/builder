@@ -184,6 +184,17 @@ class NativeTests(unittest.TestCase):
         with self.assertRaises(ValueError):objects.verify(self.installed,self.receipt)
         with self.assertRaises(ValueError):safeio.sdk_zip(self.sdk,self.root/'bad.zip',reviewed_objects=self.review)
 
+    def test_gcc_lto_object_is_rejected_as_non_native_sdk_input(self):
+        compiler=shutil.which('gcc-14') or shutil.which('gcc')
+        if not compiler:self.skipTest('GCC required for LTO regression')
+        source=self.root/'lto-provider.c';source.write_text('void sdk_lto_provider(void){}\n')
+        output=self.root/'lto-provider.c.o'
+        run([compiler,'-O2','-flto=auto','-fno-fat-lto-objects','-c',source,'-o',output],self.root)
+        output.chmod(0o644)
+        self.assertIn(b'.gnu.lto_',output.read_bytes())
+        with self.assertRaisesRegex(ValueError,'GCC LTO'):
+            safeio._object_bytes(output)
+
     def test_unreferenced_object_or_changed_binding_or_config_fails(self):
         extra=self.file.with_name('unknown.c.o');extra.write_bytes(self.file.read_bytes())
         with self.assertRaisesRegex(ValueError,'Unreferenced'):objects.capture(self.installed)
@@ -244,7 +255,11 @@ class PolicyTests(unittest.TestCase):
         if not raw:
             if os.environ.get('REQUIRE_CEF_SDK_OBJECTS')=='1':self.fail('Registry fixture required')
             self.skipTest('Pinned registry checkout required in CI')
-        objects.validate_sources(Path(raw))
+        registry=Path(raw)
+        objects.validate_sources(registry)
+        port=(registry/'ports/freerdp/portfile.cmake').read_text()
+        self.assertEqual(port.count('-DCMAKE_INTERPROCEDURAL_OPTIMIZATION=OFF'),1)
+        self.assertIn('if(VCPKG_TARGET_IS_LINUX AND VCPKG_LIBRARY_LINKAGE STREQUAL "static")',port)
 
 
 @unittest.skipUnless(sys.platform=='linux','Native exported object installation')
