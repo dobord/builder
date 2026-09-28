@@ -163,6 +163,9 @@ class NativeTests(unittest.TestCase):
         self.assertEqual(proof["cef_boringssl_collision_count"], 3)
         self.assertEqual(set(receipt["symbols"]), isolation.ANCHORS)
         self.assertGreaterEqual(proof["cef_boringssl_affected_archive_count"], 2)
+        for record in receipt["affected"].values():
+            self.assertGreater(record["global_symbol_count"], 0)
+            self.assertRegex(record["global_symbol_sha256"], r"^[0-9a-f]{64}$")
         self.assertEqual(
             openssl,
             {name: isolation.digest(self.prefix / name)
@@ -261,6 +264,16 @@ class PolicyTests(unittest.TestCase):
                 self.fail("Pinned upstream checkout required")
             self.skipTest("Pinned upstream checkout supplied in CI")
         isolation.validate_sources(Path(raw))
+
+    def test_nm_inventory_is_streamed_and_bounded(self):
+        import inspect
+        text = inspect.getsource(isolation._symbol_records)
+        self.assertIn("stdout=out", text)
+        self.assertIn("stderr=err", text)
+        self.assertNotIn("capture_output=True", text)
+        self.assertGreater(isolation.MAX_NM_OUTPUT_BYTES, 128 * 1024**2)
+        self.assertLessEqual(isolation.MAX_NM_OUTPUT_BYTES, isolation.safeio.MAX_BYTES)
+        self.assertGreater(isolation.MAX_NM_RECORDS, 1_000_000)
 
     def test_policy_is_collision_derived_and_never_suppresses_linker_errors(self):
         import inspect
