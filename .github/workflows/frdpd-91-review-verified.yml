@@ -9,8 +9,8 @@ concurrency:
   group: frdpd-91-final-${{ github.sha }}
   cancel-in-progress: false
 env:
-  SOURCE_SHA: f06799391e7cc8390bbad131cb420873543d2bde
-  SOURCE_TREE: 22bafdc1593e1cdee6e2ce3aa1bc47724c332dde
+  SOURCE_SHA: 784e8541b3e27843f3b77360b9757e920ef97d2d
+  SOURCE_TREE: bc8a4820fb75057e20d07e5cdecd8ec82f32a321
   REVIEW_BASE: 3c9171929662704418ed989cb46aa2c021234c76
   ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
 jobs:
@@ -83,7 +83,7 @@ jobs:
               base=os.environ['REVIEW_BASE']; head=os.environ['SOURCE_SHA']
               with (root/'patch-export.log').open('w') as log:
                   def git(*args): subprocess.run(['git','-C',str(source),*args],env=env,stdout=log,stderr=log,check=True,timeout=300)
-                  git('fetch','--depth=64','origin',head,base)
+                  git('fetch','--depth=512','origin',head,base)
                   git('merge-base','--is-ancestor',base,head)
                   output=root/'corrections'; output.mkdir(exist_ok=True)
                   git('format-patch','--full-index','--binary','--no-signature','--output-directory',str(output),base+'..'+head)
