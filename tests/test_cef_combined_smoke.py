@@ -121,7 +121,7 @@ class CompositionTests(unittest.TestCase):
         self.assertIn('summary["combined_sdk_smoke_built"] = True', final)
         self.assertIn('summary["combined_cef_smoke_built"] = True', final)
         self.assertNotIn('"--parallel", "2"', final)
-        self.assertEqual(combined.SDK_VCPKG, 'dd4388c816671daee94dc00c21c01f56d7ba4ea9')
+        self.assertEqual(combined.SDK_VCPKG, '56f9a7ce6bf25e3325d9d71e5fdd6255de33cb57')
         self.assertEqual(combined.CEF, '2aff22e09daaa5c28780c5766a70ee13e61c93b6')
 
 
