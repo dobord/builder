@@ -716,6 +716,12 @@ def main() -> None:
         summary["consumer_linker_kind"] = consumer_linker["kind"]
         summary["consumer_linker_version"] = consumer_linker["version"]
         summary["consumer_linker_sha256"] = consumer_linker["sha256"]
+        summary["consumer_linker_static_gcc_runtime"] = (
+            consumer_linker["static_gcc_runtime"]
+        )
+        summary["consumer_linker_os_needed_count"] = len(
+            consumer_linker["needed"]
+        )
         stage = "dependency-source-prefetch"
         cef_dependency_source.prefetch(
             registry, upstream, root, clean_environment(), summary
