@@ -1111,7 +1111,9 @@ def main() -> None:
         stage = "relocated-isolation-proof"
         summary["relocated_isolated_archive_count"] = cef_combined_port.verify_packaged_isolation(
             consumer_sdk / "installed" / TRIPLET,
-            platform_sha, port_profile["binding_sha256"],
+            platform_sha,
+            port_profile["binding_sha256"],
+            final_archive_sha256=boringssl_receipt["cef_archives"],
         )
         summary["relocated_isolation_bytes_verified"] = True
         cef_freerdp_profile.verify(consumer_sdk / "installed" / TRIPLET)
