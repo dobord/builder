@@ -46,7 +46,7 @@ jobs:
                   import re
                   log=(api['ROOT']/'docker-build.log').read_text(errors='replace')
                   for raw in log.splitlines():
-                      if 'error:' not in raw and 'warning:' not in raw and 'CMake Error' not in raw and 'FAILED:' not in raw:
+                      if 'error:' not in raw and 'warning:' not in raw and 'CMake Error' not in raw and 'FAILED:' not in raw and 'undefined reference' not in raw and 'collect2:' not in raw:
                           continue
                       line=re.sub(r'^.*?([^/ ]+\\.(?:c|h|cmake)):(\\d+):(\\d+):', r'\\1:\\2:\\3:', raw)
                       line=re.sub(r'/[^ ]*/([^/ ]+)', r'\\1', line)
