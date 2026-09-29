@@ -9,8 +9,8 @@ concurrency:
   group: frdpd-91-final-${{ github.sha }}
   cancel-in-progress: false
 env:
-  SOURCE_SHA: 33ae985901591fc159c617ea6624db4fb6f72c76
-  SOURCE_TREE: d63d16686b5674b43b152ae4fbdf58df5f88ce5e
+  SOURCE_SHA: bbc5926818bbdf111fec4bd9626f04cd1eed409c
+  SOURCE_TREE: af65d2476d66d289679e10436a00372b73fba431
   REVIEW_BASE: 3c9171929662704418ed989cb46aa2c021234c76
   ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
 jobs:
@@ -66,7 +66,16 @@ jobs:
                   script=script.replace('ctest --test-dir /tmp/review-prod',gate+'\nctest --test-dir /tmp/review-prod')
                   script=script.replace('--target frdpd frdp-session-agent TestFreeRDPFrdp','--target frdpd frdp-session-agent TestFreeRDPFrdp -- -k 0')
               script=script.replace('--output-on-failure --timeout','--output-on-failure --verbose --timeout')
-              return original(name,script,timeout)
+              rc=original(name,script,timeout)
+              if rc and name.startswith('production-'):
+                  log=(api['ROOT']/(name+'.log')).read_text(errors='replace')
+                  import re
+                  for raw in log.splitlines():
+                      if not any(key in raw for key in ('error:', 'warning:', 'FAILED:', 'undefined reference', 'AddressSanitizer', 'runtime error:')):
+                          continue
+                      line=re.sub(r'^.*?([^/ ]+\\.(?:c|h|cmake)):(\\d+):(\\d+):', r'\\1:\\2:\\3:', raw)
+                      print('production-diagnostic: '+line[-700:],flush=True)
+              return rc
           api['main'].__globals__['docker']=verified
           sys.exit(api['main']())
           PY
