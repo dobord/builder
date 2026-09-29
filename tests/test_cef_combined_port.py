@@ -88,11 +88,146 @@ class AcquisitionSourceTests(unittest.TestCase):
         self.assertNotIn('rglob("cef_static_smoke")', text)
         self.assertIn("recipe_root=recipe", text)
         self.assertEqual(text.count("cef_combined_port.verify_packaged_isolation("), 2)
+        self.assertIn(
+            'final_archive_sha256=boringssl_receipt["cef_archives"]',
+            text,
+        )
+        self.assertLess(
+            text.index('stage = "relocated-cef-boringssl-isolation"'),
+            text.index('stage = "relocated-isolation-proof"'),
+        )
         workflow = (ROOT/".github/workflows/cef-strict-combined.yml").read_text()
         self.assertIn("REQUIRE_CEF_COMBINED_PORT_FIXTURE: '1'", workflow)
         self.assertLess(workflow.index("test_cef_combined_port.py -v"),
                         workflow.index("- name: Run checkpoint-resumed final"))
         self.assertIn("--binarysource=clear", inspect.getsource(combined.source_fresh_binary_args))
+
+    def test_relocated_isolation_bridges_pretransform_binding_to_exact_final_receipt(self):
+        with tempfile.TemporaryDirectory() as folder:
+            prefix = Path(folder)
+            share = prefix / "share/cef-static"
+            archive_root = prefix / "lib/cef-static"
+            share.mkdir(parents=True)
+            archive_root.mkdir(parents=True)
+            isolated = []
+            records = {}
+            final_map = {}
+            manifest = {"files": {}}
+            config_lines = []
+            for index, name in enumerate(sorted(export.EXPECTED_INPUTS)):
+                source_sha = hashlib.sha256(
+                    ("source-" + str(index)).encode()
+                ).hexdigest()
+                before = b"!<arch>\\n" + ("before-" + str(index)).encode()
+                before_sha = hashlib.sha256(before).hexdigest()
+                final = (
+                    b"!<arch>\\nrewritten-zero"
+                    if index == 0 else before
+                )
+                path = (
+                    "lib/cef-static/cef_"
+                    + f"{index:04d}_"
+                    + f"{index + 1:012x}.a"
+                )
+                target = prefix / path
+                target.write_bytes(final)
+                final_map[path] = hashlib.sha256(final).hexdigest()
+                manifest["files"][name] = {"sha256": source_sha}
+                isolated.append({
+                    "source": name,
+                    "source_sha256": source_sha,
+                    "path": path,
+                    "sha256": before_sha,
+                })
+                native_path = (
+                    ".cef-nss-isolation/libcef_nss_isolated.a"
+                    if name == port.nss.ARCHIVE_RELATIVE
+                    else port.codecs.DIRECTORY + "/"
+                    + hashlib.sha256(name.encode()).hexdigest()[:16] + ".a"
+                )
+                records[name] = {
+                    "native": native_path,
+                    "source_sha256": source_sha,
+                    "sha256": before_sha,
+                }
+                config_lines.append(
+                    '"${_cef_static_prefix}/' + path + '"\\n'
+                )
+            manifest_path = share / "platform-build-inputs.json"
+            manifest_path.write_text(
+                json.dumps(manifest, sort_keys=True, separators=(",", ":"))
+                + "\\n",
+                encoding="utf-8",
+            )
+            expected_manifest = hashlib.sha256(
+                manifest_path.read_bytes()
+            ).hexdigest()
+            inventory = {
+                "schema": 1,
+                "kind": "external-vcpkg-archives",
+                "manifest_sha256": expected_manifest,
+                "native_isolation_verified": True,
+                "runtime_verified": False,
+                "isolated_archives": isolated,
+                "archives": [],
+            }
+            (share / "static-platform-inventory.json").write_text(
+                json.dumps(inventory, sort_keys=True, separators=(",", ":"))
+                + "\\n",
+                encoding="utf-8",
+            )
+            (share / "cef-static-config.cmake").write_text(
+                "".join(config_lines), encoding="utf-8"
+            )
+            spec = {
+                "schema": 1,
+                "kind": "cef-qualified-native-platform-bindings",
+                "platform_sha256": expected_manifest,
+                "bindings": records,
+            }
+            expected_bindings = hashlib.sha256(
+                port.codecs.canonical(spec)
+            ).hexdigest()
+
+            with self.assertRaisesRegex(
+                ValueError, "Packaged isolated archive changed"
+            ):
+                port.verify_packaged_isolation(
+                    prefix, expected_manifest, expected_bindings
+                )
+            self.assertEqual(
+                port.verify_packaged_isolation(
+                    prefix,
+                    expected_manifest,
+                    expected_bindings,
+                    final_archive_sha256=final_map,
+                ),
+                4,
+            )
+
+            missing = dict(final_map)
+            missing.pop(next(iter(missing)))
+            with self.assertRaisesRegex(
+                ValueError, "Invalid post-transform CEF archive receipt"
+            ):
+                port.verify_packaged_isolation(
+                    prefix,
+                    expected_manifest,
+                    expected_bindings,
+                    final_archive_sha256=missing,
+                )
+            tampered = dict(final_map)
+            changed = isolated[0]["path"]
+            tampered[changed] = isolated[0]["sha256"]
+            with self.assertRaisesRegex(
+                ValueError, "Packaged isolated archive changed"
+            ):
+                port.verify_packaged_isolation(
+                    prefix,
+                    expected_manifest,
+                    expected_bindings,
+                    final_archive_sha256=tampered,
+                )
 
     def test_required_fixture_does_not_silently_skip(self):
         with tempfile.TemporaryDirectory() as folder, mock.patch.dict(os.environ, {
