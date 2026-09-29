@@ -21,7 +21,7 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(subject.LLD_MAJOR, 18)
         self.assertEqual(
             subject.cmake_flag(),
-            "-DCMAKE_EXE_LINKER_FLAGS=-B/usr/lib/llvm-18/bin -fuse-ld=lld",
+            "-DCMAKE_EXE_LINKER_FLAGS=-B/usr/lib/llvm-18/bin -fuse-ld=lld -static-libstdc++ -static-libgcc",
         )
 
     def test_workflow_installs_and_preflights_lld_before_restore(self):
@@ -54,6 +54,8 @@ class PolicyTests(unittest.TestCase):
             'summary["consumer_linker_kind"]',
             'summary["consumer_linker_version"]',
             'summary["consumer_linker_sha256"]',
+            'summary["consumer_linker_static_gcc_runtime"]',
+            'summary["consumer_linker_os_needed_count"]',
         ):
             self.assertIn(field, source)
 
@@ -79,6 +81,10 @@ class NativeTests(unittest.TestCase):
             )
         self.assertEqual(receipt["kind"], "lld")
         self.assertEqual(receipt["version"], version)
+        self.assertTrue(receipt["static_gcc_runtime"])
+        self.assertNotIn("libstdc++.so.6", receipt["needed"])
+        self.assertNotIn("libgcc_s.so.1", receipt["needed"])
+        self.assertFalse(set(receipt["needed"]) - subject.cef_x11_static.OS_NEEDED)
 
     def test_required_ubuntu_lld18_profile(self):
         if os.environ.get("REQUIRE_CEF_CONSUMER_LLD") != "1":
@@ -87,6 +93,8 @@ class NativeTests(unittest.TestCase):
             receipt = subject.verify(Path(name))
         self.assertEqual(receipt["major"], 18)
         self.assertRegex(receipt["sha256"], r"^[0-9a-f]{64}$")
+        self.assertTrue(receipt["static_gcc_runtime"])
+        self.assertFalse(set(receipt["needed"]) - subject.cef_x11_static.OS_NEEDED)
 
 
 if __name__ == "__main__":
