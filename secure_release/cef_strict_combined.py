@@ -1335,13 +1335,19 @@ def main() -> None:
                 "Final FreeRDP/CEF executable has shared third-party runtime dependencies: "
                 + ", ".join(forbidden_needed)
             )
+        # The no-args CLI check must not depend on Xvfb.  The canonical proxy
+        # validates argc before CefExecuteProcess, so this probe exercises only
+        # the deterministic browser-process usage path.  The real config-driven
+        # runtime/listener proof below remains supervised by xvfb-run.
         usage = subprocess.run(
-            ["xvfb-run", "-a", str(proxy_exe)],
+            [str(proxy_exe)],
             cwd=proxy_exe.parent, env=build_env,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, timeout=120,
         )
-        if usage.returncode != 2 or "Usage:" not in usage.stdout:
+        summary["lfc_ui_freerdp_cef_usage_returncode"] = usage.returncode
+        summary["lfc_ui_freerdp_cef_usage_marker_verified"] = "Usage:" in usage.stdout
+        if usage.returncode != 2 or not summary["lfc_ui_freerdp_cef_usage_marker_verified"]:
             raise RuntimeError("Final FreeRDP/CEF executable did not reach its usage path")
         summary["lfc_ui_freerdp_cef_link_verified"] = True
         summary["lfc_ui_freerdp_cef_runtime_loader_verified"] = True
