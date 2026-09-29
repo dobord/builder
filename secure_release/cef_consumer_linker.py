@@ -14,7 +14,7 @@ import re
 import subprocess
 import tempfile
 
-from . import cef_sdk_example as checked, crypto
+from . import cef_sdk_example as checked, cef_x11_static, crypto
 
 GXX = Path("/usr/bin/g++-14")
 LLD_DIR = Path("/usr/lib/llvm-18/bin")
@@ -23,8 +23,11 @@ LLD_MAJOR = 18
 
 
 def driver_flags(lld_dir: Path = LLD_DIR) -> str:
-    """GCC driver flags that select the reviewed LLD directory explicitly."""
-    return f"-B{lld_dir.as_posix()} -fuse-ld=lld"
+    """Select reviewed LLD and keep GCC C++/unwind runtimes static."""
+    return (
+        f"-B{lld_dir.as_posix()} -fuse-ld=lld "
+        "-static-libstdc++ -static-libgcc"
+    )
 
 
 def cmake_flag(lld_dir: Path = LLD_DIR) -> str:
@@ -57,7 +60,12 @@ def _verify(root: Path, *, gxx: Path, lld_dir: Path, major: int) -> dict:
         work = Path(name)
         source = work / "probe.cc"
         source.write_text(
-            '#include <cstdio>\nint main(){std::puts("lld-probe");}\n',
+            '#include <cstdio>\n'
+            '#include <stdexcept>\n'
+            '#include <string>\n'
+            'int main(){std::string s="lld-probe";'
+            'try{throw std::runtime_error(s);}'
+            'catch(const std::exception& e){std::puts(e.what());}}\n',
             encoding="utf-8",
         )
         selected = subprocess.run(
@@ -72,8 +80,11 @@ def _verify(root: Path, *, gxx: Path, lld_dir: Path, major: int) -> dict:
         )
         executable = work / "probe"
         linked = subprocess.run(
-            [str(gxx), f"-B{lld_dir}", "-fuse-ld=lld", "-Wl,--fatal-warnings",
-             str(source), "-o", str(executable)],
+            [
+                str(gxx), f"-B{lld_dir}", "-fuse-ld=lld",
+                "-static-libstdc++", "-static-libgcc",
+                "-Wl,--fatal-warnings", str(source), "-o", str(executable),
+            ],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, timeout=60,
         )
@@ -81,6 +92,18 @@ def _verify(root: Path, *, gxx: Path, lld_dir: Path, major: int) -> dict:
             linked.returncode == 0 and executable.is_file()
             and not executable.is_symlink(),
             "Pinned LLD cannot link the consumer probe",
+        )
+        dynamic = subprocess.check_output(
+            ["readelf", "-d", str(executable)], text=True, timeout=30
+        )
+        needed = re.findall(
+            r"\(NEEDED\).*?Shared library:\s*\[([^\]]+)\]", dynamic
+        )
+        checked.require(
+            not (set(needed) - cef_x11_static.OS_NEEDED)
+            and "libstdc++.so.6" not in needed
+            and "libgcc_s.so.1" not in needed,
+            "Consumer probe imports non-OS GCC runtime libraries",
         )
         ran = subprocess.run(
             [str(executable)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -97,6 +120,8 @@ def _verify(root: Path, *, gxx: Path, lld_dir: Path, major: int) -> dict:
         "sha256": crypto.digest(lld),
         "directory": lld_dir.as_posix(),
         "driver": gxx.as_posix(),
+        "static_gcc_runtime": True,
+        "needed": sorted(needed),
     }
 
 
