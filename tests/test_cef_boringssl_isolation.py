@@ -204,10 +204,20 @@ class NativeTests(unittest.TestCase):
             self.runtime_providers,
         ) = fixture(self.root)
         self.prefix = self.installed / T
+        def runtime():
+            receipt = {
+                **self.runtime_receipt,
+                "archives": {
+                    name: {
+                        "path": path.as_posix(),
+                        "sha256": isolation.digest(path),
+                    }
+                    for name, path in self.runtime_providers
+                },
+            }
+            return receipt, self.runtime_providers
         patcher = mock.patch.object(
-            isolation,
-            "_gcc_runtime",
-            return_value=(self.runtime_receipt, self.runtime_providers),
+            isolation, "_gcc_runtime", side_effect=runtime
         )
         patcher.start()
         self.addCleanup(patcher.stop)
