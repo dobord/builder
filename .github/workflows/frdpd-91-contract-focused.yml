@@ -6,8 +6,8 @@ on:
 permissions:
   contents: read
 env:
-  SOURCE_SHA: 0cb5145b12b5955b07f4a031cf37e4d52248e703
-  SOURCE_TREE: 3e0e2eb51a0f70f29283164e6935ee9e83e6ce69
+  SOURCE_SHA: 65d3ba0caab8c8337e700cc78c212e03398ae682
+  SOURCE_TREE: b7e1e8be0bbbdbda95c9dd0add34f761b9372465
 jobs:
   focused:
     runs-on: ubuntu-24.04
@@ -44,4 +44,4 @@ jobs:
           rm -f "$ask"
           unset SOURCE_READ_TOKEN GIT_ASKPASS
           docker build --build-arg FRDP_BUILD_COMPONENT_TESTS=ON             -f "$source/server/frdp/test/e2e/Dockerfile"             -t frdpd91-contract:focused "$source"
-          docker run --rm --init --network none --entrypoint bash frdpd91-contract:focused -lc             'ctest --test-dir /opt/freerdp-build --no-tests=error --output-on-failure --timeout 180 -R "^TestFreeRDPFrdp(SceneV2|WindowLease|X11ImageConvert|X11WindowTracker|X11WindowCapture.*|X11WindowCompositor|RemoteAppContract|NativePath)$"'
+          docker run --rm --init --network none --entrypoint bash frdpd91-contract:focused -lc             'ctest --test-dir /opt/freerdp-build --no-tests=error --output-on-failure --timeout 180 -R "^TestFreeRDPFrdp(SceneV2|WindowLease|X11ImageConvert|X11WindowTracker|X11WindowCapture.*|X11WindowCompositor|AgentStop|SharedBuffer|DamageState|GraphicsControl|RemoteAppContract|NativePath)$"'
