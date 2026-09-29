@@ -210,12 +210,18 @@ def fixture(root: Path):
         "int ff_hdr_from(void){return 137;} int ff_hdr_to(void){return 139;}\n")
     ffmpeg_providers = []
     ffmpeg_archives = {}
-    for name in isolation.FFMPEG_ARCHIVES:
+    for index, name in enumerate(isolation.FFMPEG_ARCHIVES):
         target = ffmpeg_root / Path(name).name
         if name.endswith("libavutil.a"):
             shutil.copy2(ffmpeg_provider, target)
         else:
-            shutil.copy2(libgcc, target)
+            dummy = archive(
+                root,
+                "fixture_ffmpeg_dummy_" + str(index),
+                "int fixture_ffmpeg_dummy_" + str(index)
+                + "(void){return " + str(index + 1) + ";}\\n",
+            )
+            shutil.copy2(dummy, target)
         ffmpeg_providers.append((name, target))
         ffmpeg_archives[name] = isolation.digest(target)
     ffmpeg_receipt = {
