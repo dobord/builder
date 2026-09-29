@@ -118,10 +118,10 @@ class AcquisitionSourceTests(unittest.TestCase):
                 source_sha = hashlib.sha256(
                     ("source-" + str(index)).encode()
                 ).hexdigest()
-                before = b"!<arch>\\n" + ("before-" + str(index)).encode()
+                before = b"!<arch>\n" + ("before-" + str(index)).encode()
                 before_sha = hashlib.sha256(before).hexdigest()
                 final = (
-                    b"!<arch>\\nrewritten-zero"
+                    b"!<arch>\nrewritten-zero"
                     if index == 0 else before
                 )
                 path = (
@@ -151,12 +151,12 @@ class AcquisitionSourceTests(unittest.TestCase):
                     "sha256": before_sha,
                 }
                 config_lines.append(
-                    '"${_cef_static_prefix}/' + path + '"\\n'
+                    '"${_cef_static_prefix}/' + path + '"\n'
                 )
             manifest_path = share / "platform-build-inputs.json"
             manifest_path.write_text(
                 json.dumps(manifest, sort_keys=True, separators=(",", ":"))
-                + "\\n",
+                + "\n",
                 encoding="utf-8",
             )
             expected_manifest = hashlib.sha256(
@@ -173,7 +173,7 @@ class AcquisitionSourceTests(unittest.TestCase):
             }
             (share / "static-platform-inventory.json").write_text(
                 json.dumps(inventory, sort_keys=True, separators=(",", ":"))
-                + "\\n",
+                + "\n",
                 encoding="utf-8",
             )
             (share / "cef-static-config.cmake").write_text(
