@@ -190,7 +190,7 @@ class CombinedOrchestrationTests(unittest.TestCase):
             # here so host/source/checkpoint ordering remains the subject.
             stack.enter_context(mock.patch.object(
                 combined.cef_consumer_linker, "verify",
-                return_value={"kind": "lld", "version": "18.1.3", "sha256": "c" * 64},
+                return_value={"kind": "lld", "version": "18.1.3", "sha256": "c" * 64,\n                              "cxx_runtime_static": True,\n                              "probe_needed": ["libc.so.6"]},
             ))
             stack.enter_context(mock.patch.object(combined.cef_contract, "validate"))
             stack.enter_context(mock.patch.object(combined.cef_contract, "build_key", return_value="b"*64))
