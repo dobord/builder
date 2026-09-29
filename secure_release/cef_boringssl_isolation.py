@@ -1,13 +1,14 @@
-"""Namespace CEF's Chromium/BoringSSL symbols away from vcpkg OpenSSL.
+"""Namespace CEF's Chromium runtime away from final consumer runtimes.
 
-The final combined SDK intentionally links Chromium's BoringSSL and FreeRDP's
-OpenSSL into one executable. Static ELF cannot contain two global providers for
-the same SSL/X509/PEM API names. Derive the complete collision set from the
-pinned installed archives, rewrite ONLY CEF-owned archives in place with the
-pinned Chromium llvm-objcopy, and bind every byte through a transport receipt.
+The final combined SDK intentionally links Chromium's BoringSSL beside vcpkg
+OpenSSL and Chromium's libc++/libc++abi beside a GCC-built consumer closure.
+Static ELF cannot contain duplicate global providers. Derive BOTH complete
+collision sets from the pinned CEF archives and the actual final providers,
+rewrite ONLY CEF-owned definitions and references in one llvm-objcopy mapping,
+and bind every byte through one transport receipt.
 
-OpenSSL archives, FreeRDP archives/objects, CEF public headers, runtime policy,
-and success gates remain unchanged.
+OpenSSL, GCC runtime archives, FreeRDP archives/objects, CEF public headers,
+runtime policy, and success gates remain unchanged.
 """
 from __future__ import annotations
 
@@ -30,12 +31,17 @@ OPENSSL_PORT_BLOB = "82e2a0232b25f0e52397e80ff2ab93040055b11d"
 CEF_VERSION = "152.0.6"
 CEF_PORT_VERSION = 15
 NAMESPACE = "CEF_CHROMIUM_BSSL_"
+CXX_NAMESPACE = "CEF_CHROMIUM_CXX_"
 OPENSSL_ARCHIVES = ("lib/libssl.a", "lib/libcrypto.a")
+GXX = Path("/usr/bin/g++-14")
+GCC_ROOT = Path("/usr/lib/gcc/x86_64-linux-gnu/14")
+GCC_RUNTIME_ARCHIVES = ("libstdc++.a", "libgcc.a", "libgcc_eh.a")
 CEF_CONFIG = "share/cef-static/cef-static-config.cmake"
 CEF_ARCHIVE = re.compile(r"lib/cef-static/(?:cef_objects|cef_[0-9]{4}_[0-9a-f]{12})\.a\Z")
 SYMBOL = re.compile(r"[A-Za-z_.$][A-Za-z0-9_.$@]*\Z")
 MAX_CEF_ARCHIVES = 4096
 MAX_COLLISIONS = 8192
+MAX_CXX_COLLISIONS = 8192
 MAX_SOURCE_ARCHIVE_BYTES = 1024**3
 MAX_NM_OUTPUT_BYTES = 2 * 1024**3
 MAX_NM_ERROR_BYTES = 16 * 1024**2
@@ -43,6 +49,11 @@ MAX_NM_RECORDS = 20_000_000
 MAX_NM_LINE_BYTES = 8192
 PROFILE_CHUNK_RECORDS = 100_000
 ANCHORS = frozenset({"SSL_new", "SSL_use_certificate", "PEM_read_PrivateKey"})
+CXX_ANCHORS = frozenset({
+    "_ZNSt9type_infoD0Ev",
+    "_ZN10__cxxabiv117__class_type_infoD0Ev",
+    "_ZNSt9exceptionD0Ev",
+})
 
 
 def require(ok: bool, message: str) -> None:
@@ -123,6 +134,53 @@ def _archive_size(archive: Path, *, limit: int | None = None) -> int:
     return size
 
 
+def _gcc_runtime() -> tuple[dict, list[tuple[str, Path]]]:
+    """Bind the exact GCC14 static runtime archives used by final consumers."""
+    resolved_driver = GXX.resolve(strict=True)
+    require(
+        resolved_driver.is_file() and os.access(GXX, os.X_OK),
+        "Pinned GCC14 consumer driver is unavailable",
+    )
+    version = subprocess.check_output(
+        [str(GXX), "-dumpfullversion"], text=True, timeout=30
+    ).strip()
+    require(
+        re.fullmatch(r"14\.[0-9.]+", version) is not None,
+        "Pinned GCC14 consumer version changed",
+    )
+    root = GCC_ROOT.resolve(strict=True)
+    providers: list[tuple[str, Path]] = []
+    archives: dict[str, dict[str, str]] = {}
+    for name in GCC_RUNTIME_ARCHIVES:
+        raw = subprocess.check_output(
+            [str(GXX), "-print-file-name=" + name], text=True, timeout=30
+        ).strip()
+        path = Path(raw)
+        require(
+            path.is_absolute() and path.name == name,
+            "GCC static runtime archive lookup changed",
+        )
+        resolved = path.resolve(strict=True)
+        require(
+            resolved.is_file() and resolved.is_relative_to(root),
+            "GCC static runtime archive escaped pinned GCC14 root",
+        )
+        _archive_size(resolved)
+        providers.append((name, resolved))
+        archives[name] = {
+            "path": resolved.as_posix(),
+            "sha256": digest(resolved),
+        }
+    receipt = {
+        "driver": GXX.as_posix(),
+        "driver_sha256": digest(resolved_driver),
+        "version": version,
+        "root": root.as_posix(),
+        "archives": archives,
+    }
+    return receipt, providers
+
+
 def _symbol_records(nm: Path, archive: Path, *, archive_limit: int | None = None):
     """Stream bounded llvm-nm output through disk, never one giant Python string."""
     _archive_size(archive, limit=archive_limit)
@@ -186,7 +244,7 @@ def _profile_records(
     watch: set[str],
     reverse: dict[str, str] | None = None,
     forbidden: set[str] | None = None,
-    forbidden_prefix: str | None = None,
+    forbidden_prefixes: tuple[str, ...] = (),
 ) -> tuple[dict[str, int | str], Counter]:
     """Canonicalize the complete global-symbol multiset with bounded memory."""
     reverse = reverse or {}
@@ -210,10 +268,10 @@ def _profile_records(
             pending.clear()
 
         for name, kind in records:
-            if name in forbidden or (
-                forbidden_prefix is not None and name.startswith(forbidden_prefix)
+            if name in forbidden or any(
+                name.startswith(prefix) for prefix in forbidden_prefixes
             ):
-                raise ValueError("BoringSSL isolation namespace already exists")
+                raise ValueError("CEF runtime isolation namespace already exists")
             if name in watch:
                 relevant[(name, kind)] += 1
             normalized = reverse.get(name, name)
@@ -253,7 +311,7 @@ def _profile_symbols(
     watch: set[str],
     reverse: dict[str, str] | None = None,
     forbidden: set[str] | None = None,
-    forbidden_prefix: str | None = None,
+    forbidden_prefixes: tuple[str, ...] = (),
     archive_limit: int | None = None,
 ) -> tuple[dict[str, int | str], Counter]:
     return _profile_records(
@@ -261,7 +319,7 @@ def _profile_symbols(
         watch=watch,
         reverse=reverse,
         forbidden=forbidden,
-        forbidden_prefix=forbidden_prefix,
+        forbidden_prefixes=forbidden_prefixes,
     )
 
 
@@ -435,9 +493,23 @@ def _ownership(
     return result
 
 
-def _mapping_bytes(symbols: list[str]) -> bytes:
+def _domain_mapping_bytes(symbols: list[str], prefix: str) -> bytes:
     return "".join(
-        name + " " + NAMESPACE + name + "\n" for name in symbols
+        name + " " + prefix + name + "\n" for name in symbols
+    ).encode("ascii")
+
+
+def _mapping_bytes(symbols: list[str], cxx_symbols: list[str]) -> bytes:
+    pairs = {
+        **{name: NAMESPACE + name for name in symbols},
+        **{name: CXX_NAMESPACE + name for name in cxx_symbols},
+    }
+    require(
+        len(pairs) == len(symbols) + len(cxx_symbols),
+        "Overlapping CEF runtime isolation collision sets",
+    )
+    return "".join(
+        name + " " + pairs[name] + "\n" for name in sorted(pairs)
     ).encode("ascii")
 
 
@@ -466,52 +538,92 @@ def install(installed: Path, source: Path, diagnostics: Path) -> dict:
         openssl_defined.update(_defined(table))
         openssl_names.update(name for name, _ in table)
 
+    gcc_runtime, gcc_providers = _gcc_runtime()
+    gcc_defined: set[str] = set()
+    gcc_names: set[str] = set()
+    for _, path in gcc_providers:
+        table = _symbols(nm, path)
+        gcc_defined.update(_defined(table))
+        gcc_names.update(name for name, _ in table)
+
     collisions: set[str] = set()
+    cxx_collisions: set[str] = set()
     source_hashes = _archive_hashes(cef)
     profiles: dict[str, dict[str, int | str]] = {}
     candidates: dict[str, Counter] = {}
+    watch = openssl_defined | gcc_defined
     for name, path in cef:
         profile, relevant = _profile_symbols(
-            nm, path, watch=openssl_defined, forbidden_prefix=NAMESPACE
+            nm,
+            path,
+            watch=watch,
+            forbidden_prefixes=(NAMESPACE, CXX_NAMESPACE),
         )
         profiles[name] = profile
         candidates[name] = relevant
-        collisions.update(
-            symbol for (symbol, kind), count in relevant.items()
-            if count and kind not in {"U", "w", "v"}
-        )
+        for (symbol, kind), count in relevant.items():
+            if not count or kind in {"U", "w", "v"}:
+                continue
+            if symbol in openssl_defined:
+                collisions.add(symbol)
+            if symbol in gcc_defined:
+                cxx_collisions.add(symbol)
 
+    require(
+        not collisions.intersection(cxx_collisions),
+        "CEF runtime collision belongs to multiple provider namespaces",
+    )
     ordered = sorted(collisions)
+    cxx_ordered = sorted(cxx_collisions)
     require(ANCHORS <= collisions
             and 1 <= len(ordered) <= MAX_COLLISIONS,
             "Unexpected Chromium/OpenSSL collision inventory")
+    require(CXX_ANCHORS <= cxx_collisions
+            and 1 <= len(cxx_ordered) <= MAX_CXX_COLLISIONS,
+            "Unexpected Chromium/GCC runtime collision inventory")
     require(all(SYMBOL.fullmatch(name) is not None and len(name) <= 512
-                for name in ordered),
-            "Invalid Chromium/OpenSSL collision symbol")
+                for name in ordered + cxx_ordered),
+            "Invalid Chromium runtime collision symbol")
     renamed = {name: NAMESPACE + name for name in ordered}
-    require(not set(renamed.values()).intersection(openssl_names),
-            "BoringSSL isolation namespace already exists")
+    renamed.update({name: CXX_NAMESPACE + name for name in cxx_ordered})
+    require(
+        not set(renamed.values()).intersection(openssl_names | gcc_names),
+        "CEF runtime isolation namespace already exists",
+    )
 
     diagnostics.mkdir(parents=True, exist_ok=False)
     mapping = diagnostics / "redefine-syms.txt"
-    mapping.write_bytes(_mapping_bytes(ordered))
+    mapping.write_bytes(_mapping_bytes(ordered, cxx_ordered))
     mapping.chmod(0o600)
     mapping_sha = digest(mapping)
+    boringssl_mapping_sha = hashlib.sha256(
+        _domain_mapping_bytes(ordered, NAMESPACE)
+    ).hexdigest()
+    cxx_mapping_sha = hashlib.sha256(
+        _domain_mapping_bytes(cxx_ordered, CXX_NAMESPACE)
+    ).hexdigest()
 
     affected: dict[str, dict] = {}
+    boringssl_affected: set[str] = set()
+    cxx_affected: set[str] = set()
     try:
         reverse = {new: old for old, new in renamed.items()}
-        watched = collisions | set(renamed.values())
+        all_collisions = collisions | cxx_collisions
+        watched = all_collisions | set(renamed.values())
         for name, path in cef:
             relevant = Counter(
                 {
                     (symbol, kind): count
                     for (symbol, kind), count in candidates[name].items()
-                    if symbol in collisions
+                    if symbol in all_collisions
                 }
             )
             if not relevant:
                 continue
+            if any(symbol in collisions for symbol, _ in relevant):
+                boringssl_affected.add(name)
+            if any(symbol in cxx_collisions for symbol, _ in relevant):
+                cxx_affected.add(name)
             old_mode = stat.S_IMODE(path.stat().st_mode)
             fd, temp_name = tempfile.mkstemp(
                 prefix=".cef-bssl-", suffix=".a", dir=path.parent
@@ -531,7 +643,7 @@ def install(installed: Path, source: Path, diagnostics: Path) -> dict:
                     temporary,
                     watch=watched,
                     reverse=reverse,
-                    forbidden=collisions,
+                    forbidden=all_collisions,
                     archive_limit=_archive_limit(path),
                 )
                 require(
@@ -569,22 +681,35 @@ def install(installed: Path, source: Path, diagnostics: Path) -> dict:
     for _, path in providers:
         require(digest(path) == provider_hashes[
             path.relative_to(prefix).as_posix()
-        ], "OpenSSL provider changed during CEF BoringSSL isolation")
+        ], "OpenSSL provider changed during CEF runtime isolation")
+    current_gcc_runtime, _ = _gcc_runtime()
+    require(
+        current_gcc_runtime == gcc_runtime,
+        "GCC static runtime provider changed during CEF runtime isolation",
+    )
 
     receipt = {
         "schema": 1,
         "kind": "cef-chromium-boringssl-isolation",
         "namespace": NAMESPACE,
+        "cxx_namespace": CXX_NAMESPACE,
         "mapping_sha256": mapping_sha,
+        "boringssl_mapping_sha256": boringssl_mapping_sha,
+        "cxx_mapping_sha256": cxx_mapping_sha,
         "collision_count": len(ordered),
         "symbols": ordered,
+        "cxx_collision_count": len(cxx_ordered),
+        "cxx_symbols": cxx_ordered,
         "openssl": {
             "version": OPENSSL_VERSION,
             "archives": provider_hashes,
         },
+        "gcc_runtime": gcc_runtime,
         "cef_archives": final_hashes,
         "ownership": ownership_receipt,
         "affected": affected,
+        "boringssl_affected_archives": sorted(boringssl_affected),
+        "cxx_affected_archives": sorted(cxx_affected),
         "nm_sha256": digest(nm),
         "objcopy_sha256": digest(objcopy),
     }
@@ -601,17 +726,34 @@ def verify(installed: Path, source: Path, receipt: dict) -> dict:
             and receipt.get("schema") == 1
             and receipt.get("kind") == "cef-chromium-boringssl-isolation"
             and receipt.get("namespace") == NAMESPACE
+            and receipt.get("cxx_namespace") == CXX_NAMESPACE
             and receipt.get("openssl", {}).get("version") == OPENSSL_VERSION,
-            "Missing CEF BoringSSL isolation receipt")
+            "Missing CEF runtime isolation receipt")
     symbols = receipt.get("symbols")
+    cxx_symbols = receipt.get("cxx_symbols")
     require(isinstance(symbols, list)
             and symbols == sorted(set(symbols))
             and ANCHORS <= set(symbols)
             and len(symbols) == receipt.get("collision_count")
-            and 1 <= len(symbols) <= MAX_COLLISIONS
-            and hashlib.sha256(_mapping_bytes(symbols)).hexdigest()
-                == receipt.get("mapping_sha256"),
+            and 1 <= len(symbols) <= MAX_COLLISIONS,
             "Invalid CEF BoringSSL isolation mapping")
+    require(isinstance(cxx_symbols, list)
+            and cxx_symbols == sorted(set(cxx_symbols))
+            and CXX_ANCHORS <= set(cxx_symbols)
+            and len(cxx_symbols) == receipt.get("cxx_collision_count")
+            and 1 <= len(cxx_symbols) <= MAX_CXX_COLLISIONS
+            and not set(symbols).intersection(cxx_symbols),
+            "Invalid CEF C++ runtime isolation mapping")
+    require(
+        hashlib.sha256(_mapping_bytes(symbols, cxx_symbols)).hexdigest()
+            == receipt.get("mapping_sha256")
+        and hashlib.sha256(_domain_mapping_bytes(symbols, NAMESPACE)).hexdigest()
+            == receipt.get("boringssl_mapping_sha256")
+        and hashlib.sha256(
+            _domain_mapping_bytes(cxx_symbols, CXX_NAMESPACE)
+        ).hexdigest() == receipt.get("cxx_mapping_sha256"),
+        "Invalid combined CEF runtime isolation mapping",
+    )
     installed = installed.resolve(strict=True)
     prefix = installed / TRIPLET
     require(prefix.is_dir() and not prefix.is_symlink(),
@@ -619,7 +761,12 @@ def verify(installed: Path, source: Path, receipt: dict) -> dict:
     nm, objcopy = _tools(source)
     require(digest(nm) == receipt.get("nm_sha256")
             and digest(objcopy) == receipt.get("objcopy_sha256"),
-            "BoringSSL isolation tool identity changed")
+            "CEF runtime isolation tool identity changed")
+    current_gcc_runtime, _ = _gcc_runtime()
+    require(
+        current_gcc_runtime == receipt.get("gcc_runtime"),
+        "GCC static runtime provider changed in SDK transport",
+    )
 
     cef = _cef_archives(prefix)
     names = [name for name, _ in cef]
@@ -645,9 +792,26 @@ def verify(installed: Path, source: Path, receipt: dict) -> dict:
                 "OpenSSL provider changed in SDK transport")
 
     affected = receipt.get("affected")
+    boringssl_affected = receipt.get("boringssl_affected_archives")
+    cxx_affected = receipt.get("cxx_affected_archives")
     require(isinstance(affected, dict)
             and affected and set(affected) <= set(names),
-            "CEF BoringSSL affected archive receipt changed")
+            "CEF runtime affected archive receipt changed")
+    require(
+        isinstance(boringssl_affected, list)
+        and boringssl_affected == sorted(set(boringssl_affected))
+        and set(boringssl_affected) <= set(affected)
+        and boringssl_affected,
+        "CEF BoringSSL affected archive receipt changed",
+    )
+    require(
+        isinstance(cxx_affected, list)
+        and cxx_affected == sorted(set(cxx_affected))
+        and set(cxx_affected) <= set(affected)
+        and cxx_affected
+        and set(affected) == set(boringssl_affected) | set(cxx_affected),
+        "CEF C++ runtime affected archive receipt changed",
+    )
     for name, record in affected.items():
         require(isinstance(record, dict)
                 and set(record) == {
@@ -667,6 +831,12 @@ def verify(installed: Path, source: Path, receipt: dict) -> dict:
     return {
         "cef_boringssl_isolation_verified": True,
         "cef_boringssl_collision_count": len(symbols),
-        "cef_boringssl_affected_archive_count": len(affected),
-        "cef_boringssl_mapping_sha256": receipt["mapping_sha256"],
+        "cef_boringssl_affected_archive_count": len(boringssl_affected),
+        "cef_boringssl_mapping_sha256":
+            receipt["boringssl_mapping_sha256"],
+        "cef_cxx_runtime_isolation_verified": True,
+        "cef_cxx_runtime_collision_count": len(cxx_symbols),
+        "cef_cxx_runtime_affected_archive_count": len(cxx_affected),
+        "cef_cxx_runtime_mapping_sha256": receipt["cxx_mapping_sha256"],
+        "cef_runtime_mapping_sha256": receipt["mapping_sha256"],
     }
