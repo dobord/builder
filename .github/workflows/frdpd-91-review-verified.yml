@@ -18,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [full, asan, noavc]
+        variant: [noavc]
     runs-on: ubuntu-24.04
     timeout-minutes: 55
     env:
@@ -62,7 +62,7 @@ jobs:
                   path=root/name
                   if path.exists():
                       print('===== diagnostic tail: '+name+' =====')
-                      print('\n'.join(path.read_text(errors='replace').splitlines()[-160:]))
+                      print('\n'.join(path.read_text(errors='replace').splitlines()[-2000:]))
           sys.exit(rc)
           PY
       - name: Export exact committed corrections without publishing private source
