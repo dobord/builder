@@ -1,7 +1,7 @@
 name: RemoteApp client and backend differential
 on:
   push:
-    branches: [investigate/frdpd-103-mstsc-20260924]
+    branches: [test/frdpd-91-window-capture-20260928]
     paths: ['.github/workflows/frdpd-103-client-matrix.yml']
 permissions:
   contents: read
@@ -9,9 +9,9 @@ concurrency:
   group: frdpd-103-client-matrix-${{ github.ref }}
   cancel-in-progress: false
 env:
-  SOURCE_SHA: 3637007a36881a460693be50d66079291c1f4d33
-  CANDIDATE_SHA: 3637007a36881a460693be50d66079291c1f4d33
-  CANDIDATE_TREE: ffa3bd512e739cc396ec56431f0759e501d9c359
+  SOURCE_SHA: 784e8541b3e27843f3b77360b9757e920ef97d2d
+  CANDIDATE_SHA: 784e8541b3e27843f3b77360b9757e920ef97d2d
+  CANDIDATE_TREE: bc8a4820fb75057e20d07e5cdecd8ec82f32a321
   ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
 jobs:
   build:
