@@ -33,11 +33,11 @@ SDK_VCPKG_CHECKOUT = "c1e16b83cffc80c145aaf15c17d199312c58350b"
 SDK_VCPKG_CHECKOUT_TREE = "50b7b6224122277c3458f0bd990fa2926fd17667"
 SDK_VCPKG = "dd4388c816671daee94dc00c21c01f56d7ba4ea9"
 SDK_VCPKG_TREE = "74974f7a2787317d1d3fe12765cd44fa624ffa0b"
-SDK_LFC_UI_TREE = "bbc00cc70e557268570db3e08714d26171c8f06e"
+SDK_LFC_UI_TREE = "fd125f0896683fc0391803b4a52bf7c4cc651c20"
 UPSTREAM = "9e593bb18ea69cc5095e012465dcd675a822ed0d"
 CEF = "2aff22e09daaa5c28780c5766a70ee13e61c93b6"
 LOCKFREECORO = "24038aed3a0be642adb60e71bd994ae8f0d90140"
-LFC_UI = "307afeab287b283514e036aa82ea1bd331dbac2a"
+LFC_UI = "29146a706499f83d464dd28fe29301fee06bcb3d"
 TRIPLET = "x64-linux-static-release"
 
 
@@ -210,7 +210,7 @@ def verify_engine_registry_delta(engine: Path, sdk: Path) -> None:
         raise ValueError("Registry baseline changed outside lfc-ui/FreeRDP")
     if (old_lfc.get("baseline"), old_lfc.get("port-version")) != ("0.3.0", 8):
         raise ValueError("Unexpected engine-registry lfc-ui baseline")
-    if (new_lfc.get("baseline"), new_lfc.get("port-version")) != ("0.3.0", 15):
+    if (new_lfc.get("baseline"), new_lfc.get("port-version")) != ("0.3.0", 16):
         raise ValueError("Unexpected final-registry lfc-ui baseline")
     if (old_freerdp.get("baseline"), old_freerdp.get("port-version")) != ("3.31.1", 23):
         raise ValueError("Unexpected engine-registry FreeRDP baseline")
@@ -223,7 +223,7 @@ def verify_engine_registry_delta(engine: Path, sdk: Path) -> None:
     new_port_version = new_manifest.pop("port-version")
     old_feature = old_manifest["features"].pop("freerdp")
     new_feature = new_manifest["features"].pop("freerdp")
-    if old_port_version != 8 or new_port_version != 15 or old_manifest != new_manifest:
+    if old_port_version != 8 or new_port_version != 16 or old_manifest != new_manifest:
         raise ValueError("lfc-ui registry delta changed outside the reviewed FreeRDP dependency request")
     if old_feature.get("supports") != "linux" or new_feature.get("supports") != "linux":
         raise ValueError("lfc-ui FreeRDP platform contract changed")
@@ -277,7 +277,7 @@ def verify_engine_registry_delta(engine: Path, sdk: Path) -> None:
     new_portfile = (sdk / "ports/lfc-ui/portfile.cmake").read_text()
     if old_portfile.replace(
             "85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5",
-            "307afeab287b283514e036aa82ea1bd331dbac2a",
+            "29146a706499f83d464dd28fe29301fee06bcb3d",
             1) != new_portfile:
         raise ValueError("lfc-ui source pin changed outside the reviewed FFmpeg revision")
 
@@ -287,7 +287,7 @@ def verify_engine_registry_delta(engine: Path, sdk: Path) -> None:
     new_lfc_source = next(item for item in new_plan["ports"] if item["name"] == "lfc-ui")
     if old_lfc_source.get("sha") != "85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5":
         raise ValueError("Unexpected engine release-plan lfc-ui source")
-    if new_lfc_source.get("sha") != "307afeab287b283514e036aa82ea1bd331dbac2a":
+    if new_lfc_source.get("sha") != "29146a706499f83d464dd28fe29301fee06bcb3d":
         raise ValueError("Unexpected final release-plan lfc-ui source")
     old_lfc_source["sha"] = new_lfc_source["sha"]
     if old_plan != new_plan:
@@ -414,6 +414,8 @@ index 3a7f5aa..4bc04cf 100644
     new_lfc_versions = json.loads((sdk / "versions/l-/lfc-ui.json").read_text())
     expected_lfc_entries = [
         {"git-tree": SDK_LFC_UI_TREE,
+         "version": "0.3.0", "port-version": 16},
+        {"git-tree": "bbc00cc70e557268570db3e08714d26171c8f06e",
          "version": "0.3.0", "port-version": 15},
         {"git-tree": "cb1a947459fe788d6d697e9e62bb87edec24f3e2",
          "version": "0.3.0", "port-version": 14},
@@ -430,8 +432,8 @@ index 3a7f5aa..4bc04cf 100644
     ]
     if (not isinstance(old_lfc_versions.get("versions"), list)
             or not isinstance(new_lfc_versions.get("versions"), list)
-            or new_lfc_versions["versions"][:7] != expected_lfc_entries
-            or new_lfc_versions["versions"][7:] != old_lfc_versions["versions"]):
+            or new_lfc_versions["versions"][:8] != expected_lfc_entries
+            or new_lfc_versions["versions"][8:] != old_lfc_versions["versions"]):
         raise ValueError("Unexpected lfc-ui versions registry delta")
 
 
