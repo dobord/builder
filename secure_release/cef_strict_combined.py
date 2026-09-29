@@ -623,8 +623,12 @@ def verify_os_only_elf(executable: Path) -> int:
     needed = re.findall(
         r"\(NEEDED\).*?Shared library:\s*\[([^\]]+)\]", dynamic
     )
-    if set(needed) - cef_x11_static.OS_NEEDED:
-        raise RuntimeError("Relocated CEF smoke imports non-OS shared libraries")
+    unexpected = sorted(set(needed) - cef_x11_static.OS_NEEDED)
+    if unexpected:
+        raise RuntimeError(
+            "Relocated CEF smoke imports non-OS shared libraries: "
+            + ",".join(unexpected)
+        )
     return len(needed)
 
 
