@@ -981,11 +981,15 @@ def main() -> None:
             installed, source, boringssl_receipt
         )
         if (boringssl_proof.get("cef_boringssl_isolation_verified") is not True
-                or boringssl_proof.get("cef_cxx_runtime_isolation_verified") is not True):
+                or boringssl_proof.get("cef_cxx_runtime_isolation_verified") is not True
+                or boringssl_proof.get("cef_ffmpeg_isolation_verified") is not True
+                or boringssl_proof.get("cef_atomic_isolation_verified") is not True):
             raise RuntimeError("Installed CEF runtime isolation proof is incomplete")
         summary.update({
             "installed_cef_boringssl_isolation_verified": True,
             "installed_cef_cxx_runtime_isolation_verified": True,
+            "installed_cef_ffmpeg_isolation_verified": True,
+            "installed_cef_atomic_isolation_verified": True,
             "cef_boringssl_collision_count":
                 boringssl_proof["cef_boringssl_collision_count"],
             "cef_boringssl_affected_archive_count":
@@ -998,6 +1002,18 @@ def main() -> None:
                 boringssl_proof["cef_cxx_runtime_affected_archive_count"],
             "cef_cxx_runtime_mapping_sha256":
                 boringssl_proof["cef_cxx_runtime_mapping_sha256"],
+            "cef_ffmpeg_collision_count":
+                boringssl_proof["cef_ffmpeg_collision_count"],
+            "cef_ffmpeg_affected_archive_count":
+                boringssl_proof["cef_ffmpeg_affected_archive_count"],
+            "cef_ffmpeg_mapping_sha256":
+                boringssl_proof["cef_ffmpeg_mapping_sha256"],
+            "cef_atomic_collision_count":
+                boringssl_proof["cef_atomic_collision_count"],
+            "cef_atomic_affected_archive_count":
+                boringssl_proof["cef_atomic_affected_archive_count"],
+            "cef_atomic_mapping_sha256":
+                boringssl_proof["cef_atomic_mapping_sha256"],
             "cef_runtime_mapping_sha256":
                 boringssl_proof["cef_runtime_mapping_sha256"],
         })

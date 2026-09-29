@@ -32,16 +32,32 @@ CEF_VERSION = "152.0.6"
 CEF_PORT_VERSION = 15
 NAMESPACE = "CEF_CHROMIUM_BSSL_"
 CXX_NAMESPACE = "CEF_CHROMIUM_CXX_"
+FFMPEG_NAMESPACE = "CEF_CHROMIUM_FFMPEG_"
+ATOMIC_NAMESPACE = "CEF_CHROMIUM_ATOMIC_"
 OPENSSL_ARCHIVES = ("lib/libssl.a", "lib/libcrypto.a")
+FFMPEG_VERSION = "8.1.2"
+FFMPEG_PORT_VERSION = 4
+FFMPEG_ARCHIVES = (
+    "lib/libavcodec.a",
+    "lib/libavdevice.a",
+    "lib/libavfilter.a",
+    "lib/libavformat.a",
+    "lib/libavutil.a",
+    "lib/libswresample.a",
+    "lib/libswscale.a",
+)
 GXX = Path("/usr/bin/g++-14")
 GCC_ROOT = Path("/usr/lib/gcc/x86_64-linux-gnu/14")
 GCC_RUNTIME_ARCHIVES = ("libstdc++.a", "libgcc.a", "libgcc_eh.a")
+GCC_ATOMIC_ARCHIVE = "libatomic.a"
 CEF_CONFIG = "share/cef-static/cef-static-config.cmake"
 CEF_ARCHIVE = re.compile(r"lib/cef-static/(?:cef_objects|cef_[0-9]{4}_[0-9a-f]{12})\.a\Z")
 SYMBOL = re.compile(r"[A-Za-z_.$][A-Za-z0-9_.$@]*\Z")
 MAX_CEF_ARCHIVES = 4096
 MAX_COLLISIONS = 8192
 MAX_CXX_COLLISIONS = 8192
+MAX_FFMPEG_COLLISIONS = 8192
+MAX_ATOMIC_COLLISIONS = 4096
 MAX_SOURCE_ARCHIVE_BYTES = 1024**3
 MAX_NM_OUTPUT_BYTES = 2 * 1024**3
 MAX_NM_ERROR_BYTES = 16 * 1024**2
@@ -53,6 +69,19 @@ CXX_ANCHORS = frozenset({
     "_ZNSt9type_infoD0Ev",
     "_ZN10__cxxabiv117__class_type_infoD0Ev",
     "_ZNSt9exceptionD0Ev",
+})
+FFMPEG_ANCHORS = frozenset({
+    "av_dynamic_hdr_plus_alloc",
+    "av_dynamic_hdr_plus_create_side_data",
+    "av_dynamic_hdr_plus_from_t35",
+    "av_dynamic_hdr_plus_to_t35",
+})
+ATOMIC_ANCHORS = frozenset({
+    "__atomic_load",
+    "__atomic_store",
+    "__atomic_load_16",
+    "__atomic_store_16",
+    "__atomic_compare_exchange_16",
 })
 
 
@@ -179,6 +208,64 @@ def _gcc_runtime() -> tuple[dict, list[tuple[str, Path]]]:
         "archives": archives,
     }
     return receipt, providers
+
+
+def _gcc_atomic() -> tuple[dict, list[tuple[str, Path]]]:
+    """Bind the exact GCC14 libatomic provider pulled by final static proxy links."""
+    raw = subprocess.check_output(
+        [str(GXX), "-print-file-name=" + GCC_ATOMIC_ARCHIVE],
+        text=True, timeout=30,
+    ).strip()
+    path = Path(raw)
+    require(
+        path.is_absolute() and path.name == GCC_ATOMIC_ARCHIVE,
+        "GCC libatomic archive lookup changed",
+    )
+    root = GCC_ROOT.resolve(strict=True)
+    resolved = path.resolve(strict=True)
+    require(
+        resolved.is_file() and resolved.is_relative_to(root),
+        "GCC libatomic archive escaped pinned GCC14 root",
+    )
+    _archive_size(resolved)
+    receipt = {
+        "name": GCC_ATOMIC_ARCHIVE,
+        "path": resolved.as_posix(),
+        "sha256": digest(resolved),
+    }
+    return receipt, [(GCC_ATOMIC_ARCHIVE, resolved)]
+
+
+def _ffmpeg_runtime(
+    installed: Path,
+    prefix: Path,
+    *,
+    expected: dict | None = None,
+    require_status: bool = True,
+) -> tuple[dict, list[tuple[str, Path]]]:
+    """Bind the complete pinned vcpkg FFmpeg static provider set and ownership."""
+    required = {TRIPLET + "/" + name for name in FFMPEG_ARCHIVES}
+    owner = _owner(
+        installed,
+        "ffmpeg",
+        FFMPEG_VERSION,
+        FFMPEG_PORT_VERSION,
+        required,
+        expected=None if expected is None else expected.get("ownership"),
+        require_status=require_status,
+    )
+    providers = [(name, regular(prefix, name)) for name in FFMPEG_ARCHIVES]
+    archives = {name: digest(path) for name, path in providers}
+    result = {
+        "version": FFMPEG_VERSION,
+        "port_version": FFMPEG_PORT_VERSION,
+        "ownership": owner,
+        "archives": archives,
+    }
+    if expected is not None:
+        require(result == expected,
+                "FFmpeg static runtime provider changed in SDK transport")
+    return result, providers
 
 
 def _symbol_records(nm: Path, archive: Path, *, archive_limit: int | None = None):
@@ -499,13 +586,22 @@ def _domain_mapping_bytes(symbols: list[str], prefix: str) -> bytes:
     ).encode("ascii")
 
 
-def _mapping_bytes(symbols: list[str], cxx_symbols: list[str]) -> bytes:
+def _mapping_bytes(
+    symbols: list[str],
+    cxx_symbols: list[str],
+    ffmpeg_symbols: list[str],
+    atomic_symbols: list[str],
+) -> bytes:
     pairs = {
         **{name: NAMESPACE + name for name in symbols},
         **{name: CXX_NAMESPACE + name for name in cxx_symbols},
+        **{name: FFMPEG_NAMESPACE + name for name in ffmpeg_symbols},
+        **{name: ATOMIC_NAMESPACE + name for name in atomic_symbols},
     }
     require(
-        len(pairs) == len(symbols) + len(cxx_symbols),
+        len(pairs)
+        == len(symbols) + len(cxx_symbols) + len(ffmpeg_symbols)
+           + len(atomic_symbols),
         "Overlapping CEF runtime isolation collision sets",
     )
     return "".join(
@@ -546,18 +642,40 @@ def install(installed: Path, source: Path, diagnostics: Path) -> dict:
         gcc_defined.update(_defined(table))
         gcc_names.update(name for name, _ in table)
 
+    atomic_runtime, atomic_providers = _gcc_atomic()
+    atomic_defined: set[str] = set()
+    atomic_names: set[str] = set()
+    for _, path in atomic_providers:
+        table = _symbols(nm, path)
+        atomic_defined.update(_defined(table))
+        atomic_names.update(name for name, _ in table)
+
+    ffmpeg_runtime, ffmpeg_providers = _ffmpeg_runtime(
+        installed, prefix, require_status=True
+    )
+    ffmpeg_defined: set[str] = set()
+    ffmpeg_names: set[str] = set()
+    for _, path in ffmpeg_providers:
+        table = _symbols(nm, path)
+        ffmpeg_defined.update(_defined(table))
+        ffmpeg_names.update(name for name, _ in table)
+
     collisions: set[str] = set()
     cxx_collisions: set[str] = set()
+    ffmpeg_collisions: set[str] = set()
+    atomic_collisions: set[str] = set()
     source_hashes = _archive_hashes(cef)
     profiles: dict[str, dict[str, int | str]] = {}
     candidates: dict[str, Counter] = {}
-    watch = openssl_defined | gcc_defined
+    watch = openssl_defined | gcc_defined | ffmpeg_defined | atomic_defined
     for name, path in cef:
         profile, relevant = _profile_symbols(
             nm,
             path,
             watch=watch,
-            forbidden_prefixes=(NAMESPACE, CXX_NAMESPACE),
+            forbidden_prefixes=(
+                NAMESPACE, CXX_NAMESPACE, FFMPEG_NAMESPACE, ATOMIC_NAMESPACE
+            ),
         )
         profiles[name] = profile
         candidates[name] = relevant
@@ -568,32 +686,55 @@ def install(installed: Path, source: Path, diagnostics: Path) -> dict:
                 collisions.add(symbol)
             if symbol in gcc_defined:
                 cxx_collisions.add(symbol)
+            if symbol in ffmpeg_defined:
+                ffmpeg_collisions.add(symbol)
+            if symbol in atomic_defined:
+                atomic_collisions.add(symbol)
 
+    domains = (collisions, cxx_collisions, ffmpeg_collisions, atomic_collisions)
     require(
-        not collisions.intersection(cxx_collisions),
+        sum(len(domain) for domain in domains)
+        == len(set().union(*domains)),
         "CEF runtime collision belongs to multiple provider namespaces",
     )
     ordered = sorted(collisions)
     cxx_ordered = sorted(cxx_collisions)
+    ffmpeg_ordered = sorted(ffmpeg_collisions)
+    atomic_ordered = sorted(atomic_collisions)
     require(ANCHORS <= collisions
             and 1 <= len(ordered) <= MAX_COLLISIONS,
             "Unexpected Chromium/OpenSSL collision inventory")
     require(CXX_ANCHORS <= cxx_collisions
             and 1 <= len(cxx_ordered) <= MAX_CXX_COLLISIONS,
             "Unexpected Chromium/GCC runtime collision inventory")
+    require(FFMPEG_ANCHORS <= ffmpeg_collisions
+            and 1 <= len(ffmpeg_ordered) <= MAX_FFMPEG_COLLISIONS,
+            "Unexpected Chromium/FFmpeg collision inventory")
+    require(ATOMIC_ANCHORS <= atomic_collisions
+            and 1 <= len(atomic_ordered) <= MAX_ATOMIC_COLLISIONS,
+            "Unexpected Chromium/libatomic collision inventory")
     require(all(SYMBOL.fullmatch(name) is not None and len(name) <= 512
-                for name in ordered + cxx_ordered),
+                for name in ordered + cxx_ordered
+                + ffmpeg_ordered + atomic_ordered),
             "Invalid Chromium runtime collision symbol")
     renamed = {name: NAMESPACE + name for name in ordered}
     renamed.update({name: CXX_NAMESPACE + name for name in cxx_ordered})
+    renamed.update({name: FFMPEG_NAMESPACE + name for name in ffmpeg_ordered})
+    renamed.update({name: ATOMIC_NAMESPACE + name for name in atomic_ordered})
     require(
-        not set(renamed.values()).intersection(openssl_names | gcc_names),
+        not set(renamed.values()).intersection(
+            openssl_names | gcc_names | ffmpeg_names | atomic_names
+        ),
         "CEF runtime isolation namespace already exists",
     )
 
     diagnostics.mkdir(parents=True, exist_ok=False)
     mapping = diagnostics / "redefine-syms.txt"
-    mapping.write_bytes(_mapping_bytes(ordered, cxx_ordered))
+    mapping.write_bytes(
+        _mapping_bytes(
+            ordered, cxx_ordered, ffmpeg_ordered, atomic_ordered
+        )
+    )
     mapping.chmod(0o600)
     mapping_sha = digest(mapping)
     boringssl_mapping_sha = hashlib.sha256(
@@ -602,13 +743,23 @@ def install(installed: Path, source: Path, diagnostics: Path) -> dict:
     cxx_mapping_sha = hashlib.sha256(
         _domain_mapping_bytes(cxx_ordered, CXX_NAMESPACE)
     ).hexdigest()
+    ffmpeg_mapping_sha = hashlib.sha256(
+        _domain_mapping_bytes(ffmpeg_ordered, FFMPEG_NAMESPACE)
+    ).hexdigest()
+    atomic_mapping_sha = hashlib.sha256(
+        _domain_mapping_bytes(atomic_ordered, ATOMIC_NAMESPACE)
+    ).hexdigest()
 
     affected: dict[str, dict] = {}
     boringssl_affected: set[str] = set()
     cxx_affected: set[str] = set()
+    ffmpeg_affected: set[str] = set()
+    atomic_affected: set[str] = set()
     try:
         reverse = {new: old for old, new in renamed.items()}
-        all_collisions = collisions | cxx_collisions
+        all_collisions = (
+            collisions | cxx_collisions | ffmpeg_collisions | atomic_collisions
+        )
         watched = all_collisions | set(renamed.values())
         for name, path in cef:
             relevant = Counter(
@@ -624,6 +775,10 @@ def install(installed: Path, source: Path, diagnostics: Path) -> dict:
                 boringssl_affected.add(name)
             if any(symbol in cxx_collisions for symbol, _ in relevant):
                 cxx_affected.add(name)
+            if any(symbol in ffmpeg_collisions for symbol, _ in relevant):
+                ffmpeg_affected.add(name)
+            if any(symbol in atomic_collisions for symbol, _ in relevant):
+                atomic_affected.add(name)
             old_mode = stat.S_IMODE(path.stat().st_mode)
             fd, temp_name = tempfile.mkstemp(
                 prefix=".cef-bssl-", suffix=".a", dir=path.parent
@@ -687,29 +842,53 @@ def install(installed: Path, source: Path, diagnostics: Path) -> dict:
         current_gcc_runtime == gcc_runtime,
         "GCC static runtime provider changed during CEF runtime isolation",
     )
+    current_atomic_runtime, _ = _gcc_atomic()
+    require(
+        current_atomic_runtime == atomic_runtime,
+        "GCC libatomic provider changed during CEF runtime isolation",
+    )
+    current_ffmpeg_runtime, _ = _ffmpeg_runtime(
+        installed, prefix, require_status=True
+    )
+    require(
+        current_ffmpeg_runtime == ffmpeg_runtime,
+        "FFmpeg provider changed during CEF runtime isolation",
+    )
 
     receipt = {
         "schema": 1,
         "kind": "cef-chromium-boringssl-isolation",
         "namespace": NAMESPACE,
         "cxx_namespace": CXX_NAMESPACE,
+        "ffmpeg_namespace": FFMPEG_NAMESPACE,
+        "atomic_namespace": ATOMIC_NAMESPACE,
         "mapping_sha256": mapping_sha,
         "boringssl_mapping_sha256": boringssl_mapping_sha,
         "cxx_mapping_sha256": cxx_mapping_sha,
+        "ffmpeg_mapping_sha256": ffmpeg_mapping_sha,
+        "atomic_mapping_sha256": atomic_mapping_sha,
         "collision_count": len(ordered),
         "symbols": ordered,
         "cxx_collision_count": len(cxx_ordered),
         "cxx_symbols": cxx_ordered,
+        "ffmpeg_collision_count": len(ffmpeg_ordered),
+        "ffmpeg_symbols": ffmpeg_ordered,
+        "atomic_collision_count": len(atomic_ordered),
+        "atomic_symbols": atomic_ordered,
         "openssl": {
             "version": OPENSSL_VERSION,
             "archives": provider_hashes,
         },
         "gcc_runtime": gcc_runtime,
+        "atomic_runtime": atomic_runtime,
+        "ffmpeg_runtime": ffmpeg_runtime,
         "cef_archives": final_hashes,
         "ownership": ownership_receipt,
         "affected": affected,
         "boringssl_affected_archives": sorted(boringssl_affected),
         "cxx_affected_archives": sorted(cxx_affected),
+        "ffmpeg_affected_archives": sorted(ffmpeg_affected),
+        "atomic_affected_archives": sorted(atomic_affected),
         "nm_sha256": digest(nm),
         "objcopy_sha256": digest(objcopy),
     }
@@ -727,10 +906,14 @@ def verify(installed: Path, source: Path, receipt: dict) -> dict:
             and receipt.get("kind") == "cef-chromium-boringssl-isolation"
             and receipt.get("namespace") == NAMESPACE
             and receipt.get("cxx_namespace") == CXX_NAMESPACE
+            and receipt.get("ffmpeg_namespace") == FFMPEG_NAMESPACE
+            and receipt.get("atomic_namespace") == ATOMIC_NAMESPACE
             and receipt.get("openssl", {}).get("version") == OPENSSL_VERSION,
             "Missing CEF runtime isolation receipt")
     symbols = receipt.get("symbols")
     cxx_symbols = receipt.get("cxx_symbols")
+    ffmpeg_symbols = receipt.get("ffmpeg_symbols")
+    atomic_symbols = receipt.get("atomic_symbols")
     require(isinstance(symbols, list)
             and symbols == sorted(set(symbols))
             and ANCHORS <= set(symbols)
@@ -741,17 +924,45 @@ def verify(installed: Path, source: Path, receipt: dict) -> dict:
             and cxx_symbols == sorted(set(cxx_symbols))
             and CXX_ANCHORS <= set(cxx_symbols)
             and len(cxx_symbols) == receipt.get("cxx_collision_count")
-            and 1 <= len(cxx_symbols) <= MAX_CXX_COLLISIONS
-            and not set(symbols).intersection(cxx_symbols),
+            and 1 <= len(cxx_symbols) <= MAX_CXX_COLLISIONS,
             "Invalid CEF C++ runtime isolation mapping")
+    require(isinstance(ffmpeg_symbols, list)
+            and ffmpeg_symbols == sorted(set(ffmpeg_symbols))
+            and FFMPEG_ANCHORS <= set(ffmpeg_symbols)
+            and len(ffmpeg_symbols) == receipt.get("ffmpeg_collision_count")
+            and 1 <= len(ffmpeg_symbols) <= MAX_FFMPEG_COLLISIONS,
+            "Invalid CEF FFmpeg isolation mapping")
+    require(isinstance(atomic_symbols, list)
+            and atomic_symbols == sorted(set(atomic_symbols))
+            and ATOMIC_ANCHORS <= set(atomic_symbols)
+            and len(atomic_symbols) == receipt.get("atomic_collision_count")
+            and 1 <= len(atomic_symbols) <= MAX_ATOMIC_COLLISIONS,
+            "Invalid CEF libatomic isolation mapping")
+    domains = [
+        set(symbols), set(cxx_symbols), set(ffmpeg_symbols), set(atomic_symbols)
+    ]
     require(
-        hashlib.sha256(_mapping_bytes(symbols, cxx_symbols)).hexdigest()
-            == receipt.get("mapping_sha256")
+        sum(len(domain) for domain in domains)
+        == len(set().union(*domains)),
+        "CEF runtime isolation collision domains overlap in receipt",
+    )
+    require(
+        hashlib.sha256(
+            _mapping_bytes(
+                symbols, cxx_symbols, ffmpeg_symbols, atomic_symbols
+            )
+        ).hexdigest() == receipt.get("mapping_sha256")
         and hashlib.sha256(_domain_mapping_bytes(symbols, NAMESPACE)).hexdigest()
             == receipt.get("boringssl_mapping_sha256")
         and hashlib.sha256(
             _domain_mapping_bytes(cxx_symbols, CXX_NAMESPACE)
-        ).hexdigest() == receipt.get("cxx_mapping_sha256"),
+        ).hexdigest() == receipt.get("cxx_mapping_sha256")
+        and hashlib.sha256(
+            _domain_mapping_bytes(ffmpeg_symbols, FFMPEG_NAMESPACE)
+        ).hexdigest() == receipt.get("ffmpeg_mapping_sha256")
+        and hashlib.sha256(
+            _domain_mapping_bytes(atomic_symbols, ATOMIC_NAMESPACE)
+        ).hexdigest() == receipt.get("atomic_mapping_sha256"),
         "Invalid combined CEF runtime isolation mapping",
     )
     installed = installed.resolve(strict=True)
@@ -766,6 +977,21 @@ def verify(installed: Path, source: Path, receipt: dict) -> dict:
     require(
         current_gcc_runtime == receipt.get("gcc_runtime"),
         "GCC static runtime provider changed in SDK transport",
+    )
+    current_atomic_runtime, _ = _gcc_atomic()
+    require(
+        current_atomic_runtime == receipt.get("atomic_runtime"),
+        "GCC libatomic provider changed in SDK transport",
+    )
+    current_ffmpeg_runtime, _ = _ffmpeg_runtime(
+        installed,
+        prefix,
+        expected=receipt.get("ffmpeg_runtime"),
+        require_status=False,
+    )
+    require(
+        current_ffmpeg_runtime == receipt.get("ffmpeg_runtime"),
+        "FFmpeg provider changed in SDK transport",
     )
 
     cef = _cef_archives(prefix)
@@ -794,6 +1020,8 @@ def verify(installed: Path, source: Path, receipt: dict) -> dict:
     affected = receipt.get("affected")
     boringssl_affected = receipt.get("boringssl_affected_archives")
     cxx_affected = receipt.get("cxx_affected_archives")
+    ffmpeg_affected = receipt.get("ffmpeg_affected_archives")
+    atomic_affected = receipt.get("atomic_affected_archives")
     require(isinstance(affected, dict)
             and affected and set(affected) <= set(names),
             "CEF runtime affected archive receipt changed")
@@ -808,9 +1036,26 @@ def verify(installed: Path, source: Path, receipt: dict) -> dict:
         isinstance(cxx_affected, list)
         and cxx_affected == sorted(set(cxx_affected))
         and set(cxx_affected) <= set(affected)
-        and cxx_affected
-        and set(affected) == set(boringssl_affected) | set(cxx_affected),
+        and cxx_affected,
         "CEF C++ runtime affected archive receipt changed",
+    )
+    require(
+        isinstance(ffmpeg_affected, list)
+        and ffmpeg_affected == sorted(set(ffmpeg_affected))
+        and set(ffmpeg_affected) <= set(affected)
+        and ffmpeg_affected,
+        "CEF FFmpeg affected archive receipt changed",
+    )
+    require(
+        isinstance(atomic_affected, list)
+        and atomic_affected == sorted(set(atomic_affected))
+        and set(atomic_affected) <= set(affected)
+        and atomic_affected
+        and set(affected) == (
+            set(boringssl_affected) | set(cxx_affected)
+            | set(ffmpeg_affected) | set(atomic_affected)
+        ),
+        "CEF libatomic affected archive receipt changed",
     )
     for name, record in affected.items():
         require(isinstance(record, dict)
@@ -838,5 +1083,13 @@ def verify(installed: Path, source: Path, receipt: dict) -> dict:
         "cef_cxx_runtime_collision_count": len(cxx_symbols),
         "cef_cxx_runtime_affected_archive_count": len(cxx_affected),
         "cef_cxx_runtime_mapping_sha256": receipt["cxx_mapping_sha256"],
+        "cef_ffmpeg_isolation_verified": True,
+        "cef_ffmpeg_collision_count": len(ffmpeg_symbols),
+        "cef_ffmpeg_affected_archive_count": len(ffmpeg_affected),
+        "cef_ffmpeg_mapping_sha256": receipt["ffmpeg_mapping_sha256"],
+        "cef_atomic_isolation_verified": True,
+        "cef_atomic_collision_count": len(atomic_symbols),
+        "cef_atomic_affected_archive_count": len(atomic_affected),
+        "cef_atomic_mapping_sha256": receipt["atomic_mapping_sha256"],
         "cef_runtime_mapping_sha256": receipt["mapping_sha256"],
     }

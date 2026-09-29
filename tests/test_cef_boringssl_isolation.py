@@ -74,14 +74,39 @@ def fixture(root: Path):
         "int cxx_exception(void) __asm__(\"_ZNSt9exceptionD0Ev\");\n"
         "int cxx_typeinfo(void){return 29;}\n"
         "int cxx_class(void){return 31;}\n"
-        "int cxx_exception(void){return 37;}\n")
+        "int cxx_exception(void){return 37;}\n"
+        "int ff_hdr_alloc(void) __asm__(\"av_dynamic_hdr_plus_alloc\");\n"
+        "int ff_hdr_side(void) __asm__(\"av_dynamic_hdr_plus_create_side_data\");\n"
+        "int ff_hdr_from(void) __asm__(\"av_dynamic_hdr_plus_from_t35\");\n"
+        "int ff_hdr_to(void) __asm__(\"av_dynamic_hdr_plus_to_t35\");\n"
+        "int atomic_load(void) __asm__(\"__atomic_load\");\n"
+        "int atomic_store(void) __asm__(\"__atomic_store\");\n"
+        "int atomic_load16(void) __asm__(\"__atomic_load_16\");\n"
+        "int atomic_store16(void) __asm__(\"__atomic_store_16\");\n"
+        "int atomic_cas16(void) __asm__(\"__atomic_compare_exchange_16\");\n"
+        "int ff_hdr_alloc(void){return 2;} int ff_hdr_side(void){return 3;}\n"
+        "int ff_hdr_from(void){return 5;} int ff_hdr_to(void){return 7;}\n"
+        "int atomic_load(void){return 11;} int atomic_store(void){return 13;}\n"
+        "int atomic_load16(void){return 17;} int atomic_store16(void){return 19;}\n"
+        "int atomic_cas16(void){return 23;}\n")
     user = archive(root, "cef_user",
         "int SSL_new(void); int SSL_use_certificate(void); int PEM_read_PrivateKey(void);\n"
         "int cxx_typeinfo(void) __asm__(\"_ZNSt9type_infoD0Ev\");\n"
         "int cxx_class(void) __asm__(\"_ZN10__cxxabiv117__class_type_infoD0Ev\");\n"
         "int cxx_exception(void) __asm__(\"_ZNSt9exceptionD0Ev\");\n"
+        "int ff_hdr_alloc(void) __asm__(\"av_dynamic_hdr_plus_alloc\");\n"
+        "int ff_hdr_side(void) __asm__(\"av_dynamic_hdr_plus_create_side_data\");\n"
+        "int ff_hdr_from(void) __asm__(\"av_dynamic_hdr_plus_from_t35\");\n"
+        "int ff_hdr_to(void) __asm__(\"av_dynamic_hdr_plus_to_t35\");\n"
+        "int atomic_load(void) __asm__(\"__atomic_load\");\n"
+        "int atomic_store(void) __asm__(\"__atomic_store\");\n"
+        "int atomic_load16(void) __asm__(\"__atomic_load_16\");\n"
+        "int atomic_store16(void) __asm__(\"__atomic_store_16\");\n"
+        "int atomic_cas16(void) __asm__(\"__atomic_compare_exchange_16\");\n"
         "int cef_value(void){return SSL_new()+SSL_use_certificate()+PEM_read_PrivateKey()"
-        "+cxx_typeinfo()+cxx_class()+cxx_exception();}\n")
+        "+cxx_typeinfo()+cxx_class()+cxx_exception()+ff_hdr_alloc()+ff_hdr_side()"
+        "+ff_hdr_from()+ff_hdr_to()+atomic_load()+atomic_store()+atomic_load16()"
+        "+atomic_store16()+atomic_cas16();}\n")
     ssl = archive(root, "openssl_ssl",
         "int SSL_new(void){return 17;} int SSL_use_certificate(void){return 19;}\n"
         "int openssl_ssl_value(void){return SSL_new()+SSL_use_certificate();}\n")
@@ -155,7 +180,68 @@ def fixture(root: Path):
         "root": gcc_root.as_posix(),
         "archives": runtime_paths,
     }
-    return installed, source, names, runtime, providers
+
+    atomic = archive(root, "fixture_libatomic",
+        "int atomic_load(void) __asm__(\"__atomic_load\");\n"
+        "int atomic_store(void) __asm__(\"__atomic_store\");\n"
+        "int atomic_load16(void) __asm__(\"__atomic_load_16\");\n"
+        "int atomic_store16(void) __asm__(\"__atomic_store_16\");\n"
+        "int atomic_cas16(void) __asm__(\"__atomic_compare_exchange_16\");\n"
+        "int atomic_load(void){return 101;} int atomic_store(void){return 103;}\n"
+        "int atomic_load16(void){return 107;} int atomic_store16(void){return 109;}\n"
+        "int atomic_cas16(void){return 113;}\n")
+    atomic_target = gcc_root / "libatomic.a"
+    shutil.copy2(atomic, atomic_target)
+    atomic_receipt = {
+        "name": "libatomic.a",
+        "path": atomic_target.as_posix(),
+        "sha256": isolation.digest(atomic_target),
+    }
+    atomic_providers = [("libatomic.a", atomic_target)]
+
+    ffmpeg_root = root / "ffmpeg-runtime"
+    ffmpeg_root.mkdir()
+    ffmpeg_provider = archive(root, "fixture_ffmpeg",
+        "int ff_hdr_alloc(void) __asm__(\"av_dynamic_hdr_plus_alloc\");\n"
+        "int ff_hdr_side(void) __asm__(\"av_dynamic_hdr_plus_create_side_data\");\n"
+        "int ff_hdr_from(void) __asm__(\"av_dynamic_hdr_plus_from_t35\");\n"
+        "int ff_hdr_to(void) __asm__(\"av_dynamic_hdr_plus_to_t35\");\n"
+        "int ff_hdr_alloc(void){return 127;} int ff_hdr_side(void){return 131;}\n"
+        "int ff_hdr_from(void){return 137;} int ff_hdr_to(void){return 139;}\n")
+    ffmpeg_providers = []
+    ffmpeg_archives = {}
+    for index, name in enumerate(isolation.FFMPEG_ARCHIVES):
+        target = ffmpeg_root / Path(name).name
+        if name.endswith("libavutil.a"):
+            shutil.copy2(ffmpeg_provider, target)
+        else:
+            dummy = archive(
+                root,
+                "fixture_ffmpeg_dummy_" + str(index),
+                "int fixture_ffmpeg_dummy_" + str(index)
+                + "(void){return " + str(index + 1) + ";}\n",
+            )
+            shutil.copy2(dummy, target)
+        ffmpeg_providers.append((name, target))
+        ffmpeg_archives[name] = isolation.digest(target)
+    ffmpeg_receipt = {
+        "version": isolation.FFMPEG_VERSION,
+        "port_version": isolation.FFMPEG_PORT_VERSION,
+        "ownership": {
+            "package": "ffmpeg",
+            "version": isolation.FFMPEG_VERSION,
+            "port_version": isolation.FFMPEG_PORT_VERSION,
+            "triplet": T,
+            "owner": "ffmpeg_fixture_" + T + ".list",
+            "owner_sha256": "e" * 64,
+            "required_count": len(isolation.FFMPEG_ARCHIVES),
+        },
+        "archives": ffmpeg_archives,
+    }
+    return (
+        installed, source, names, runtime, providers,
+        atomic_receipt, atomic_providers, ffmpeg_receipt, ffmpeg_providers,
+    )
 
 
 def consumer(
@@ -172,7 +258,7 @@ def consumer(
     exe = root / label
     main.write_text(
         "int cef_value(void); int openssl_ssl_value(void); int openssl_crypto_value(void);\n"
-        "int main(void){return cef_value()!=128 || openssl_ssl_value()!=36 || "
+        "int main(void){return cef_value()!=228 || openssl_ssl_value()!=36 || "
         "openssl_crypto_value()!=23;}\n",
         encoding="utf-8",
     )
@@ -202,6 +288,10 @@ class NativeTests(unittest.TestCase):
             self.names,
             self.runtime_receipt,
             self.runtime_providers,
+            self.atomic_receipt,
+            self.atomic_providers,
+            self.ffmpeg_receipt,
+            self.ffmpeg_providers,
         ) = fixture(self.root)
         self.prefix = self.installed / T
         def runtime():
@@ -222,9 +312,39 @@ class NativeTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
+        def atomic():
+            path = self.atomic_providers[0][1]
+            return {
+                **self.atomic_receipt,
+                "sha256": isolation.digest(path),
+            }, self.atomic_providers
+        atomic_patcher = mock.patch.object(
+            isolation, "_gcc_atomic", side_effect=atomic
+        )
+        atomic_patcher.start()
+        self.addCleanup(atomic_patcher.stop)
+
+        def ffmpeg(installed, prefix, *, expected=None, require_status=True):
+            receipt = {
+                **self.ffmpeg_receipt,
+                "archives": {
+                    name: isolation.digest(path)
+                    for name, path in self.ffmpeg_providers
+                },
+            }
+            if expected is not None and receipt != expected:
+                raise ValueError("FFmpeg static runtime provider changed in SDK transport")
+            return receipt, self.ffmpeg_providers
+        ffmpeg_patcher = mock.patch.object(
+            isolation, "_ffmpeg_runtime", side_effect=ffmpeg
+        )
+        ffmpeg_patcher.start()
+        self.addCleanup(ffmpeg_patcher.stop)
+
     def test_duplicate_ssl_providers_fail_then_namespaced_cef_links_and_relocates(self):
         failed = consumer(
-            self.root, self.prefix, self.names, self.runtime_providers,
+            self.root, self.prefix, self.names,
+            self.runtime_providers + self.atomic_providers + self.ffmpeg_providers,
             "before", ok=False
         )
         self.assertNotEqual(failed.returncode, 0)
@@ -245,6 +365,12 @@ class NativeTests(unittest.TestCase):
         self.assertEqual(proof["cef_cxx_runtime_collision_count"], 3)
         self.assertEqual(set(receipt["cxx_symbols"]), isolation.CXX_ANCHORS)
         self.assertEqual(receipt["gcc_runtime"], self.runtime_receipt)
+        self.assertTrue(proof["cef_ffmpeg_isolation_verified"])
+        self.assertEqual(proof["cef_ffmpeg_collision_count"], 4)
+        self.assertEqual(set(receipt["ffmpeg_symbols"]), isolation.FFMPEG_ANCHORS)
+        self.assertTrue(proof["cef_atomic_isolation_verified"])
+        self.assertEqual(proof["cef_atomic_collision_count"], 5)
+        self.assertEqual(set(receipt["atomic_symbols"]), isolation.ATOMIC_ANCHORS)
         self.assertEqual(set(receipt["ownership"]), {"cef-static", "openssl"})
         for owner in receipt["ownership"].values():
             self.assertRegex(owner["owner_sha256"], r"^[0-9a-f]{64}$")
@@ -253,6 +379,8 @@ class NativeTests(unittest.TestCase):
         self.assertGreaterEqual(proof["cef_cxx_runtime_affected_archive_count"], 1)
         self.assertTrue(receipt["boringssl_affected_archives"])
         self.assertTrue(receipt["cxx_affected_archives"])
+        self.assertTrue(receipt["ffmpeg_affected_archives"])
+        self.assertTrue(receipt["atomic_affected_archives"])
         for record in receipt["affected"].values():
             self.assertGreater(record["global_symbol_count"], 0)
             self.assertRegex(record["global_symbol_sha256"], r"^[0-9a-f]{64}$")
@@ -262,7 +390,9 @@ class NativeTests(unittest.TestCase):
              for name in isolation.OPENSSL_ARCHIVES},
         )
         consumer(
-            self.root, self.prefix, self.names, self.runtime_providers, "after"
+            self.root, self.prefix, self.names,
+            self.runtime_providers + self.atomic_providers + self.ffmpeg_providers,
+            "after"
         )
 
         moved = self.root / "relocated"
@@ -275,7 +405,8 @@ class NativeTests(unittest.TestCase):
             isolation.verify(moved, self.source, receipt), proof
         )
         consumer(
-            self.root, moved / T, self.names, self.runtime_providers,
+            self.root, moved / T, self.names,
+            self.runtime_providers + self.atomic_providers + self.ffmpeg_providers,
             "relocated-consumer"
         )
 
@@ -305,6 +436,20 @@ class NativeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "GCC static runtime provider changed"):
             isolation.verify(self.installed, self.source, receipt)
         runtime.write_bytes(saved)
+
+        atomic = self.atomic_providers[0][1]
+        saved = atomic.read_bytes()
+        atomic.write_bytes(saved + b"x")
+        with self.assertRaisesRegex(ValueError, "libatomic provider changed"):
+            isolation.verify(self.installed, self.source, receipt)
+        atomic.write_bytes(saved)
+
+        ffmpeg = self.ffmpeg_providers[-3][1]
+        saved = ffmpeg.read_bytes()
+        ffmpeg.write_bytes(saved + b"x")
+        with self.assertRaisesRegex(ValueError, "FFmpeg"):
+            isolation.verify(self.installed, self.source, receipt)
+        ffmpeg.write_bytes(saved)
 
     def test_transport_without_status_still_requires_exact_owner_receipt(self):
         receipt = isolation.install(
@@ -462,10 +607,18 @@ class PolicyTests(unittest.TestCase):
         import inspect
         text = inspect.getsource(isolation)
         self.assertIn('"--redefine-syms="', text)
-        self.assertIn("watch = openssl_defined | gcc_defined", text)
+        self.assertIn(
+            "watch = openssl_defined | gcc_defined | ffmpeg_defined | atomic_defined",
+            text,
+        )
         self.assertIn('kind in {"U", "w", "v"}', text)
         self.assertIn("CXX_NAMESPACE", text)
+        self.assertIn("FFMPEG_NAMESPACE", text)
+        self.assertIn("ATOMIC_NAMESPACE", text)
         self.assertIn("GCC_RUNTIME_ARCHIVES", text)
+        self.assertIn("GCC_ATOMIC_ARCHIVE", text)
+        self.assertEqual(isolation.FFMPEG_VERSION, "8.1.2")
+        self.assertEqual(isolation.FFMPEG_PORT_VERSION, 4)
         self.assertNotIn("--allow-multiple-definition", text)
         self.assertNotIn("--unresolved-symbols", text)
         self.assertNotIn("--exclude-libs", text)
