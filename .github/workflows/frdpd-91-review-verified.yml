@@ -9,8 +9,8 @@ concurrency:
   group: frdpd-91-final-${{ github.sha }}
   cancel-in-progress: false
 env:
-  SOURCE_SHA: fa1f1b54b77b637a5efc8f7cbeabfdf0958a0e6e
-  SOURCE_TREE: a445afc8ca51eabab9cabbcc2df52efb01af33a2
+  SOURCE_SHA: c94bb258047b9f14e45e270c394a8584ce954145
+  SOURCE_TREE: 98a7433cb5bc51b8cdb41d44e589c760b6e60148
   REVIEW_BASE: 3c9171929662704418ed989cb46aa2c021234c76
   ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
 jobs:
@@ -43,7 +43,7 @@ jobs:
           def verified(name,script,timeout=900):
               script=script.replace('-DWITH_FRDPD_STRICT_WARNINGS=ON','-DWITH_FRDPD_STRICT_WARNINGS=ON -DWITH_VERBOSE_WINPR_ASSERT=OFF')
               script=script.replace('GfxPolicy|ZGfxHistory','GfxPolicy|CursorAdapter|ZGfxHistory')
-              script=script.replace('X11WindowTracker|RemoteAppContract','X11WindowTracker|X11WindowCapture|SceneV2|WindowLease|X11ImageConvert|NativePath|RemoteAppContract')
+              script=script.replace('X11WindowTracker|RemoteAppContract','X11WindowTracker|X11WindowCapture|X11WindowCompositor|SceneV2.*|WindowLease|X11ImageConvert|GraphicsControl|DamageState|SharedBuffer|NativePath|RemoteAppContract')
               if name=='focused':
                   script="grep -q '^#define WITH_GFX_H264' /opt/freerdp-build/include/freerdp/config.h && "+script
               if name.startswith('production-'):
