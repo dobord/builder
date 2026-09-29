@@ -29,11 +29,11 @@ from . import (
 )
 
 ENGINE_VCPKG = "b4bb281192ea8bb004542012ac804b988a4ff403"
-SDK_VCPKG_CHECKOUT = "bc9fa678a7f7cb2b1f29c0e34c251cf4ae061438"
-SDK_VCPKG_CHECKOUT_TREE = "c755f345d8def011f2a19612f60593093dfff57a"
-SDK_VCPKG = "c1e16b83cffc80c145aaf15c17d199312c58350b"
-SDK_VCPKG_TREE = "50b7b6224122277c3458f0bd990fa2926fd17667"
-SDK_LFC_UI_TREE = "cb1a947459fe788d6d697e9e62bb87edec24f3e2"
+SDK_VCPKG_CHECKOUT = "c1e16b83cffc80c145aaf15c17d199312c58350b"
+SDK_VCPKG_CHECKOUT_TREE = "50b7b6224122277c3458f0bd990fa2926fd17667"
+SDK_VCPKG = "dd4388c816671daee94dc00c21c01f56d7ba4ea9"
+SDK_VCPKG_TREE = "74974f7a2787317d1d3fe12765cd44fa624ffa0b"
+SDK_LFC_UI_TREE = "bbc00cc70e557268570db3e08714d26171c8f06e"
 UPSTREAM = "9e593bb18ea69cc5095e012465dcd675a822ed0d"
 CEF = "2aff22e09daaa5c28780c5766a70ee13e61c93b6"
 LOCKFREECORO = "24038aed3a0be642adb60e71bd994ae8f0d90140"
@@ -72,57 +72,51 @@ def materialize_sdk_registry(root: Path) -> dict[str, str]:
 
     edits = (
         (
-            "ports/freerdp/portfile.cmake",
-            "if (NOT HAS_SHADOW_SUBSYSTEM)\n"
-            "    list(APPEND FEATURE_OPTIONS -DWITH_SHADOW_SUBSYSTEM=OFF -DWITH_SERVER_SHADOW_CLI=OFF)\n"
-            "endif()\n\n"
-            "vcpkg_find_acquire_program(PKGCONFIG)\n",
-            "if (NOT HAS_SHADOW_SUBSYSTEM)\n"
-            "    list(APPEND FEATURE_OPTIONS -DWITH_SHADOW_SUBSYSTEM=OFF -DWITH_SERVER_SHADOW_CLI=OFF)\n"
-            "endif()\n\n"
-            "# Installed static channel OBJECT libraries are part of the exported SDK link\n"
-            "# interface. GCC LTO objects are discoverable by nm through liblto_plugin but\n"
-            "# cannot be consumed by the qualified LLD linker used by the final CEF SDK.\n"
-            "# Keep Linux static FreeRDP link inputs as native ELF relocatables.\n"
-            "if(VCPKG_TARGET_IS_LINUX AND VCPKG_LIBRARY_LINKAGE STREQUAL \"static\")\n"
-            "    list(APPEND FEATURE_OPTIONS -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=OFF)\n"
-            "endif()\n\n"
-            "vcpkg_find_acquire_program(PKGCONFIG)\n",
+            "ports/lfc-ui/use-installed-freerdp.cmake",
+            "        target_link_libraries(lfc-ui ${_lfc_ui_usage_scope}\n"
+            "            freerdp-server-proxy freerdp-client freerdp-server freerdp\n"
+            "            disp-server rdpgfx-server)\n"
+            "        target_compile_definitions(lfc-ui ${_lfc_ui_usage_scope} LFC_UI_ENABLE_FREERDP_PROXY_PLATFORM=1)\n",
+            "        target_link_libraries(lfc-ui ${_lfc_ui_usage_scope}\n"
+            "            freerdp-server-proxy freerdp-client freerdp-server freerdp\n"
+            "            disp-server rdpgfx-server)\n"
+            "        target_link_libraries(lfc-ui INTERFACE \"$<TARGET_OBJECTS:rdpgfx-server>\")\n"
+            "        target_compile_definitions(lfc-ui ${_lfc_ui_usage_scope} LFC_UI_ENABLE_FREERDP_PROXY_PLATFORM=1)\n",
         ),
         (
-            "ports/freerdp/vcpkg.json",
-            '  "port-version": 24\n}\n',
-            '  "port-version": 25\n}\n',
+            "ports/lfc-ui/vcpkg.json",
+            '  "port-version": 14\n}\n',
+            '  "port-version": 15\n}\n',
         ),
         (
             "versions/baseline.json",
-            '    "freerdp": {\n'
-            '      "baseline": "3.31.1",\n'
-            '      "port-version": 24\n'
+            '    "lfc-ui": {\n'
+            '      "baseline": "0.3.0",\n'
+            '      "port-version": 14\n'
             '    },\n',
-            '    "freerdp": {\n'
-            '      "baseline": "3.31.1",\n'
-            '      "port-version": 25\n'
+            '    "lfc-ui": {\n'
+            '      "baseline": "0.3.0",\n'
+            '      "port-version": 15\n'
             '    },\n',
         ),
         (
-            "versions/f-/freerdp.json",
+            "versions/l-/lfc-ui.json",
             '  "versions": [\n'
             '    {\n'
-            '      "git-tree": "aceadca1288983390522864e4d6c42b38ae84a6a",\n'
-            '      "version": "3.31.1",\n'
-            '      "port-version": 24\n'
+            '      "git-tree": "cb1a947459fe788d6d697e9e62bb87edec24f3e2",\n'
+            '      "version": "0.3.0",\n'
+            '      "port-version": 14\n'
             '    },\n',
             '  "versions": [\n'
             '    {\n'
-            '      "git-tree": "2c8bdcad32d778ff2ff280db0efe3e1eefabf162",\n'
-            '      "version": "3.31.1",\n'
-            '      "port-version": 25\n'
+            '      "git-tree": "bbc00cc70e557268570db3e08714d26171c8f06e",\n'
+            '      "version": "0.3.0",\n'
+            '      "port-version": 15\n'
             '    },\n'
             '    {\n'
-            '      "git-tree": "aceadca1288983390522864e4d6c42b38ae84a6a",\n'
-            '      "version": "3.31.1",\n'
-            '      "port-version": 24\n'
+            '      "git-tree": "cb1a947459fe788d6d697e9e62bb87edec24f3e2",\n'
+            '      "version": "0.3.0",\n'
+            '      "port-version": 14\n'
             '    },\n',
         ),
     )
@@ -216,7 +210,7 @@ def verify_engine_registry_delta(engine: Path, sdk: Path) -> None:
         raise ValueError("Registry baseline changed outside lfc-ui/FreeRDP")
     if (old_lfc.get("baseline"), old_lfc.get("port-version")) != ("0.3.0", 8):
         raise ValueError("Unexpected engine-registry lfc-ui baseline")
-    if (new_lfc.get("baseline"), new_lfc.get("port-version")) != ("0.3.0", 14):
+    if (new_lfc.get("baseline"), new_lfc.get("port-version")) != ("0.3.0", 15):
         raise ValueError("Unexpected final-registry lfc-ui baseline")
     if (old_freerdp.get("baseline"), old_freerdp.get("port-version")) != ("3.31.1", 23):
         raise ValueError("Unexpected engine-registry FreeRDP baseline")
@@ -229,7 +223,7 @@ def verify_engine_registry_delta(engine: Path, sdk: Path) -> None:
     new_port_version = new_manifest.pop("port-version")
     old_feature = old_manifest["features"].pop("freerdp")
     new_feature = new_manifest["features"].pop("freerdp")
-    if old_port_version != 8 or new_port_version != 14 or old_manifest != new_manifest:
+    if old_port_version != 8 or new_port_version != 15 or old_manifest != new_manifest:
         raise ValueError("lfc-ui registry delta changed outside the reviewed FreeRDP dependency request")
     if old_feature.get("supports") != "linux" or new_feature.get("supports") != "linux":
         raise ValueError("lfc-ui FreeRDP platform contract changed")
@@ -266,7 +260,8 @@ def verify_engine_registry_delta(engine: Path, sdk: Path) -> None:
         (
             "            freerdp-server-proxy freerdp-client freerdp-server freerdp)\n",
             "            freerdp-server-proxy freerdp-client freerdp-server freerdp\n"
-            "            disp-server rdpgfx-server)\n",
+            "            disp-server rdpgfx-server)\n"
+            "        target_link_libraries(lfc-ui INTERFACE \"$<TARGET_OBJECTS:rdpgfx-server>\")\n",
         ),
     )
     for before_text, after_text in overlay_replacements:
@@ -419,6 +414,8 @@ index 3a7f5aa..4bc04cf 100644
     new_lfc_versions = json.loads((sdk / "versions/l-/lfc-ui.json").read_text())
     expected_lfc_entries = [
         {"git-tree": SDK_LFC_UI_TREE,
+         "version": "0.3.0", "port-version": 15},
+        {"git-tree": "cb1a947459fe788d6d697e9e62bb87edec24f3e2",
          "version": "0.3.0", "port-version": 14},
         {"git-tree": "456adaca80fe88da3f23fb7c103f20fab2003fd7",
          "version": "0.3.0", "port-version": 13},
@@ -433,8 +430,8 @@ index 3a7f5aa..4bc04cf 100644
     ]
     if (not isinstance(old_lfc_versions.get("versions"), list)
             or not isinstance(new_lfc_versions.get("versions"), list)
-            or new_lfc_versions["versions"][:6] != expected_lfc_entries
-            or new_lfc_versions["versions"][6:] != old_lfc_versions["versions"]):
+            or new_lfc_versions["versions"][:7] != expected_lfc_entries
+            or new_lfc_versions["versions"][7:] != old_lfc_versions["versions"]):
         raise ValueError("Unexpected lfc-ui versions registry delta")
 
 
