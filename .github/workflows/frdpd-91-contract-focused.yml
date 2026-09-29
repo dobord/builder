@@ -1,0 +1,47 @@
+name: FRDPD issue 91 contract focused
+on:
+  push:
+    branches: [test/frdpd-91-window-capture-20260928]
+    paths: ['.github/workflows/frdpd-91-contract-focused.yml']
+permissions:
+  contents: read
+env:
+  SOURCE_SHA: e9cb28b8358a9f43192ed5e18008dae0d23c8480
+  SOURCE_TREE: 804a6b5fbebfd5f7e5749cda6709082d2b14e2ca
+jobs:
+  focused:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Fetch exact private source and run focused Docker tests
+        env:
+          SOURCE_READ_TOKEN: ${{ secrets.SOURCE_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/frdpd91-contract"
+          source="$root/source"
+          mkdir -p "$root"
+          ask="$root/askpass"
+          cat >"$ask" <<'EOF'
+          #!/bin/sh
+          case "$1" in
+            *Username*) echo x-access-token ;;
+            *) printf '%s\n' "$SOURCE_READ_TOKEN" ;;
+          esac
+          EOF
+          chmod 700 "$ask"
+          export GIT_ASKPASS="$ask" GIT_TERMINAL_PROMPT=0
+          git init "$source"
+          git -C "$source" remote add origin https://github.com/dobord/frdpd.git
+          git -C "$source" fetch --depth=1 origin "$SOURCE_SHA"
+          git -C "$source" checkout --detach FETCH_HEAD
+          test "$(git -C "$source" rev-parse 'HEAD^{tree}')" = "$SOURCE_TREE"
+          git -C "$source" -c url.https://github.com/.insteadOf=git@github.com: submodule update --init --recursive --depth=1
+          test "$(git -C "$source/freerdp" rev-parse HEAD)" = aa8650b300aa4cabd85d9c72b431301509b9043f
+          rm -f "$ask"
+          unset SOURCE_READ_TOKEN GIT_ASKPASS
+          docker build --build-arg FRDP_BUILD_COMPONENT_TESTS=ON             -f "$source/server/frdp/test/e2e/Dockerfile"             -t frdpd91-contract:focused "$source"
+          docker run --rm --init --network none --entrypoint bash frdpd91-contract:focused -lc             'ctest --test-dir /opt/freerdp-build --no-tests=error --output-on-failure --timeout 180 -R "^TestFreeRDPFrdp(Scene|SharedBuffer|DamageState|Backend|GraphicsControl|X11WindowTracker|X11WindowCapture.*)$"'
