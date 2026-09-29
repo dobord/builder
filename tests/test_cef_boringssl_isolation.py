@@ -219,7 +219,7 @@ def fixture(root: Path):
                 root,
                 "fixture_ffmpeg_dummy_" + str(index),
                 "int fixture_ffmpeg_dummy_" + str(index)
-                + "(void){return " + str(index + 1) + ";}\\n",
+                + "(void){return " + str(index + 1) + ";}\n",
             )
             shutil.copy2(dummy, target)
         ffmpeg_providers.append((name, target))
