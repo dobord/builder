@@ -983,16 +983,26 @@ def main() -> None:
         boringssl_proof = cef_boringssl_isolation.verify(
             installed, source, boringssl_receipt
         )
-        if boringssl_proof.get("cef_boringssl_isolation_verified") is not True:
-            raise RuntimeError("Installed CEF BoringSSL isolation proof is incomplete")
+        if (boringssl_proof.get("cef_boringssl_isolation_verified") is not True
+                or boringssl_proof.get("cef_cxx_runtime_isolation_verified") is not True):
+            raise RuntimeError("Installed CEF runtime isolation proof is incomplete")
         summary.update({
             "installed_cef_boringssl_isolation_verified": True,
+            "installed_cef_cxx_runtime_isolation_verified": True,
             "cef_boringssl_collision_count":
                 boringssl_proof["cef_boringssl_collision_count"],
             "cef_boringssl_affected_archive_count":
                 boringssl_proof["cef_boringssl_affected_archive_count"],
             "cef_boringssl_mapping_sha256":
                 boringssl_proof["cef_boringssl_mapping_sha256"],
+            "cef_cxx_runtime_collision_count":
+                boringssl_proof["cef_cxx_runtime_collision_count"],
+            "cef_cxx_runtime_affected_archive_count":
+                boringssl_proof["cef_cxx_runtime_affected_archive_count"],
+            "cef_cxx_runtime_mapping_sha256":
+                boringssl_proof["cef_cxx_runtime_mapping_sha256"],
+            "cef_runtime_mapping_sha256":
+                boringssl_proof["cef_runtime_mapping_sha256"],
         })
 
         stage = "installed-object-review"
