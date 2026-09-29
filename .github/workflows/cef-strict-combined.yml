@@ -107,7 +107,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/vcpkg
-          ref: dd4388c816671daee94dc00c21c01f56d7ba4ea9
+          ref: 56f9a7ce6bf25e3325d9d71e5fdd6255de33cb57
           path: private-vcpkg
           token: ${{ secrets.SOURCE_READ_TOKEN }}
           persist-credentials: false
@@ -140,7 +140,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/lfc-ui
-          ref: 307afeab287b283514e036aa82ea1bd331dbac2a
+          ref: 29146a706499f83d464dd28fe29301fee06bcb3d
           path: private-lfc-ui
           token: ${{ secrets.SOURCE_READ_TOKEN }}
           persist-credentials: false
