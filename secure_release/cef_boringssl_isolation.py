@@ -32,16 +32,32 @@ CEF_VERSION = "152.0.6"
 CEF_PORT_VERSION = 15
 NAMESPACE = "CEF_CHROMIUM_BSSL_"
 CXX_NAMESPACE = "CEF_CHROMIUM_CXX_"
+FFMPEG_NAMESPACE = "CEF_CHROMIUM_FFMPEG_"
+ATOMIC_NAMESPACE = "CEF_CHROMIUM_ATOMIC_"
 OPENSSL_ARCHIVES = ("lib/libssl.a", "lib/libcrypto.a")
+FFMPEG_VERSION = "8.1.2"
+FFMPEG_PORT_VERSION = 4
+FFMPEG_ARCHIVES = (
+    "lib/libavcodec.a",
+    "lib/libavdevice.a",
+    "lib/libavfilter.a",
+    "lib/libavformat.a",
+    "lib/libavutil.a",
+    "lib/libswresample.a",
+    "lib/libswscale.a",
+)
 GXX = Path("/usr/bin/g++-14")
 GCC_ROOT = Path("/usr/lib/gcc/x86_64-linux-gnu/14")
 GCC_RUNTIME_ARCHIVES = ("libstdc++.a", "libgcc.a", "libgcc_eh.a")
+GCC_ATOMIC_ARCHIVE = "libatomic.a"
 CEF_CONFIG = "share/cef-static/cef-static-config.cmake"
 CEF_ARCHIVE = re.compile(r"lib/cef-static/(?:cef_objects|cef_[0-9]{4}_[0-9a-f]{12})\.a\Z")
 SYMBOL = re.compile(r"[A-Za-z_.$][A-Za-z0-9_.$@]*\Z")
 MAX_CEF_ARCHIVES = 4096
 MAX_COLLISIONS = 8192
 MAX_CXX_COLLISIONS = 8192
+MAX_FFMPEG_COLLISIONS = 8192
+MAX_ATOMIC_COLLISIONS = 4096
 MAX_SOURCE_ARCHIVE_BYTES = 1024**3
 MAX_NM_OUTPUT_BYTES = 2 * 1024**3
 MAX_NM_ERROR_BYTES = 16 * 1024**2
@@ -53,6 +69,19 @@ CXX_ANCHORS = frozenset({
     "_ZNSt9type_infoD0Ev",
     "_ZN10__cxxabiv117__class_type_infoD0Ev",
     "_ZNSt9exceptionD0Ev",
+})
+FFMPEG_ANCHORS = frozenset({
+    "av_dynamic_hdr_plus_alloc",
+    "av_dynamic_hdr_plus_create_side_data",
+    "av_dynamic_hdr_plus_from_t35",
+    "av_dynamic_hdr_plus_to_t35",
+})
+ATOMIC_ANCHORS = frozenset({
+    "__atomic_load",
+    "__atomic_store",
+    "__atomic_load_16",
+    "__atomic_store_16",
+    "__atomic_compare_exchange_16",
 })
 
 
@@ -179,6 +208,64 @@ def _gcc_runtime() -> tuple[dict, list[tuple[str, Path]]]:
         "archives": archives,
     }
     return receipt, providers
+
+
+def _gcc_atomic() -> tuple[dict, list[tuple[str, Path]]]:
+    """Bind the exact GCC14 libatomic provider pulled by final static proxy links."""
+    raw = subprocess.check_output(
+        [str(GXX), "-print-file-name=" + GCC_ATOMIC_ARCHIVE],
+        text=True, timeout=30,
+    ).strip()
+    path = Path(raw)
+    require(
+        path.is_absolute() and path.name == GCC_ATOMIC_ARCHIVE,
+        "GCC libatomic archive lookup changed",
+    )
+    root = GCC_ROOT.resolve(strict=True)
+    resolved = path.resolve(strict=True)
+    require(
+        resolved.is_file() and resolved.is_relative_to(root),
+        "GCC libatomic archive escaped pinned GCC14 root",
+    )
+    _archive_size(resolved)
+    receipt = {
+        "name": GCC_ATOMIC_ARCHIVE,
+        "path": resolved.as_posix(),
+        "sha256": digest(resolved),
+    }
+    return receipt, [(GCC_ATOMIC_ARCHIVE, resolved)]
+
+
+def _ffmpeg_runtime(
+    installed: Path,
+    prefix: Path,
+    *,
+    expected: dict | None = None,
+    require_status: bool = True,
+) -> tuple[dict, list[tuple[str, Path]]]:
+    """Bind the complete pinned vcpkg FFmpeg static provider set and ownership."""
+    required = {TRIPLET + "/" + name for name in FFMPEG_ARCHIVES}
+    owner = _owner(
+        installed,
+        "ffmpeg",
+        FFMPEG_VERSION,
+        FFMPEG_PORT_VERSION,
+        required,
+        expected=None if expected is None else expected.get("ownership"),
+        require_status=require_status,
+    )
+    providers = [(name, regular(prefix, name)) for name in FFMPEG_ARCHIVES]
+    archives = {name: digest(path) for name, path in providers}
+    result = {
+        "version": FFMPEG_VERSION,
+        "port_version": FFMPEG_PORT_VERSION,
+        "ownership": owner,
+        "archives": archives,
+    }
+    if expected is not None:
+        require(result == expected,
+                "FFmpeg static runtime provider changed in SDK transport")
+    return result, providers
 
 
 def _symbol_records(nm: Path, archive: Path, *, archive_limit: int | None = None):
