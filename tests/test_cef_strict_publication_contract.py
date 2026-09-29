@@ -104,6 +104,7 @@ def write_registry_fixture(root: Path, lfc_port_version: int, minimal: bool) -> 
         target_link_libraries(lfc-ui INTERFACE "$<TARGET_OBJECTS:disp-server>")
             freerdp-server-proxy freerdp-client freerdp-server freerdp
             disp-server rdpgfx-server)
+        target_link_libraries(lfc-ui INTERFACE "$<TARGET_OBJECTS:rdpgfx-server>")
 """
     files = {
         "ports/freerdp/vcpkg.json": json.dumps({
@@ -226,6 +227,10 @@ index 3a7f5aa..4bc04cf 100644
         "versions/l-/lfc-ui.json": json.dumps({
             "versions": (
                 [{
+                    "git-tree": "bbc00cc70e557268570db3e08714d26171c8f06e",
+                    "version": "0.3.0",
+                    "port-version": 15,
+                }, {
                     "git-tree": "cb1a947459fe788d6d697e9e62bb87edec24f3e2",
                     "version": "0.3.0",
                     "port-version": 14,
@@ -283,7 +288,7 @@ class StrictPublicationContractTests(unittest.TestCase):
             root = Path(folder)
             engine, sdk = root / "engine", root / "sdk"
             write_registry_fixture(engine, 8, False)
-            write_registry_fixture(sdk, 14, True)
+            write_registry_fixture(sdk, 15, True)
             engine_sha, sdk_sha = "1" * 40, "2" * 40
 
             def fake_head(path):
@@ -299,7 +304,7 @@ class StrictPublicationContractTests(unittest.TestCase):
             root = Path(folder)
             engine, sdk = root / "engine", root / "sdk"
             write_registry_fixture(engine, 8, False)
-            write_registry_fixture(sdk, 14, True)
+            write_registry_fixture(sdk, 15, True)
             (sdk / "ports/cef-static/vcpkg.json").write_text(
                 "changed-engine-port\n", encoding="utf-8"
             )
