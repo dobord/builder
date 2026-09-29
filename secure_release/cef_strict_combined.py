@@ -31,8 +31,8 @@ from . import (
 ENGINE_VCPKG = "b4bb281192ea8bb004542012ac804b988a4ff403"
 SDK_VCPKG_CHECKOUT = "c1e16b83cffc80c145aaf15c17d199312c58350b"
 SDK_VCPKG_CHECKOUT_TREE = "50b7b6224122277c3458f0bd990fa2926fd17667"
-SDK_VCPKG = "dd4388c816671daee94dc00c21c01f56d7ba4ea9"
-SDK_VCPKG_TREE = "74974f7a2787317d1d3fe12765cd44fa624ffa0b"
+SDK_VCPKG = "56f9a7ce6bf25e3325d9d71e5fdd6255de33cb57"
+SDK_VCPKG_TREE = "5d798711a13c08389ca55c84ace774c912314b8e"
 SDK_LFC_UI_TREE = "fd125f0896683fc0391803b4a52bf7c4cc651c20"
 UPSTREAM = "9e593bb18ea69cc5095e012465dcd675a822ed0d"
 CEF = "2aff22e09daaa5c28780c5766a70ee13e61c93b6"
@@ -84,9 +84,19 @@ def materialize_sdk_registry(root: Path) -> dict[str, str]:
             "        target_compile_definitions(lfc-ui ${_lfc_ui_usage_scope} LFC_UI_ENABLE_FREERDP_PROXY_PLATFORM=1)\n",
         ),
         (
+            "ports/lfc-ui/portfile.cmake",
+            'REF "307afeab287b283514e036aa82ea1bd331dbac2a"\n',
+            'REF "29146a706499f83d464dd28fe29301fee06bcb3d"\n',
+        ),
+        (
+            "ci/release-plan.json",
+            '"sha": "307afeab287b283514e036aa82ea1bd331dbac2a"',
+            '"sha": "29146a706499f83d464dd28fe29301fee06bcb3d"',
+        ),
+        (
             "ports/lfc-ui/vcpkg.json",
             '  "port-version": 14\n}\n',
-            '  "port-version": 15\n}\n',
+            '  "port-version": 16\n}\n',
         ),
         (
             "versions/baseline.json",
@@ -96,7 +106,7 @@ def materialize_sdk_registry(root: Path) -> dict[str, str]:
             '    },\n',
             '    "lfc-ui": {\n'
             '      "baseline": "0.3.0",\n'
-            '      "port-version": 15\n'
+            '      "port-version": 16\n'
             '    },\n',
         ),
         (
@@ -108,6 +118,11 @@ def materialize_sdk_registry(root: Path) -> dict[str, str]:
             '      "port-version": 14\n'
             '    },\n',
             '  "versions": [\n'
+            '    {\n'
+            '      "git-tree": "fd125f0896683fc0391803b4a52bf7c4cc651c20",\n'
+            '      "version": "0.3.0",\n'
+            '      "port-version": 16\n'
+            '    },\n'
             '    {\n'
             '      "git-tree": "bbc00cc70e557268570db3e08714d26171c8f06e",\n'
             '      "version": "0.3.0",\n'
