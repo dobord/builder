@@ -9,8 +9,8 @@ concurrency:
   group: frdpd-91-final-${{ github.sha }}
   cancel-in-progress: false
 env:
-  SOURCE_SHA: 2c85e3d9594fe960c22183cd0131c45f16e6128c
-  SOURCE_TREE: 864b8249648cfcbdfaafb7686aaa750ed83e6dc2
+  SOURCE_SHA: cb043c4182c0953e7e4b7aee5826f0f853df3352
+  SOURCE_TREE: 987f8e9c70d3a2593daba60980fc7f971a3fe801
   REVIEW_BASE: 3c9171929662704418ed989cb46aa2c021234c76
   ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
 jobs:
@@ -18,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [noavc]
+        variant: [full, asan, noavc]
     runs-on: ubuntu-24.04
     timeout-minutes: 55
     env:
