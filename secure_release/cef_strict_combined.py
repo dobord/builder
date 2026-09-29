@@ -623,8 +623,12 @@ def verify_os_only_elf(executable: Path) -> int:
     needed = re.findall(
         r"\(NEEDED\).*?Shared library:\s*\[([^\]]+)\]", dynamic
     )
-    if set(needed) - cef_x11_static.OS_NEEDED:
-        raise RuntimeError("Relocated CEF smoke imports non-OS shared libraries")
+    unexpected = sorted(set(needed) - cef_x11_static.OS_NEEDED)
+    if unexpected:
+        raise RuntimeError(
+            "Relocated CEF smoke imports non-OS shared libraries: "
+            + ",".join(unexpected)
+        )
     return len(needed)
 
 
@@ -716,6 +720,8 @@ def main() -> None:
         summary["consumer_linker_kind"] = consumer_linker["kind"]
         summary["consumer_linker_version"] = consumer_linker["version"]
         summary["consumer_linker_sha256"] = consumer_linker["sha256"]
+        summary["consumer_cxx_runtime_static"] = consumer_linker["cxx_runtime_static"]
+        summary["consumer_linker_probe_needed"] = consumer_linker["probe_needed"]
         stage = "dependency-source-prefetch"
         cef_dependency_source.prefetch(
             registry, upstream, root, clean_environment(), summary

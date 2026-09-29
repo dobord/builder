@@ -20,8 +20,13 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(subject.LLD_DIR, Path("/usr/lib/llvm-18/bin"))
         self.assertEqual(subject.LLD_MAJOR, 18)
         self.assertEqual(
+            subject.CXX_RUNTIME_FLAGS,
+            ("-static-libstdc++", "-static-libgcc"),
+        )
+        self.assertEqual(
             subject.cmake_flag(),
-            "-DCMAKE_EXE_LINKER_FLAGS=-B/usr/lib/llvm-18/bin -fuse-ld=lld",
+            "-DCMAKE_EXE_LINKER_FLAGS=-B/usr/lib/llvm-18/bin -fuse-ld=lld "
+            "-static-libstdc++ -static-libgcc",
         )
 
     def test_workflow_installs_and_preflights_lld_before_restore(self):
@@ -54,6 +59,8 @@ class PolicyTests(unittest.TestCase):
             'summary["consumer_linker_kind"]',
             'summary["consumer_linker_version"]',
             'summary["consumer_linker_sha256"]',
+            'summary["consumer_cxx_runtime_static"]',
+            'summary["consumer_linker_probe_needed"]',
         ):
             self.assertIn(field, source)
 
@@ -79,6 +86,9 @@ class NativeTests(unittest.TestCase):
             )
         self.assertEqual(receipt["kind"], "lld")
         self.assertEqual(receipt["version"], version)
+        self.assertTrue(receipt["cxx_runtime_static"])
+        self.assertNotIn("libstdc++.so.6", receipt["probe_needed"])
+        self.assertNotIn("libgcc_s.so.1", receipt["probe_needed"])
 
     def test_required_ubuntu_lld18_profile(self):
         if os.environ.get("REQUIRE_CEF_CONSUMER_LLD") != "1":
@@ -87,6 +97,11 @@ class NativeTests(unittest.TestCase):
             receipt = subject.verify(Path(name))
         self.assertEqual(receipt["major"], 18)
         self.assertRegex(receipt["sha256"], r"^[0-9a-f]{64}$")
+        self.assertTrue(receipt["cxx_runtime_static"])
+        self.assertTrue(receipt["probe_needed"])
+        self.assertFalse(
+            {"libstdc++.so.6", "libgcc_s.so.1"} & set(receipt["probe_needed"])
+        )
 
 
 if __name__ == "__main__":

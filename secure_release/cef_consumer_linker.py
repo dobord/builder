@@ -20,11 +20,16 @@ GXX = Path("/usr/bin/g++-14")
 LLD_DIR = Path("/usr/lib/llvm-18/bin")
 LLD = LLD_DIR / "ld.lld"
 LLD_MAJOR = 18
+CXX_RUNTIME_FLAGS = ("-static-libstdc++", "-static-libgcc")
 
 
 def driver_flags(lld_dir: Path = LLD_DIR) -> str:
-    """GCC driver flags that select the reviewed LLD directory explicitly."""
-    return f"-B{lld_dir.as_posix()} -fuse-ld=lld"
+    """Select reviewed LLD and keep GCC C++/unwind runtimes static."""
+    return " ".join((
+        f"-B{lld_dir.as_posix()}",
+        "-fuse-ld=lld",
+        *CXX_RUNTIME_FLAGS,
+    ))
 
 
 def cmake_flag(lld_dir: Path = LLD_DIR) -> str:
@@ -57,7 +62,11 @@ def _verify(root: Path, *, gxx: Path, lld_dir: Path, major: int) -> dict:
         work = Path(name)
         source = work / "probe.cc"
         source.write_text(
-            '#include <cstdio>\nint main(){std::puts("lld-probe");}\n',
+            '#include <iostream>\n'
+            '#include <stdexcept>\n'
+            '#include <string>\n'
+            'int main(){try{throw std::runtime_error(std::string("lld-probe"));}'
+            'catch(const std::exception& e){std::cout<<e.what()<<"\\n";}return 0;}\n',
             encoding="utf-8",
         )
         selected = subprocess.run(
@@ -72,8 +81,8 @@ def _verify(root: Path, *, gxx: Path, lld_dir: Path, major: int) -> dict:
         )
         executable = work / "probe"
         linked = subprocess.run(
-            [str(gxx), f"-B{lld_dir}", "-fuse-ld=lld", "-Wl,--fatal-warnings",
-             str(source), "-o", str(executable)],
+            [str(gxx), f"-B{lld_dir}", "-fuse-ld=lld", *CXX_RUNTIME_FLAGS,
+             "-Wl,--fatal-warnings", str(source), "-o", str(executable)],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, timeout=60,
         )
@@ -90,6 +99,19 @@ def _verify(root: Path, *, gxx: Path, lld_dir: Path, major: int) -> dict:
             ran.returncode == 0 and ran.stdout == "lld-probe\n",
             "Pinned LLD consumer probe did not execute",
         )
+        dynamic = subprocess.check_output(
+            ["readelf", "-d", str(executable)], text=True, timeout=30
+        )
+        needed = re.findall(
+            r"\(NEEDED\).*?Shared library:\s*\[([^\]]+)\]", dynamic
+        )
+        from . import cef_x11_static
+        checked.require(
+            needed
+            and not ({"libstdc++.so.6", "libgcc_s.so.1"} & set(needed))
+            and not (set(needed) - cef_x11_static.OS_NEEDED),
+            "Consumer C++ runtime is not fully static",
+        )
     return {
         "kind": "lld",
         "major": major,
@@ -97,6 +119,8 @@ def _verify(root: Path, *, gxx: Path, lld_dir: Path, major: int) -> dict:
         "sha256": crypto.digest(lld),
         "directory": lld_dir.as_posix(),
         "driver": gxx.as_posix(),
+        "cxx_runtime_static": True,
+        "probe_needed": sorted(set(needed)),
     }
 
 
