@@ -189,9 +189,19 @@ def materialize(port: Path, recipe: Path, source: Path, manifest: Path,
             "isolated_archives": len(spec["bindings"]), "runtime_verified": False}
 
 
-def verify_packaged_isolation(prefix: Path, expected_manifest: str,
-                              expected_bindings: str) -> int:
-    """Recheck exact derived bytes and target ownership AFTER vcpkg relocation."""
+def verify_packaged_isolation(
+    prefix: Path,
+    expected_manifest: str,
+    expected_bindings: str,
+    *,
+    final_archive_sha256: dict[str, str] | None = None,
+) -> int:
+    """Recheck qualified provenance and exact final bytes after relocation.
+
+    The ABI-tracked qualified binding records pre-BoringSSL isolated bytes.
+    If a later reviewed CEF-wide namespace transform is present, its already
+    verified final archive map supplies the only permitted post-transform SHA.
+    """
     share = prefix / "share/cef-static"
     manifest_path = codecs.regular(share, "platform-build-inputs.json")
     require(codecs.digest(manifest_path) == expected_manifest,
@@ -211,6 +221,27 @@ def verify_packaged_isolation(prefix: Path, expected_manifest: str,
     records = {}
     paths = set()
     config = codecs.regular(share, "cef-static-config.cmake").read_text(encoding="utf-8")
+    config_archives = set(re.findall(
+        r'\$\{_cef_static_prefix\}/(lib/cef-static/(?:cef_objects|cef_[0-9]{4,}_[0-9a-f]{12})\.a)"',
+        config,
+    ))
+    if final_archive_sha256 is not None:
+        require(
+            isinstance(final_archive_sha256, dict)
+            and set(final_archive_sha256) == config_archives
+            and 1 < len(final_archive_sha256) <= 4096
+            and all(
+                isinstance(path, str)
+                and re.fullmatch(
+                    r"lib/cef-static/(?:cef_objects|cef_[0-9]{4,}_[0-9a-f]{12})\.a",
+                    path,
+                ) is not None
+                and isinstance(value, str)
+                and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+                for path, value in final_archive_sha256.items()
+            ),
+            "Invalid post-transform CEF archive receipt",
+        )
     for item in isolated:
         require(isinstance(item, dict) and set(item) == {"source", "source_sha256", "path", "sha256"},
                 "Invalid packaged isolation record")
@@ -224,7 +255,16 @@ def verify_packaged_isolation(prefix: Path, expected_manifest: str,
         actual = codecs.regular(prefix, path)
         with actual.open("rb") as stream:
             require(stream.read(8) == b"!<arch>\n", "Isolated SDK archive is not self-contained")
-        require(codecs.digest(actual) == item["sha256"], "Packaged isolated archive changed")
+        actual_sha256 = codecs.digest(actual)
+        expected_final_sha256 = (
+            item["sha256"]
+            if final_archive_sha256 is None
+            else final_archive_sha256.get(path)
+        )
+        require(
+            actual_sha256 == expected_final_sha256,
+            "Packaged isolated archive changed",
+        )
         require('${_cef_static_prefix}/' + name + '"' not in config
                 and '${_cef_static_prefix}/' + path + '"' in config,
                 "CEF target mixes original and isolated archive ownership")
