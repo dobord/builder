@@ -180,7 +180,7 @@ index 3a7f5aa..4bc04cf 100644
         ),
         "ports/lfc-ui/usage": ("ffmpeg-minimal\n" if minimal else "full\n"),
         "ports/lfc-ui/portfile.cmake": (
-            'REF "307afeab287b283514e036aa82ea1bd331dbac2a"\n'
+            'REF "29146a706499f83d464dd28fe29301fee06bcb3d"\n'
             if minimal else
             'REF "85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5"\n'
         ),
@@ -188,7 +188,7 @@ index 3a7f5aa..4bc04cf 100644
             "ports": [{
                 "name": "lfc-ui",
                 "sha": (
-                    "307afeab287b283514e036aa82ea1bd331dbac2a"
+                    "29146a706499f83d464dd28fe29301fee06bcb3d"
                     if minimal else
                     "85ced5b0f72cb55b9e07b2ab58d27fc43d9420b5"
                 ),
@@ -227,6 +227,10 @@ index 3a7f5aa..4bc04cf 100644
         "versions/l-/lfc-ui.json": json.dumps({
             "versions": (
                 [{
+                    "git-tree": "fd125f0896683fc0391803b4a52bf7c4cc651c20",
+                    "version": "0.3.0",
+                    "port-version": 16,
+                }, {
                     "git-tree": "bbc00cc70e557268570db3e08714d26171c8f06e",
                     "version": "0.3.0",
                     "port-version": 15,
@@ -288,7 +292,7 @@ class StrictPublicationContractTests(unittest.TestCase):
             root = Path(folder)
             engine, sdk = root / "engine", root / "sdk"
             write_registry_fixture(engine, 8, False)
-            write_registry_fixture(sdk, 15, True)
+            write_registry_fixture(sdk, 16, True)
             engine_sha, sdk_sha = "1" * 40, "2" * 40
 
             def fake_head(path):
@@ -304,7 +308,7 @@ class StrictPublicationContractTests(unittest.TestCase):
             root = Path(folder)
             engine, sdk = root / "engine", root / "sdk"
             write_registry_fixture(engine, 8, False)
-            write_registry_fixture(sdk, 15, True)
+            write_registry_fixture(sdk, 16, True)
             (sdk / "ports/cef-static/vcpkg.json").write_text(
                 "changed-engine-port\n", encoding="utf-8"
             )
