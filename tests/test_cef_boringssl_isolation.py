@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 from secure_release import cef_boringssl_isolation as isolation
 
@@ -67,10 +68,20 @@ def fixture(root: Path):
     provider = archive(root, "cef_provider",
         "int SSL_new(void){return 7;}\n"
         "int SSL_use_certificate(void){return 11;}\n"
-        "int PEM_read_PrivateKey(void){return 13;}\n")
+        "int PEM_read_PrivateKey(void){return 13;}\n"
+        "int cxx_typeinfo(void) __asm__(\"_ZNSt9type_infoD0Ev\");\n"
+        "int cxx_class(void) __asm__(\"_ZN10__cxxabiv117__class_type_infoD0Ev\");\n"
+        "int cxx_exception(void) __asm__(\"_ZNSt9exceptionD0Ev\");\n"
+        "int cxx_typeinfo(void){return 29;}\n"
+        "int cxx_class(void){return 31;}\n"
+        "int cxx_exception(void){return 37;}\n")
     user = archive(root, "cef_user",
         "int SSL_new(void); int SSL_use_certificate(void); int PEM_read_PrivateKey(void);\n"
-        "int cef_value(void){return SSL_new()+SSL_use_certificate()+PEM_read_PrivateKey();}\n")
+        "int cxx_typeinfo(void) __asm__(\"_ZNSt9type_infoD0Ev\");\n"
+        "int cxx_class(void) __asm__(\"_ZN10__cxxabiv117__class_type_infoD0Ev\");\n"
+        "int cxx_exception(void) __asm__(\"_ZNSt9exceptionD0Ev\");\n"
+        "int cef_value(void){return SSL_new()+SSL_use_certificate()+PEM_read_PrivateKey()"
+        "+cxx_typeinfo()+cxx_class()+cxx_exception();}\n")
     ssl = archive(root, "openssl_ssl",
         "int SSL_new(void){return 17;} int SSL_use_certificate(void){return 19;}\n"
         "int openssl_ssl_value(void){return SSL_new()+SSL_use_certificate();}\n")
@@ -111,16 +122,57 @@ def fixture(root: Path):
         T + "/lib/libssl.a\n" + T + "/lib/libcrypto.a\n",
         encoding="utf-8",
     )
-    return installed, source, names
+
+    gcc_root = root / "gcc-runtime"
+    gcc_root.mkdir()
+    stdcxx = archive(root, "fixture_libstdcxx",
+        "int cxx_typeinfo(void) __asm__(\"_ZNSt9type_infoD0Ev\");\n"
+        "int cxx_class(void) __asm__(\"_ZN10__cxxabiv117__class_type_infoD0Ev\");\n"
+        "int cxx_exception(void) __asm__(\"_ZNSt9exceptionD0Ev\");\n"
+        "int cxx_typeinfo(void){return 41;}\n"
+        "int cxx_class(void){return 43;}\n"
+        "int cxx_exception(void){return 47;}\n")
+    libgcc = archive(root, "fixture_libgcc", "int fixture_libgcc(void){return 1;}\n")
+    libgcc_eh = archive(root, "fixture_libgcc_eh", "int fixture_libgcc_eh(void){return 2;}\n")
+    runtime_paths = {}
+    providers = []
+    for name, source_archive in (
+        ("libstdc++.a", stdcxx),
+        ("libgcc.a", libgcc),
+        ("libgcc_eh.a", libgcc_eh),
+    ):
+        target = gcc_root / name
+        shutil.copy2(source_archive, target)
+        providers.append((name, target))
+        runtime_paths[name] = {
+            "path": target.as_posix(),
+            "sha256": isolation.digest(target),
+        }
+    runtime = {
+        "driver": "/fixture/g++-14",
+        "driver_sha256": "d" * 64,
+        "version": "14.2.0",
+        "root": gcc_root.as_posix(),
+        "archives": runtime_paths,
+    }
+    return installed, source, names, runtime, providers
 
 
-def consumer(root: Path, prefix: Path, names: list[str], label: str, *, ok=True):
+def consumer(
+    root: Path,
+    prefix: Path,
+    names: list[str],
+    runtime_providers: list[tuple[str, Path]],
+    label: str,
+    *,
+    ok=True,
+):
     main = root / (label + ".c")
     obj = root / (label + ".o")
     exe = root / label
     main.write_text(
         "int cef_value(void); int openssl_ssl_value(void); int openssl_crypto_value(void);\n"
-        "int main(void){return cef_value()!=31 || openssl_ssl_value()!=36 || "
+        "int main(void){return cef_value()!=128 || openssl_ssl_value()!=36 || "
         "openssl_crypto_value()!=23;}\n",
         encoding="utf-8",
     )
@@ -129,6 +181,7 @@ def consumer(root: Path, prefix: Path, names: list[str], label: str, *, ok=True)
         "cc", obj, "-Wl,--whole-archive",
         *(prefix / name for name in names),
         prefix / "lib/libssl.a", prefix / "lib/libcrypto.a",
+        *(path for _, path in runtime_providers),
         "-Wl,--no-whole-archive", "-o", exe,
     ]
     result = run(command, root, ok=ok)
@@ -143,11 +196,27 @@ class NativeTests(unittest.TestCase):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.root = Path(temp.name).resolve()
-        self.installed, self.source, self.names = fixture(self.root)
+        (
+            self.installed,
+            self.source,
+            self.names,
+            self.runtime_receipt,
+            self.runtime_providers,
+        ) = fixture(self.root)
         self.prefix = self.installed / T
+        patcher = mock.patch.object(
+            isolation,
+            "_gcc_runtime",
+            return_value=(self.runtime_receipt, self.runtime_providers),
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def test_duplicate_ssl_providers_fail_then_namespaced_cef_links_and_relocates(self):
-        failed = consumer(self.root, self.prefix, self.names, "before", ok=False)
+        failed = consumer(
+            self.root, self.prefix, self.names, self.runtime_providers,
+            "before", ok=False
+        )
         self.assertNotEqual(failed.returncode, 0)
         self.assertIn("multiple definition", failed.stderr + failed.stdout)
 
@@ -162,11 +231,18 @@ class NativeTests(unittest.TestCase):
         self.assertTrue(proof["cef_boringssl_isolation_verified"])
         self.assertEqual(proof["cef_boringssl_collision_count"], 3)
         self.assertEqual(set(receipt["symbols"]), isolation.ANCHORS)
+        self.assertTrue(proof["cef_cxx_runtime_isolation_verified"])
+        self.assertEqual(proof["cef_cxx_runtime_collision_count"], 3)
+        self.assertEqual(set(receipt["cxx_symbols"]), isolation.CXX_ANCHORS)
+        self.assertEqual(receipt["gcc_runtime"], self.runtime_receipt)
         self.assertEqual(set(receipt["ownership"]), {"cef-static", "openssl"})
         for owner in receipt["ownership"].values():
             self.assertRegex(owner["owner_sha256"], r"^[0-9a-f]{64}$")
             self.assertGreater(owner["required_count"], 0)
         self.assertGreaterEqual(proof["cef_boringssl_affected_archive_count"], 2)
+        self.assertGreaterEqual(proof["cef_cxx_runtime_affected_archive_count"], 1)
+        self.assertTrue(receipt["boringssl_affected_archives"])
+        self.assertTrue(receipt["cxx_affected_archives"])
         for record in receipt["affected"].values():
             self.assertGreater(record["global_symbol_count"], 0)
             self.assertRegex(record["global_symbol_sha256"], r"^[0-9a-f]{64}$")
@@ -175,7 +251,9 @@ class NativeTests(unittest.TestCase):
             {name: isolation.digest(self.prefix / name)
              for name in isolation.OPENSSL_ARCHIVES},
         )
-        consumer(self.root, self.prefix, self.names, "after")
+        consumer(
+            self.root, self.prefix, self.names, self.runtime_providers, "after"
+        )
 
         moved = self.root / "relocated"
         shutil.copytree(self.installed, moved)
@@ -186,7 +264,10 @@ class NativeTests(unittest.TestCase):
         self.assertEqual(
             isolation.verify(moved, self.source, receipt), proof
         )
-        consumer(self.root, moved / T, self.names, "relocated-consumer")
+        consumer(
+            self.root, moved / T, self.names, self.runtime_providers,
+            "relocated-consumer"
+        )
 
     def test_tamper_unknown_namespace_and_owner_changes_fail_closed(self):
         receipt = isolation.install(
@@ -206,6 +287,14 @@ class NativeTests(unittest.TestCase):
         owner.write_text(data.replace(T + "/lib/libssl.a\n", ""))
         with self.assertRaisesRegex(ValueError, "unique vcpkg package owner"):
             isolation.verify(self.installed, self.source, receipt)
+        owner.write_text(data)
+
+        runtime = self.runtime_providers[0][1]
+        saved = runtime.read_bytes()
+        runtime.write_bytes(saved + b"x")
+        with self.assertRaisesRegex(ValueError, "GCC static runtime provider changed"):
+            isolation.verify(self.installed, self.source, receipt)
+        runtime.write_bytes(saved)
 
     def test_transport_without_status_still_requires_exact_owner_receipt(self):
         receipt = isolation.install(
@@ -363,8 +452,10 @@ class PolicyTests(unittest.TestCase):
         import inspect
         text = inspect.getsource(isolation)
         self.assertIn('"--redefine-syms="', text)
-        self.assertIn("watch=openssl_defined", text)
-        self.assertIn('kind not in {"U", "w", "v"}', text)
+        self.assertIn("watch = openssl_defined | gcc_defined", text)
+        self.assertIn('kind in {"U", "w", "v"}', text)
+        self.assertIn("CXX_NAMESPACE", text)
+        self.assertIn("GCC_RUNTIME_ARCHIVES", text)
         self.assertNotIn("--allow-multiple-definition", text)
         self.assertNotIn("--unresolved-symbols", text)
         self.assertNotIn("--exclude-libs", text)
