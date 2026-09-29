@@ -15,13 +15,13 @@ from . import safeio
 
 TRIPLET = "x64-linux-static-release"
 EXAMPLE = "share/lfc-ui/examples/freerdp-proxy-cef"
-PORT_BLOB = "fe777c8d2a1da69eb76a61da813fe0c4ac7c4a17"
+PORT_BLOB = "f97f6ecbfbc1f5e02ad97ebeab146d876e011115"
 # Identities read from the immutable lfc-ui and vcpkg revisions already required
 # by combined.main. This is not an allowlist supplied by an untrusted SDK.
 ORIGINS = {
     "freerdp_proxy_web_engine_view_cef.cpp": (
         "lfc_ui", "examples/freerdp_proxy_web_engine_view_cef.cpp",
-        "5b8cd72bb1c4061d0936890e2d9c0d5ff07c9ced"),
+        "e34e98e33a2eee5f8d822f148cc0d9a22da44fe2"),
     "freerdp_graphics_mode_args.hpp": (
         "lfc_ui", "examples/freerdp_graphics_mode_args.hpp",
         "6758dacc3e406351e2f96d0fc97e6591eadc2345"),
