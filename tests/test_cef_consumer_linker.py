@@ -59,6 +59,8 @@ class PolicyTests(unittest.TestCase):
             'summary["consumer_linker_kind"]',
             'summary["consumer_linker_version"]',
             'summary["consumer_linker_sha256"]',
+            'summary["consumer_cxx_runtime_static"]',
+            'summary["consumer_linker_probe_needed"]',
         ):
             self.assertIn(field, source)
 
