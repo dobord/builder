@@ -252,7 +252,7 @@ def consumer(
     exe = root / label
     main.write_text(
         "int cef_value(void); int openssl_ssl_value(void); int openssl_crypto_value(void);\n"
-        "int main(void){return cef_value()!=128 || openssl_ssl_value()!=36 || "
+        "int main(void){return cef_value()!=228 || openssl_ssl_value()!=36 || "
         "openssl_crypto_value()!=23;}\n",
         encoding="utf-8",
     )
@@ -601,10 +601,18 @@ class PolicyTests(unittest.TestCase):
         import inspect
         text = inspect.getsource(isolation)
         self.assertIn('"--redefine-syms="', text)
-        self.assertIn("watch = openssl_defined | gcc_defined", text)
+        self.assertIn(
+            "watch = openssl_defined | gcc_defined | ffmpeg_defined | atomic_defined",
+            text,
+        )
         self.assertIn('kind in {"U", "w", "v"}', text)
         self.assertIn("CXX_NAMESPACE", text)
+        self.assertIn("FFMPEG_NAMESPACE", text)
+        self.assertIn("ATOMIC_NAMESPACE", text)
         self.assertIn("GCC_RUNTIME_ARCHIVES", text)
+        self.assertIn("GCC_ATOMIC_ARCHIVE", text)
+        self.assertEqual(isolation.FFMPEG_VERSION, "8.1.2")
+        self.assertEqual(isolation.FFMPEG_PORT_VERSION, 4)
         self.assertNotIn("--allow-multiple-definition", text)
         self.assertNotIn("--unresolved-symbols", text)
         self.assertNotIn("--exclude-libs", text)
