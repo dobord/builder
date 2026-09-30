@@ -25,9 +25,13 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
         with:
           python-version: '3.12'
-      - name: Install hash-pinned cryptographic libraries and CMake
+      - name: Verify and install cryptographic libraries from offline wheelhouse
         run: |
-          python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r requirements.lock
+          python tools/verify_wheelhouse.py
+          python -m pip install --disable-pip-version-check --no-index --find-links=vendor/wheels --require-hashes --only-binary=:all: -r requirements.lock
+          python tools/tink_offline.py --version
+      - name: Install hash-pinned CMake build tool
+        run: |
           python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r build-tools.lock
       - name: Synthetic tests only; no repository secrets
         env:
@@ -73,8 +77,11 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
         with:
           python-version: '3.12'
-      - run: |
-          python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r requirements.lock
+      - name: Verify and install cryptographic libraries from offline wheelhouse
+        run: |
+          python tools/verify_wheelhouse.py
+          python -m pip install --disable-pip-version-check --no-index --find-links=vendor/wheels --require-hashes --only-binary=:all: -r requirements.lock
+          python tools/tink_offline.py --version
       - name: Verify GitHub API digests and decrypt Linux and Windows fixtures
         env:
           GH_TOKEN: ${{ github.token }}
