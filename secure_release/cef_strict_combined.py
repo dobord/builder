@@ -1139,13 +1139,19 @@ def main() -> None:
         if (boringssl_proof.get("cef_boringssl_isolation_verified") is not True
                 or boringssl_proof.get("cef_cxx_runtime_isolation_verified") is not True
                 or boringssl_proof.get("cef_ffmpeg_isolation_verified") is not True
-                or boringssl_proof.get("cef_atomic_isolation_verified") is not True):
+                or boringssl_proof.get("cef_atomic_isolation_verified") is not True
+                or boringssl_proof.get("cef_init_array_alignment_verified") is not True):
             raise RuntimeError("Installed CEF runtime isolation proof is incomplete")
         summary.update({
             "installed_cef_boringssl_isolation_verified": True,
             "installed_cef_cxx_runtime_isolation_verified": True,
             "installed_cef_ffmpeg_isolation_verified": True,
             "installed_cef_atomic_isolation_verified": True,
+            "installed_cef_init_array_alignment_verified": True,
+            "cef_init_array_affected_archive_count":
+                boringssl_proof["cef_init_array_affected_archive_count"],
+            "cef_init_array_normalized_section_count":
+                boringssl_proof["cef_init_array_normalized_section_count"],
             "cef_boringssl_collision_count":
                 boringssl_proof["cef_boringssl_collision_count"],
             "cef_boringssl_affected_archive_count":
@@ -1203,6 +1209,7 @@ def main() -> None:
                 sdk / "installed", source, boringssl_receipt) != boringssl_proof:
             raise RuntimeError("CEF BoringSSL isolation changed during raw export")
         summary["sdk_cef_boringssl_isolation_verified"] = True
+        summary["sdk_cef_init_array_alignment_verified"] = True
         sdk_zip = root / "sdk.zip"
         stage = "sdk-example-review"
         reviewed_sources = cef_sdk_example.verify(sdk, example_review)
@@ -1253,6 +1260,7 @@ def main() -> None:
                 consumer_sdk / "installed", source, boringssl_receipt) != boringssl_proof:
             raise RuntimeError("CEF BoringSSL isolation changed during relocation")
         summary["relocated_cef_boringssl_isolation_verified"] = True
+        summary["relocated_cef_init_array_alignment_verified"] = True
         cef_sdk_example.verify(consumer_sdk, example_review)
         summary["relocated_sdk_example_source_verified"] = True
         cef_sdk_headers.verify(consumer_sdk, engine_work / "platform-inputs.json", platform_sha)
