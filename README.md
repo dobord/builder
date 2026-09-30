@@ -38,6 +38,8 @@ Public artifact sizes, timing and opaque release/run IDs are observable.
 - `publish.py`: independent verification, retry-safe draft handling, conflict refusal.
 - `bootstrap.py`: LOCAL-only key generation and repository secret provisioning with `gh` stdin.
 - `decrypt_local.py`: LOCAL-only authenticated diagnostic decryption; does not authorize releases.
+- `secure_release/openssl_tink_logs.py`: decrypt-only OpenSSL 3 compatibility reader for existing Tink encrypted CI logs.
+- `scripts/decrypt-builder-logs-openssl.py`: zero-install local CLI for Actions log artifacts when OpenSSL 3 `libcrypto` is already present.
 - `fetch_sdk_local.py`: LOCAL-only download, verification and decryption of completed SDK artifacts.
 - `.github/workflows/ci.yml`: PUBLIC synthetic tests only; disposable PUBLIC test keys protect no private data.
 - `.github/workflows/build-release.yml`: real encrypted release build, disabled until configured.
@@ -75,6 +77,25 @@ The private source repository contains the complete Russian setup guide at
 `docs/encrypted-release/SETUP_RU.md`, including the exact private source scopes,
 permission settings and first validation-only run. Enable publication only after
 the first complete two-platform verification succeeds.
+
+## Offline OpenSSL diagnostic decryption
+
+Builder encrypted CI logs can be decrypted without installing the Tink Python package when a trusted workstation already has OpenSSL 3.0+ `libcrypto`. The OpenSSL reader is compatibility-only: it reads the same `VCPKGSE1` envelope produced by `secure_release.crypto` and supports only the pinned profiles used here - RFC 9180 `DHKEM_X25519_HKDF_SHA256/HKDF_SHA256/AES_256_GCM` for the wrapped per-file key and Tink `AES256_GCM_HKDF_1MB` for the log stream. It never encrypts, changes the wire format, contacts a package index, or authorizes a release.
+
+Verify the local OpenSSL runtime, then decrypt either the downloaded Actions ZIP or its single `.enc` member:
+
+```sh
+python3 scripts/decrypt-builder-logs-openssl.py --version
+chmod 600 ~/builder-ci-log-key.private.b64
+python3 scripts/decrypt-builder-logs-openssl.py \
+  --input /path/to/encrypted-logs-artifact.zip \
+  --private-key ~/builder-ci-log-key.private.b64 \
+  --output /tmp/builder-ci-logs-RUN_ID
+```
+
+`--private-key` names a protected file, never key contents. The file may contain the existing base64 transport text used by `scripts/decrypt-builder-logs.py` or the decoded Tink JSON keyset. The output directory must not exist. No plaintext directory is published until HPKE and every Streaming AEAD segment authenticate; archive paths, the authenticated builder context, recipient fingerprint, manifest membership, sizes, and file SHA-256 values are then checked again before the final directory rename.
+
+`libcrypto` is auto-detected on common OpenSSL 3 installations. When it lives outside the system loader path, use `--openssl-library /absolute/path/to/libcrypto` or set `BUILDER_OPENSSL_CRYPTO_LIBRARY`. The existing Tink-based `scripts/decrypt-builder-logs.py` remains the reference/fallback reader. If both readers are available and disagree, stop and investigate instead of weakening validation.
 
 ## Local workstation SDK retrieval
 
