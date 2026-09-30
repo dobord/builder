@@ -1,0 +1,69 @@
+name: Vendor offline Tink wheels
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - requirements.lock
+      - tools/verify_wheelhouse.py
+      - .github/workflows/vendor-offline-wheels.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: vendor-offline-tink-wheels
+  cancel-in-progress: false
+
+jobs:
+  vendor:
+    if: github.repository == 'dobord/builder' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.12'
+      - name: Download only exact hash-pinned binary wheels
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .vendor-tmp
+          mkdir -p .vendor-tmp/{py312-win,py313-win,py312-linux,py313-linux} vendor/wheels
+          rm -f vendor/wheels/*.whl
+
+          python -m pip download --disable-pip-version-check --require-hashes --only-binary=:all: --no-deps \
+            --dest .vendor-tmp/py312-win --platform win_amd64 --implementation cp --python-version 3.12 \
+            --abi cp312 --abi abi3 --abi none -r requirements.lock
+          python -m pip download --disable-pip-version-check --require-hashes --only-binary=:all: --no-deps \
+            --dest .vendor-tmp/py313-win --platform win_amd64 --implementation cp --python-version 3.13 \
+            --abi cp313 --abi abi3 --abi none -r requirements.lock
+          python -m pip download --disable-pip-version-check --require-hashes --only-binary=:all: --no-deps \
+            --dest .vendor-tmp/py312-linux \
+            --platform manylinux_2_28_x86_64 --platform manylinux_2_27_x86_64 --platform manylinux2014_x86_64 \
+            --implementation cp --python-version 3.12 --abi cp312 --abi abi3 --abi none -r requirements.lock
+          python -m pip download --disable-pip-version-check --require-hashes --only-binary=:all: --no-deps \
+            --dest .vendor-tmp/py313-linux \
+            --platform manylinux_2_28_x86_64 --platform manylinux_2_27_x86_64 --platform manylinux2014_x86_64 \
+            --implementation cp --python-version 3.13 --abi cp313 --abi abi3 --abi none -r requirements.lock
+
+          find .vendor-tmp -type f -name '*.whl' -exec cp -f {} vendor/wheels/ \;
+          rm -rf .vendor-tmp
+          python tools/verify_wheelhouse.py
+      - name: Commit the verified wheelhouse
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add vendor/wheels
+          if git diff --cached --quiet; then
+            echo "Wheelhouse already matches requirements.lock."
+            exit 0
+          fi
+          git commit -m "Vendor exact hash-pinned Tink 1.16.1 wheelhouse"
+          git push origin HEAD:main
