@@ -164,6 +164,17 @@ jobs:
           if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
           python investigations/frdpd-103/native.py
           Set-Content "$env:RUNNER_TEMP/native-exit" $LASTEXITCODE
+          @'
+          import json, os
+          from pathlib import Path
+          result=Path(os.environ['RUNNER_TEMP'])/'native-private'/'result.json'
+          if result.exists():
+              value=json.loads(result.read_text())
+              safe={key:value.get(key) for key in (
+                  'native_pass','stable_window_seconds','exec_result_success',
+                  'frame_ack','error_type','elapsed_seconds')}
+              print('SAFE_NATIVE_SUMMARY='+json.dumps(safe,sort_keys=True))
+          '@ | python -
           exit 0
       - name: Encrypt session evidence
         if: always()
