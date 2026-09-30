@@ -136,9 +136,9 @@ def capture_proxy_startup_backtrace(
     result["lfc_ui_freerdp_cef_backtrace_sigsegv"] = (
         "Program received signal SIGSEGV" in text
     )
-    frames = [line for line in text.splitlines() if re.match(r"^#[0-9]+\\s", line)]
+    frames = [line for line in text.splitlines() if re.match(r"^#[0-9]+\s", line)]
     result["lfc_ui_freerdp_cef_backtrace_frame_count"] = len(frames)
-    normalized_frames = "\\n".join(frames).encode("utf-8", errors="replace")
+    normalized_frames = "\n".join(frames).encode("utf-8", errors="replace")
     result["lfc_ui_freerdp_cef_backtrace_frames_sha256"] = (
         hashlib.sha256(normalized_frames).hexdigest()
     )
