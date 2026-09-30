@@ -29,7 +29,8 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
         with:
           python-version: '3.13'
-      - run: python -m pip install --require-hashes --only-binary=:all: -r requirements.lock
+      - run: |
+          python -m pip install --require-hashes --only-binary=:all: -r requirements.lock
       - name: Verify exact source in isolated Docker containers
         env:
           SOURCE_READ_TOKEN: ${{ secrets.SOURCE_READ_TOKEN }}
@@ -58,12 +59,13 @@ jobs:
           finally:
               root = Path(os.environ['RUNNER_TEMP']) / 'review-validation'
               status = json.loads((root / 'status.json').read_text()) if (root / 'status.json').exists() else {}
-              summary = {'source_sha': os.environ['SOURCE_SHA'], 'tree_sha': os.environ['SOURCE_TREE'], 'builder_sha': os.environ['GITHUB_SHA'], 'run_id': os.environ['GITHUB_RUN_ID'], 'variant': os.environ['REVIEW_VARIANT'], 'exit_code': rc, 'status': status, 'ctest_summaries': {}}
+              summary = {'source_sha': os.environ['SOURCE_SHA'], 'tree_sha': os.environ['SOURCE_TREE'], 'builder_sha': os.environ['GITHUB_SHA'], 'run_id': os.environ['GITHUB_RUN_ID'], 'variant': os.environ['REVIEW_VARIANT'], 'exit_code': rc, 'status': status, 'ctest_summaries': {}, 'failed_tests': {}}
               for name in ('focused.log', 'full-local.log', 'production-asan.log', 'production-noavc.log'):
                   path = root / name
                   if path.exists():
                       text = path.read_text(errors='replace')
                       summary['ctest_summaries'][name] = re.findall(r'^\d+% tests passed, \d+ tests failed out of \d+\s*$', text, re.M)
+                      summary['failed_tests'][name] = sorted(set(re.findall(r'TestFreeRDPFrdp[A-Za-z0-9_]+(?=\s+\.{2,}\s+\*\*\*)', text)))
               (Path(os.environ['RUNNER_TEMP']) / 'verification.json').write_text(json.dumps(summary, indent=2))
               print(json.dumps(summary, indent=2))
           sys.exit(rc)
