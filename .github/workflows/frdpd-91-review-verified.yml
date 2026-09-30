@@ -9,8 +9,8 @@ concurrency:
   group: frdpd-91-final-${{ github.sha }}
   cancel-in-progress: false
 env:
-  SOURCE_SHA: f9d65f753b542f3a6e49af686b955ca1ddd58e0d
-  SOURCE_TREE: 9d96a03704ed3a138cdecef96b2c3674f6acffc4
+  SOURCE_SHA: e8a3fa537d0813d10908da31efc3bf7b20659c4a
+  SOURCE_TREE: 8083e1f16406df1107c98d9b87e58c76f77d64a2
   REVIEW_BASE: 3c9171929662704418ed989cb46aa2c021234c76
   ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
 jobs:
@@ -42,8 +42,8 @@ jobs:
           original=api['docker']
           def verified(name,script,timeout=900):
               script=script.replace('-DWITH_FRDPD_STRICT_WARNINGS=ON','-DWITH_FRDPD_STRICT_WARNINGS=ON -DWITH_VERBOSE_WINPR_ASSERT=OFF')
-              script=script.replace('GfxPolicy|ZGfxHistory','SceneIpc|GfxPolicy|CursorAdapter|ZGfxHistory')
-              script=script.replace('X11WindowTracker|RemoteAppContract','X11WindowTracker|NativePath|RemoteAppContract|SceneIpc')
+              script=script.replace('GfxPolicy|ZGfxHistory','SceneIpc|WindowRegistry|WindowLease|GfxPolicy|CursorAdapter|ZGfxHistory')
+              script=script.replace('X11WindowTracker|RemoteAppContract','X11WindowTracker|NativePath|RemoteAppContract|SceneIpc|WindowRegistry|WindowLease')
               if name=='focused':
                   script="grep -q '^#define WITH_GFX_H264' /opt/freerdp-build/include/freerdp/config.h && "+script
               if name.startswith('production-'):
