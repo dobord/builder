@@ -231,7 +231,10 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn('- secure_release/cef_native_link_static.py',text)
         self.assertIn('- secure_release/cef_x11_static.py',text)
         self.assertIn('- secure_release/cef_unwind_backtrace.py',text)
+        self.assertIn('- secure_release/cef_elf_init.py',text)
+        self.assertIn('- tests/test_cef_elf_init.py',text)
         self.assertIn('- tests/test_cef_qualification_workflows.py',text)
+        self.assertIn('test_cef_elf_init.py -v',text)
         self.assertIn('- ci/cef-strict-combined-lock.json',text)
         self.assertNotIn('fetch_cache 10510999882', text)
         self.assertNotIn('CEF_STRICT_BINARY_CACHE_CORE:', text)
@@ -346,13 +349,28 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn('"lfc_ui_freerdp_cef_runtime_failure_class"',worker)
         self.assertIn('classify_proxy_runtime_failure(lifecycle_log, code)',worker)
         self.assertIn('MAX_PROXY_BACKTRACE_LOG_BYTES = 4 * 1024 * 1024',worker)
+        self.assertIn('def capture_startup_backtrace(',worker)
         self.assertIn('def capture_proxy_startup_backtrace(',worker)
         self.assertIn('"thread apply all bt"',worker)
+        self.assertIn('BUILDER_GDB_PC_ZERO=',worker)
+        self.assertIn('"null-pre-main-init-call"',worker)
         self.assertIn('"static-initializer"',worker)
         self.assertIn('"logger"',worker)
         self.assertIn('"cxx-runtime"',worker)
-        self.assertIn('"lfc_ui_freerdp_cef_backtrace_frames_sha256"',worker)
+        self.assertIn('frames_text for marker in markers',worker)
+        self.assertNotIn('if any(marker in text_value for marker in markers)',worker)
+        self.assertIn('key("frames_sha256")',worker)
+        self.assertIn('prefix + "_backtrace_" + suffix',worker)
         self.assertIn('capture_proxy_startup_backtrace(',worker)
+        self.assertIn('cef_elf_init.audit(executable)',worker)
+        self.assertIn('summary[prefix + "_" + name] = value',worker)
+        self.assertIn('result["summary"]["constructor_integrity_verified"]',worker)
+        self.assertIn('prefix="combined_cef_smoke"',worker)
+        self.assertIn('prefix="lfc_ui_freerdp_cef"',worker)
+        self.assertIn('stage = "combined-consumer-cef-runtime"',worker)
+        self.assertIn('["xvfb-run", "-a", str(cef_smoke_exe)]',worker)
+        self.assertIn('"CEF_STATIC_SMOKE_PASS"',worker)
+        self.assertIn('"combined_cef_smoke_runtime_verified"',worker)
         self.assertIn('"hidden_root_consumer_verified"',worker)
         self.assertIn('stage = "lfc-ui-freerdp-cef-usage-sanity"',worker)
         self.assertIn('["xvfb-run", "-a", str(proxy_exe), str(proxy_config)]',worker)
@@ -373,9 +391,11 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
             def fake_run(command, **kwargs):
                 self.assertEqual(command[:3], ["gdb", "--batch", "--quiet"])
                 kwargs["stdout"].write(
-                    """Program received signal SIGSEGV, Segmentation fault.
-#0  0x0000000000000000 in __static_initialization_and_destruction_0()
-#1  0x0000000000000000 in call_init()
+                    """Reading symbols from /tmp/freerdp_proxy_web_engine_view_cef...
+Program received signal SIGSEGV, Segmentation fault.
+BUILDER_GDB_PC_ZERO=1
+#0  0x0000000000000000 in ?? ()
+#1  0x00007ffff7db1234 in call_init ()
 """
                 )
                 return Completed()
@@ -388,17 +408,46 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
             self.assertTrue(result["lfc_ui_freerdp_cef_backtrace_sigsegv"])
             self.assertEqual(
                 result["lfc_ui_freerdp_cef_backtrace_class"],
-                "static-initializer",
+                "null-pre-main-init-call",
             )
+            self.assertTrue(result["lfc_ui_freerdp_cef_backtrace_pc_zero"])
             self.assertEqual(result["lfc_ui_freerdp_cef_backtrace_frame_count"], 2)
             self.assertRegex(
                 result["lfc_ui_freerdp_cef_backtrace_frames_sha256"],
                 r"^[0-9a-f]{64}$",
             )
             self.assertFalse(any(
-                "__static_initialization" in str(value)
+                "call_init" in str(value) or "freerdp_proxy" in str(value)
                 for value in result.values()
             ))
+
+    def test_backtrace_domain_ignores_executable_path_text(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            log = root / "gdb.log"
+
+            class Completed:
+                returncode = 0
+
+            def fake_run(command, **kwargs):
+                kwargs["stdout"].write(
+                    """Reading symbols from /tmp/freerdp_proxy_web_engine_view_cef...
+Program received signal SIGSEGV, Segmentation fault.
+BUILDER_GDB_PC_ZERO=0
+#0  0x0000000000401000 in unknown_constructor ()
+#1  0x00007ffff7db1234 in call_init ()
+"""
+                )
+                return Completed()
+
+            with mock.patch.object(combined.subprocess, "run", side_effect=fake_run):
+                result = combined.capture_proxy_startup_backtrace(
+                    root / "proxy", root, {}, log
+                )
+            self.assertEqual(
+                result["lfc_ui_freerdp_cef_backtrace_class"],
+                "static-initializer",
+            )
 
     def test_windows_engine_iteration_is_dormant_encrypted_and_exact(self):
         workflow = (ROOT / ".github/workflows/cef-windows-engine-iteration.yml").read_text()

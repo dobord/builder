@@ -20,7 +20,7 @@ import sys
 import time
 
 from . import (
-    build_support, cef_build, cef_contract, cef_native_link_static,
+    build_support, cef_build, cef_contract, cef_elf_init, cef_native_link_static,
     cef_nss_isolation, cef_unwind_backtrace, cef_x11_static, crypto, safeio,
 )
 from . import (
@@ -86,26 +86,26 @@ def classify_proxy_runtime_failure(log: Path, exit_code: int) -> dict[str, objec
 
 MAX_PROXY_BACKTRACE_LOG_BYTES = 4 * 1024 * 1024
 _PROXY_BACKTRACE_DOMAINS = (
-    # Specific runtime/component frames must win over the generic ELF
-    # constructor trampoline, which is expected to coexist lower in a
-    # pre-main stack and otherwise masks the actual failing component.
     ("logger", ("lfc::ui::detail::logImpl", "__vfprintf_internal", "vfprintf", "fprintf")),
     ("cef", ("CefExecuteProcess", "CefInitialize", "cef_execute_process", "cef_initialize")),
-    ("freerdp", ("pf_server_", "freerdp")),
+    ("freerdp", ("pf_server_", "freerdp_", "winpr_")),
     ("cxx-runtime", ("__cxa_", "std::", "libstdc++")),
-    ("libc", ("__libc_start_main", "libc_start_main")),
     ("static-initializer", ("__static_initialization_and_destruction_0", "_GLOBAL__sub_I_", "call_init")),
+    ("libc", ("__libc_start_main", "libc_start_main")),
 )
 
 
-def capture_proxy_startup_backtrace(
-    proxy_exe: Path, cwd: Path, env: dict[str, str], log: Path
+def capture_startup_backtrace(
+    executable: Path,
+    cwd: Path,
+    env: dict[str, str],
+    log: Path,
+    *,
+    prefix: str,
 ) -> dict[str, object]:
-    """Capture a bounded native stack after an already-observed startup crash.
-
-    The full stack remains runner-local/encrypted. Public output is limited to
-    a signal bit, frame count/hash and one fixed crash-domain label.
-    """
+    """Capture bounded crash identity; raw stack stays runner-local/encrypted."""
+    if re.fullmatch(r"[a-z0-9_]{1,64}", prefix) is None:
+        raise ValueError("invalid startup backtrace prefix")
     with log.open("w", encoding="utf-8") as stream:
         try:
             completed = subprocess.run(
@@ -113,8 +113,9 @@ def capture_proxy_startup_backtrace(
                     "gdb", "--batch", "--quiet",
                     "-ex", "set pagination off",
                     "-ex", "run",
+                    "-ex", 'printf "BUILDER_GDB_PC_ZERO=%d\\n", $pc == 0',
                     "-ex", "thread apply all bt",
-                    "--args", str(proxy_exe),
+                    "--args", str(executable),
                 ],
                 cwd=cwd, env=env, stdout=stream, stderr=subprocess.STDOUT,
                 text=True, timeout=60,
@@ -122,38 +123,76 @@ def capture_proxy_startup_backtrace(
             gdb_returncode = completed.returncode
         except subprocess.TimeoutExpired:
             gdb_returncode = 124
-    result: dict[str, object] = {
-        "lfc_ui_freerdp_cef_backtrace_gdb_returncode": gdb_returncode,
-    }
+
+    key = lambda suffix: prefix + "_backtrace_" + suffix
+    result: dict[str, object] = {key("gdb_returncode"): gdb_returncode}
     if not log.is_file() or log.is_symlink():
-        result["lfc_ui_freerdp_cef_backtrace_class"] = "log-missing"
+        result[key("class")] = "log-missing"
         return result
     size = log.stat().st_size
-    result["lfc_ui_freerdp_cef_backtrace_log_bytes"] = size
+    result[key("log_bytes")] = size
     if size > MAX_PROXY_BACKTRACE_LOG_BYTES:
-        result["lfc_ui_freerdp_cef_backtrace_class"] = "log-oversized"
+        result[key("class")] = "log-oversized"
         return result
+
     data = log.read_bytes()
-    result["lfc_ui_freerdp_cef_backtrace_log_sha256"] = crypto.digest(log)
-    text = data.decode("utf-8", errors="replace")
-    result["lfc_ui_freerdp_cef_backtrace_sigsegv"] = (
-        "Program received signal SIGSEGV" in text
+    result[key("log_sha256")] = crypto.digest(log)
+    text_value = data.decode("utf-8", errors="replace")
+    result[key("sigsegv")] = "Program received signal SIGSEGV" in text_value
+    frames = [
+        line for line in text_value.splitlines()
+        if re.match(r"^#[0-9]+\s", line)
+    ]
+    frames_text = "\n".join(frames)
+    result[key("frame_count")] = len(frames)
+    result[key("frames_sha256")] = hashlib.sha256(
+        frames_text.encode("utf-8", errors="replace")
+    ).hexdigest()
+    pc_zero = (
+        "BUILDER_GDB_PC_ZERO=1" in text_value
+        or any(re.match(r"^#0\s+0x0+\s", line) for line in frames)
     )
-    frames = [line for line in text.splitlines() if re.match(r"^#[0-9]+\s", line)]
-    result["lfc_ui_freerdp_cef_backtrace_frame_count"] = len(frames)
-    normalized_frames = "\n".join(frames).encode("utf-8", errors="replace")
-    result["lfc_ui_freerdp_cef_backtrace_frames_sha256"] = (
-        hashlib.sha256(normalized_frames).hexdigest()
-    )
-    if not result["lfc_ui_freerdp_cef_backtrace_sigsegv"]:
-        result["lfc_ui_freerdp_cef_backtrace_class"] = "not-reproduced"
+    result[key("pc_zero")] = pc_zero
+
+    if not result[key("sigsegv")]:
+        result[key("class")] = "not-reproduced"
+        return result
+    if pc_zero and "call_init" in frames_text:
+        result[key("class")] = "null-pre-main-init-call"
         return result
     for domain, markers in _PROXY_BACKTRACE_DOMAINS:
-        if any(marker in text for marker in markers):
-            result["lfc_ui_freerdp_cef_backtrace_class"] = domain
+        if any(marker in frames_text for marker in markers):
+            result[key("class")] = domain
             return result
-    result["lfc_ui_freerdp_cef_backtrace_class"] = "unknown"
+    result[key("class")] = "unknown"
     return result
+
+
+def capture_proxy_startup_backtrace(
+    proxy_exe: Path, cwd: Path, env: dict[str, str], log: Path
+) -> dict[str, object]:
+    return capture_startup_backtrace(
+        proxy_exe, cwd, env, log, prefix="lfc_ui_freerdp_cef"
+    )
+
+
+def record_constructor_audit(
+    summary: dict,
+    root: Path,
+    executable: Path,
+    *,
+    prefix: str,
+) -> bool:
+    if re.fullmatch(r"[a-z0-9_]{1,64}", prefix) is None:
+        raise ValueError("invalid constructor audit prefix")
+    result = cef_elf_init.audit(executable)
+    (root / (prefix.replace("_", "-") + "-constructor-audit.json")).write_text(
+        json.dumps(result["details"], sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    for name, value in result["summary"].items():
+        summary[prefix + "_" + name] = value
+    return bool(result["summary"]["constructor_integrity_verified"])
 
 
 def git_head(path: Path) -> str:
@@ -1336,6 +1375,69 @@ def main() -> None:
             log=root / "consumer-test.log", timeout=600,
         )
 
+        # CTest intentionally contains only the non-CEF sdk_smoke.  The strict
+        # builder itself must supervise the real external CEF consumer so a
+        # pre-main failure in CEF::static cannot be mistaken for a proxy-only
+        # regression.
+        stage = "combined-consumer-cef-runtime"
+        cef_smoke_exe = relocated_smokes[0]
+        combined_cef_constructor_failed = not record_constructor_audit(
+            summary, root, cef_smoke_exe, prefix="combined_cef_smoke"
+        )
+        cef_smoke_log = root / "consumer-cef-runtime.log"
+        cef_smoke_result = cef_smoke_exe.parent / "smoke-result.json"
+        cef_smoke_result.unlink(missing_ok=True)
+        cef_smoke_env = dict(build_env)
+        cef_smoke_env["CEF_STATIC_STRICT_THIRD_PARTY"] = "1"
+        try:
+            with cef_smoke_log.open("w", encoding="utf-8") as stream:
+                cef_smoke = subprocess.run(
+                    ["xvfb-run", "-a", str(cef_smoke_exe)],
+                    cwd=cef_smoke_exe.parent, env=cef_smoke_env,
+                    stdout=stream, stderr=subprocess.STDOUT, text=True,
+                    timeout=120,
+                )
+        except subprocess.TimeoutExpired as error:
+            summary["combined_cef_smoke_runtime_timeout"] = True
+            raise RuntimeError("Combined CEF smoke runtime timed out") from error
+        summary["combined_cef_smoke_runtime_returncode"] = cef_smoke.returncode
+        cef_smoke_text = cef_smoke_log.read_text(
+            encoding="utf-8", errors="replace"
+        )
+        summary["combined_cef_smoke_runtime_marker_verified"] = (
+            "CEF_STATIC_SMOKE_PASS" in cef_smoke_text
+        )
+        if cef_smoke.returncode != 0:
+            summary.update(capture_startup_backtrace(
+                cef_smoke_exe, cef_smoke_exe.parent, cef_smoke_env,
+                root / "consumer-cef-gdb.log",
+                prefix="combined_cef_smoke",
+            ))
+            raise RuntimeError("Combined CEF smoke runtime failed")
+        if not summary["combined_cef_smoke_runtime_marker_verified"]:
+            raise RuntimeError("Combined CEF smoke runtime lost its success marker")
+        if not cef_smoke_result.is_file() or cef_smoke_result.is_symlink():
+            raise RuntimeError("Combined CEF smoke runtime proof is missing")
+        smoke_proof = json.loads(cef_smoke_result.read_text(encoding="utf-8"))
+        if (
+            not isinstance(smoke_proof, dict)
+            or smoke_proof.get("engine") != "static"
+            or smoke_proof.get("interface") != "capi"
+            or smoke_proof.get("javascript") is not True
+            or smoke_proof.get("paint") is not True
+            or smoke_proof.get("browser_modules_clean") is not True
+            or smoke_proof.get("renderer_modules_clean") is not True
+            or smoke_proof.get("third_party_modules_static") is not True
+            or smoke_proof.get("sandbox_verified") is not False
+            or type(smoke_proof.get("browser_pid")) is not int
+            or type(smoke_proof.get("renderer_pid")) is not int
+            or smoke_proof["browser_pid"] <= 0
+            or smoke_proof["renderer_pid"] <= 0
+            or smoke_proof["browser_pid"] == smoke_proof["renderer_pid"]
+        ):
+            raise RuntimeError("Combined CEF smoke runtime proof is invalid")
+        summary["combined_cef_smoke_runtime_verified"] = True
+
         stage = "lfc-ui-freerdp-cef-consumer"
         canonical_proxy_example = (
             lfc_ui / "examples/freerdp_proxy_web_engine_view_cef.cpp"
@@ -1409,6 +1511,9 @@ def main() -> None:
         if len(executables) != 1:
             raise RuntimeError("Final FreeRDP/CEF qualification executable is missing")
         proxy_exe = executables[0]
+        proxy_constructor_failed = not record_constructor_audit(
+            summary, root, proxy_exe, prefix="lfc_ui_freerdp_cef"
+        )
         target_prefix = consumer_sdk / "installed" / TRIPLET
         shared_payload = sorted(
             path.relative_to(target_prefix).as_posix()
@@ -1627,6 +1732,11 @@ PrivateKeyFile={private_key}
             raise RuntimeError("Final strict Linux contract identity changed")
         summary["hidden_root_consumer_verified"] = True
 
+        if combined_cef_constructor_failed or proxy_constructor_failed:
+            stage = "elf-startup-constructor-integrity"
+            raise RuntimeError(
+                "Final consumer ELF startup constructor metadata is unsafe"
+            )
         if usage_failed:
             stage = "lfc-ui-freerdp-cef-usage-sanity"
             raise RuntimeError(
