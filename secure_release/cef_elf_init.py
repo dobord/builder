@@ -7,6 +7,8 @@ import mmap
 from pathlib import Path
 import struct
 
+from . import cef_constructor_map
+
 ELF_HEADER = struct.Struct("<16sHHIQQQIHHHHHH")
 SECTION_HEADER = struct.Struct("<IIQQQQIIQQ")
 RELA = struct.Struct("<QQq")
@@ -433,4 +435,9 @@ def audit(path: Path) -> dict:
             "constructor_metadata_sha256": metadata_sha,
             "constructor_integrity_verified": verified,
         }
+        provenance = cef_constructor_map.inspect_map(
+            path.parent / cef_constructor_map.MAP_NAME, sections, details
+        )
+        summary.update(provenance["summary"])
+        details["source_map"] = provenance["details"]
         return {"summary": summary, "details": details}

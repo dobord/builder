@@ -21,7 +21,7 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(subject.LLD_MAJOR, 18)
         self.assertEqual(
             subject.cmake_flag(),
-            "-DCMAKE_EXE_LINKER_FLAGS=-B/usr/lib/llvm-18/bin -fuse-ld=lld -static-libstdc++ -static-libgcc",
+            "-DCMAKE_EXE_LINKER_FLAGS=-B/usr/lib/llvm-18/bin -fuse-ld=lld -static-libstdc++ -static-libgcc -Wl,-Map=cef-consumer-link.map",
         )
 
     def test_workflow_installs_and_preflights_lld_before_restore(self):
