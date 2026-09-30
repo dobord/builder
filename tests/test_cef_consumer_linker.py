@@ -26,7 +26,10 @@ class PolicyTests(unittest.TestCase):
 
     def test_workflow_installs_and_preflights_lld_before_restore(self):
         flow = (ROOT / ".github/workflows/cef-strict-combined.yml").read_text()
-        self.assertIn("g++-14 lld-18 autoconf", flow)
+        self.assertIn("g++-14", flow)
+        self.assertIn("lld-18", flow)
+        self.assertIn("gdb", flow)
+        self.assertIn("autoconf", flow)
         self.assertIn("REQUIRE_CEF_CONSUMER_LLD: '1'", flow)
         self.assertLess(
             flow.index("test_cef_consumer_linker.py -v"),
