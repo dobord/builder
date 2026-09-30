@@ -3,7 +3,9 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
+from secure_release import cef_strict_combined as combined
 from secure_release import cef_strict_iteration as strict
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -235,6 +237,7 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertNotIn('CEF_STRICT_BINARY_CACHE_CORE:', text)
         self.assertIn('Verify Chromium BoringSSL namespace isolation before restore', text)
         self.assertIn('Verify exact engine profile adapters before combined restore', text)
+        self.assertIn('lld-18 gdb autoconf', text)
         self.assertIn('ref: 56f9a7ce6bf25e3325d9d71e5fdd6255de33cb57',text)
         self.assertNotIn('ref: bc9fa678a7f7cb2b1f29c0e34c251cf4ae061438',text)
         self.assertIn('ref: b4bb281192ea8bb004542012ac804b988a4ff403',text)
@@ -342,6 +345,14 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn('"lfc_ui_freerdp_cef_runtime_log_sha256"',worker)
         self.assertIn('"lfc_ui_freerdp_cef_runtime_failure_class"',worker)
         self.assertIn('classify_proxy_runtime_failure(lifecycle_log, code)',worker)
+        self.assertIn('MAX_PROXY_BACKTRACE_LOG_BYTES = 4 * 1024 * 1024',worker)
+        self.assertIn('def capture_proxy_startup_backtrace(',worker)
+        self.assertIn('"thread apply all bt"',worker)
+        self.assertIn('"static-initializer"',worker)
+        self.assertIn('"logger"',worker)
+        self.assertIn('"cxx-runtime"',worker)
+        self.assertIn('"lfc_ui_freerdp_cef_backtrace_frames_sha256"',worker)
+        self.assertIn('capture_proxy_startup_backtrace(',worker)
         self.assertIn('"hidden_root_consumer_verified"',worker)
         self.assertIn('stage = "lfc-ui-freerdp-cef-usage-sanity"',worker)
         self.assertIn('["xvfb-run", "-a", str(proxy_exe), str(proxy_config)]',worker)
@@ -350,6 +361,43 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
         self.assertIn('proxy_config.write_text',worker)
         self.assertIn('process.send_signal(signal.SIGTERM)',worker)
         self.assertIn('lfc_ui_freerdp_proxy_listener_verified',worker)
+
+    def test_proxy_startup_backtrace_summary_is_bounded_and_domain_only(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            log = root / "gdb.log"
+
+            class Completed:
+                returncode = 0
+
+            def fake_run(command, **kwargs):
+                self.assertEqual(command[:3], ["gdb", "--batch", "--quiet"])
+                kwargs["stdout"].write(
+                    "Program received signal SIGSEGV, Segmentation fault.\\n"
+                    "#0  0x0000000000000000 in __static_initialization_and_destruction_0()\\n"
+                    "#1  0x0000000000000000 in call_init()\\n"
+                )
+                return Completed()
+
+            with mock.patch.object(combined.subprocess, "run", side_effect=fake_run):
+                result = combined.capture_proxy_startup_backtrace(
+                    root / "proxy", root, {}, log
+                )
+
+            self.assertTrue(result["lfc_ui_freerdp_cef_backtrace_sigsegv"])
+            self.assertEqual(
+                result["lfc_ui_freerdp_cef_backtrace_class"],
+                "static-initializer",
+            )
+            self.assertEqual(result["lfc_ui_freerdp_cef_backtrace_frame_count"], 2)
+            self.assertRegex(
+                result["lfc_ui_freerdp_cef_backtrace_frames_sha256"],
+                r"^[0-9a-f]{64}$",
+            )
+            self.assertFalse(any(
+                "__static_initialization" in str(value)
+                for value in result.values()
+            ))
 
     def test_windows_engine_iteration_is_dormant_encrypted_and_exact(self):
         workflow = (ROOT / ".github/workflows/cef-windows-engine-iteration.yml").read_text()
