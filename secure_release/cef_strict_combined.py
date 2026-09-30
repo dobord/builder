@@ -40,6 +40,48 @@ LOCKFREECORO = "24038aed3a0be642adb60e71bd994ae8f0d90140"
 LFC_UI = "29146a706499f83d464dd28fe29301fee06bcb3d"
 TRIPLET = "x64-linux-static-release"
 
+MAX_PROXY_RUNTIME_LOG_BYTES = 1024 * 1024
+_PROXY_RUNTIME_FAILURE_MARKERS = (
+    ("Failed to load FreeRDP proxy config:", "config-load"),
+    ("Failed to create FreeRDP proxy server", "server-create"),
+    ("Failed to initialize process-owned CEF runner:", "cef-initialize"),
+    ("Failed to register lfc-ui FreeRDP proxy CEF module", "module-register"),
+    ("Failed to start FreeRDP proxy server", "server-start"),
+)
+
+
+def classify_proxy_runtime_failure(log: Path, exit_code: int) -> dict[str, object]:
+    """Publish only bounded startup classification, never raw runtime diagnostics."""
+    result: dict[str, object] = {
+        "lfc_ui_freerdp_cef_runtime_exit_code": exit_code,
+    }
+    if not log.is_file() or log.is_symlink():
+        result["lfc_ui_freerdp_cef_runtime_failure_class"] = "log-missing"
+        return result
+    size = log.stat().st_size
+    result["lfc_ui_freerdp_cef_runtime_log_bytes"] = size
+    if size > MAX_PROXY_RUNTIME_LOG_BYTES:
+        result["lfc_ui_freerdp_cef_runtime_failure_class"] = "log-oversized"
+        return result
+    data = log.read_bytes()
+    result["lfc_ui_freerdp_cef_runtime_log_sha256"] = crypto.digest(log)
+    text = data.decode("utf-8", errors="replace")
+    for marker, failure_class in _PROXY_RUNTIME_FAILURE_MARKERS:
+        if marker in text:
+            result["lfc_ui_freerdp_cef_runtime_failure_class"] = failure_class
+            return result
+    if exit_code < 0:
+        result["lfc_ui_freerdp_cef_runtime_failure_class"] = (
+            "signal-before-log" if not data else "signal-unclassified"
+        )
+    elif "Starting one-shot FreeRDP Proxy CEF lifecycle example" in text:
+        result["lfc_ui_freerdp_cef_runtime_failure_class"] = "server-run"
+    elif exit_code == 0:
+        result["lfc_ui_freerdp_cef_runtime_failure_class"] = "unexpected-clean-exit"
+    else:
+        result["lfc_ui_freerdp_cef_runtime_failure_class"] = "early-exit-unclassified"
+    return result
+
 
 def git_head(path: Path) -> str:
     return subprocess.check_output(
@@ -1439,6 +1481,9 @@ PrivateKeyFile={private_key}
                 while time.monotonic() < deadline:
                     code = process.poll()
                     if code is not None:
+                        summary.update(
+                            classify_proxy_runtime_failure(lifecycle_log, code)
+                        )
                         raise RuntimeError(
                             "Final FreeRDP/CEF process exited before proxy listener startup"
                         )
