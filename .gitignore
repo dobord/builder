@@ -1,8 +1,11 @@
 __pycache__/
 .venv/
+.offline-tink/
 *.pyc
 public-test-fixture/
 *.enc
 *.key
+*.keyset.json
+keys/
 *-private.json
 *-private_key.json

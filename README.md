@@ -35,6 +35,10 @@ Public artifact sizes, timing and opaque release/run IDs are observable.
 - `publish.py`: independent verification, retry-safe draft handling, conflict refusal.
 - `bootstrap.py`: LOCAL-only key generation and repository secret provisioning with `gh` stdin.
 - `decrypt_local.py`: LOCAL-only authenticated diagnostic decryption; does not authorize releases.
+- `tools/tink_offline.py`: offline launcher that bootstraps only from the committed wheelhouse.
+- `tools/verify_wheelhouse.py`: exact filename/SHA-256 verifier for every vendored wheel.
+- `vendor/wheels/`: official binary wheels for Tink 1.16.1 and its pinned runtime dependencies.
+- `.github/workflows/vendor-offline-wheels.yml`: regenerates the committed wheelhouse from exact lock hashes.
 - `.github/workflows/ci.yml`: PUBLIC synthetic tests only; disposable PUBLIC test keys protect no private data.
 - `.github/workflows/build-release.yml`: real encrypted release build, disabled until configured.
 - `.github/workflows/request-publication.yml`: dispatch publisher after completed successful build.
@@ -47,8 +51,9 @@ upload plaintext diagnostics, source archives, credentials or private SDKs here.
 
 ## Installation
 
-Use Python 3.12 on Windows x64 or Linux x64 and authenticated GitHub CLI with
-administrator access to the three repositories. On the trusted operator machine:
+Use CPython 3.12 or 3.13 on Windows x64 or Linux x86-64 and authenticated GitHub
+CLI with administrator access to the three repositories. For normal online setup
+on the trusted operator machine:
 
 ```sh
 python -m pip install --require-hashes --only-binary=:all: -r requirements.lock
@@ -68,6 +73,72 @@ The private source repository contains the complete Russian setup guide at
 `docs/encrypted-release/SETUP_RU.md`, including the exact private source scopes,
 permission settings and first validation-only run. Enable publication only after
 the first complete two-platform verification succeeds.
+
+## Offline Tink 1.16.1 diagnostic decryption
+
+The official Tink Python package is a library, not a standalone upstream CLI.
+For offline operation this repository commits the official PyPI binary wheels
+needed for its supported hosts and provides a small launcher around the existing
+`secure_release.decrypt_local` command. The launcher does not reimplement any
+cryptography.
+
+Verify the bundle and the exact Tink version:
+
+```sh
+python tools/verify_wheelhouse.py
+python tools/tink_offline.py --version
+```
+
+On first use, `tools/tink_offline.py` creates `.offline-tink/` and installs
+only from `vendor/wheels/` using all of:
+
+```text
+--no-index
+--require-hashes
+--only-binary=:all:
+```
+
+There is no package-index/network fallback. The wheelhouse covers CPython
+3.12/3.13 on Linux x86-64 (glibc 2.28+) and Windows x64. The lock contains only
+the accepted hashes for those targets.
+
+Decrypt an encrypted compiler diagnostic locally:
+
+```sh
+python tools/tink_offline.py \
+  --ciphertext /private/path/diagnostic.enc \
+  --private-key /private/path/output-private.json \
+  --output /private/path/diagnostic.log \
+  --run BUILD_RUN_ID \
+  --attempt BUILD_ATTEMPT \
+  --builder-sha FULL_40_HEX_BUILDER_SHA \
+  --platform linux
+```
+
+Use `--platform windows` for a Windows diagnostic. Run/attempt/builder SHA are
+deliberately explicit: the decryptor reconstructs the expected authenticated
+context instead of trusting context copied from an untrusted ciphertext header.
+
+The private key file is the decoded Tink JSON keyset, not the base64 transport
+text. If your backup is base64-encoded, decode it once into a mode-restricted
+file outside every Git worktree. Feed secret material through stdin or a protected
+file; do not put the key in shell command arguments, environment variables,
+README examples, issues, Actions logs or repository files.
+
+The provided output private key is intentionally not committed. Existing ignore
+rules cover common private-key names, and `.offline-tink/` is also ignored.
+
+## Refreshing the offline wheelhouse
+
+`requirements.lock` is the authority. It pins Tink 1.16.1 and every required
+runtime dependency by exact SHA-256. When that lock or the wheel verifier changes,
+`.github/workflows/vendor-offline-wheels.yml` downloads binary wheels only,
+checks the exact expected filenames and SHA-256 values, and commits
+`vendor/wheels/*.whl`. Do not hand-edit or replace vendored wheels.
+
+A supported offline installation is therefore reproducible from a repository
+clone alone; internet access is needed only when intentionally refreshing the
+committed wheelhouse.
 
 ## Operational limits
 

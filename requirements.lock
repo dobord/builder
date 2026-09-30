@@ -1,4 +1,5 @@
-# Python 3.12/3.13, Linux x86-64 and Windows AMD64. Wheel-only, hash-pinned.
+# Python 3.12/3.13, Linux x86-64 and Windows AMD64. Wheel-only, exact hash-pinned.
+# Tink hashes below are the official PyPI 1.16.1 wheels for only those four targets.
 tink==1.16.1 \
  --hash=sha256:99766688b84b362516488fbf371b4f801c5b2833a86cc8b70f58d607a636d951 \
  --hash=sha256:af3519dfa01704e9f1ae1020db6076dcff89b5f799deba08a1adf901d977fc4e \
@@ -6,7 +7,7 @@ tink==1.16.1 \
  --hash=sha256:a33da9474ee43a21e0c7261ad8af1a3b394d1607db2d79a0a21e3d5305285e68
 absl-py==2.3.1 --hash=sha256:eeecf07f0c2a93ace0772c92e596ace6d3d3996c042b2128459aaae2a76de11d
 bazel-runfiles==1.6.3 --hash=sha256:76a6c2d1e9cc2b8fc9ae657901aff0dbf4da46ee1eeab67cce8fd907e3196857
+# Native protobuf wheels for Windows x64 and manylinux x86-64; no sdist/pure-wheel fallback.
 protobuf==6.33.5 \
  --hash=sha256:3093804752167bcab3998bec9f1048baae6e29505adaf1afd14a37bddede533c \
- --hash=sha256:cbf16ba3350fb7b889fca858fb215967792dc125b35c7976ca4818bee3521cf0 \
- --hash=sha256:69915a973dd0f60f31a08b8318b73eab2bd6a392c79184b3612226b0a3f8ec02
+ --hash=sha256:cbf16ba3350fb7b889fca858fb215967792dc125b35c7976ca4818bee3521cf0
