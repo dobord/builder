@@ -170,32 +170,39 @@ def _archive_size(archive: Path, *, limit: int | None = None) -> int:
     return size
 
 
-def _ar_elf_payloads(archive: Path):
+def _ar_elf_payloads(archive: Path, *, archive_limit: int | None = None):
     """Yield bounded regular-archive ELF member payloads in physical order."""
-    _archive_size(archive)
+    archive_size = _archive_size(archive, limit=archive_limit)
     with archive.open("rb") as stream:
-        require(stream.read(8) == b"!<arch>\\n",
+        require(stream.read(8) == b"!<arch>\n",
                 "CEF startup-alignment input is not a regular archive")
         member_index = 0
         while True:
             header = stream.read(AR_HEADER_BYTES)
             if not header:
                 break
-            require(len(header) == AR_HEADER_BYTES and header[58:] == b"\\x60\\n",
+            require(len(header) == AR_HEADER_BYTES and header[58:] == b"\x60\n",
                     "Malformed CEF archive member header")
             raw_size = header[48:58].strip()
             require(raw_size.isdigit(), "Malformed CEF archive member size")
             size = int(raw_size)
-            require(0 <= size <= safeio.MAX_BYTES,
+            require(0 <= size <= archive_size - stream.tell() - (size & 1),
                     "CEF archive member exceeds SDK byte budget")
-            payload = stream.read(size)
-            require(len(payload) == size, "Truncated CEF archive member")
+            # Archive indexes/name tables can be large. Only materialize ELF
+            # members; keep declared sizes inside the already validated file.
+            magic = stream.read(min(4, size))
+            if magic == b"\x7fELF":
+                payload = magic + stream.read(size - len(magic))
+                require(len(payload) == size, "Truncated CEF archive member")
+            else:
+                stream.seek(size - len(magic), os.SEEK_CUR)
+                payload = b""
             if size & 1:
-                require(stream.read(1) == b"\\n", "Malformed CEF archive padding")
+                require(stream.read(1) == b"\n", "Malformed CEF archive padding")
             member_index += 1
             require(member_index <= MAX_ARCHIVE_MEMBERS,
                     "CEF archive has too many members")
-            if payload.startswith(b"\\x7fELF"):
+            if payload.startswith(b"\x7fELF"):
                 yield member_index, payload
 
 
@@ -204,7 +211,7 @@ def _elf_init_array_sections(payload: bytes):
     require(len(payload) >= ELF64_HEADER.size, "Truncated CEF ELF member")
     header = ELF64_HEADER.unpack_from(payload, 0)
     ident = header[0]
-    require(ident[:7] == b"\\x7fELF\\x02\\x01\\x01",
+    require(ident[:7] == b"\x7fELF\x02\x01\x01",
             "CEF startup-alignment audit requires little-endian ELF64")
     e_shoff = header[6]
     e_ehsize = header[8]
@@ -231,7 +238,7 @@ def _elf_init_array_sections(payload: bytes):
 
     def section_name(offset: int) -> str:
         require(0 <= offset < len(names), "Invalid CEF ELF section-name offset")
-        end = names.find(b"\\0", offset)
+        end = names.find(b"\0", offset)
         require(end >= 0, "Unterminated CEF ELF section name")
         try:
             return names[offset:end].decode("ascii")
@@ -250,9 +257,13 @@ def _elf_init_array_sections(payload: bytes):
             yield name, size, alignment
 
 
-def _init_array_profile(archive: Path) -> list[tuple[int, str, int, int]]:
+def _init_array_profile(
+    archive: Path, *, archive_limit: int | None = None
+) -> list[tuple[int, str, int, int]]:
     records: list[tuple[int, str, int, int]] = []
-    for member_index, payload in _ar_elf_payloads(archive):
+    for member_index, payload in _ar_elf_payloads(
+        archive, archive_limit=archive_limit
+    ):
         for name, size, alignment in _elf_init_array_sections(payload):
             records.append((member_index, name, size, alignment))
             require(len(records) <= MAX_INIT_ARRAY_SECTIONS,
@@ -269,7 +280,7 @@ def _normalized_init_array_profile(records):
 
 def _profile_sha256(records) -> str:
     raw = "".join(
-        f"{member}\\t{name}\\t{size}\\t{alignment}\\n"
+        f"{member}\t{name}\t{size}\t{alignment}\n"
         for member, name, size, alignment in records
     ).encode("ascii")
     return hashlib.sha256(raw).hexdigest()
@@ -940,7 +951,9 @@ def install(installed: Path, source: Path, diagnostics: Path) -> dict:
                     "CEF archive global symbol table changed outside namespace mapping",
                 )
                 normalized_init_profile = _normalized_init_array_profile(init_profile)
-                final_init_profile = _init_array_profile(temporary)
+                final_init_profile = _init_array_profile(
+                    temporary, archive_limit=_archive_limit(path)
+                )
                 require(
                     final_init_profile == normalized_init_profile,
                     "CEF init-array alignment normalization is incomplete",
