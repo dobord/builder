@@ -9,8 +9,8 @@ concurrency:
   group: frdpd-124-${{ github.sha }}
   cancel-in-progress: false
 env:
-  SOURCE_SHA: 7b466859c19b46038346181ed918aa6964912a5b
-  SOURCE_TREE: 6580f5caba1e69d633fdfd5be4a54d7410617039
+  SOURCE_SHA: 654eb9bccb32e26220c034ab405994a4f563c3ce
+  SOURCE_TREE: ab77d228b89c511476542474468c1402a14f7fa4
   ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
 jobs:
   regression:
@@ -36,15 +36,53 @@ jobs:
           SOURCE_READ_TOKEN: ${{ secrets.SOURCE_READ_TOKEN }}
         run: |
           python - <<'PY'
-          import json, os, re, runpy, sys
+          import base64, hashlib, json, os, re, runpy, sys, urllib.request
           from pathlib import Path
           api = runpy.run_path('investigations/frdpd-103/review-ci.py')
           original = api['docker']
+          baseline = Path(os.environ['RUNNER_TEMP']) / 'baseline-capture.c'
+          if os.environ['REVIEW_VARIANT'] == 'full':
+              blob = 'bc03a5450817be5e5a811b589895e7782cfed372'
+              request = urllib.request.Request('https://api.github.com/repos/dobord/frdpd/git/blobs/' + blob, headers={'Authorization': 'Bearer ' + os.environ['SOURCE_READ_TOKEN'], 'Accept': 'application/vnd.github+json'})
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  data = base64.b64decode(json.load(response)['content'])
+              if hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest() != blob:
+                  raise ValueError('baseline blob mismatch')
+              baseline.write_bytes(data)
+              baseline.chmod(0o600)
+          def lease_regression():
+              script = r'''set -euo pipefail
+          mkdir -p /tmp/lease-proof
+          cd /tmp/lease-proof
+          agent=/src/server/frdp/frdp-session-agent
+          test=/src/server/frdp/test/TestFreeRDPFrdpX11WindowCapture.c
+          lease=/src/server/frdp/graphics-control/window-lease.c
+          flags=(-std=c11 -D_POSIX_C_SOURCE=200809L -Wall -Wextra -Werror -I/src/server/frdp -I"$agent")
+          libs=(-lXcomposite -lXdamage -lXfixes -lXrender -lXext -lX11)
+          gcc "${flags[@]}" "$test" /baseline.c "$lease" "${libs[@]}" -o baseline-test
+          set +e
+          timeout 120 xvfb-run -a ./baseline-test >baseline.log 2>&1
+          status=$?
+          set -e
+          test "$status" -eq 1
+          grep -qx 'window capture regression failed: late finish after lease reclamation preserves damage' baseline.log
+          echo 'LEASE_BASELINE_EXPECTED_FAILURE=1'
+          gcc "${flags[@]}" "$test" "$agent/x11_window_capture.c" "$lease" "${libs[@]}" -o fixed-test
+          timeout 120 xvfb-run -a ./fixed-test
+          timeout 120 xvfb-run -a -s '-screen 0 1280x1024x24 -extension Composite' ./fixed-test --expect-no-composite
+          timeout 120 xvfb-run -a -s '-screen 0 1280x1024x24 -extension DAMAGE' ./fixed-test --expect-no-damage
+          timeout 120 xvfb-run -a -s '-screen 0 1280x1024x24 -extension XFIXES' ./fixed-test --expect-no-xfixes
+          gcc "${flags[@]}" -g -fno-omit-frame-pointer -fsanitize=address,undefined "$test" "$agent/x11_window_capture.c" "$lease" "${libs[@]}" -o sanitized-test
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 timeout 120 xvfb-run -a ./sanitized-test
+          echo 'LEASE_FIXED_CORPUS_AND_SANITIZERS=1'
+          '''
+              return api['run']('lease-red-green', ['docker', 'run', '--rm', '--init', '--network', 'none', '--entrypoint', 'bash', '-v', str(baseline) + ':/baseline.c:ro', api['IMAGE'], '-lc', script], timeout=240)
           def verified(name, script, timeout=900):
               script = script.replace('-DWITH_FRDPD_STRICT_WARNINGS=ON', '-DWITH_FRDPD_STRICT_WARNINGS=ON -DWITH_VERBOSE_WINPR_ASSERT=OFF')
               script = script.replace('GfxPolicy|ZGfxHistory', 'GfxPolicy|CursorAdapter|ZGfxHistory')
               script = script.replace('X11WindowTracker|RemoteAppContract', 'X11WindowTracker|X11WindowCapture|X11WindowCompositor|SceneV2.*|WindowLease|X11ImageConvert|GraphicsControl|DamageState|SharedBuffer|NativePath|RemoteAppContract')
               if name == 'focused':
+                  lease_regression()
                   script = "grep -q '^#define WITH_GFX_H264' /opt/freerdp-build/include/freerdp/config.h && " + script
               if name.startswith('production-'):
                   positive = "grep -q '^#define WITH_GFX_H264' /tmp/review-prod/include/freerdp/config.h"
@@ -65,7 +103,18 @@ jobs:
                   if path.exists():
                       text = path.read_text(errors='replace')
                       summary['ctest_summaries'][name] = re.findall(r'^\d+% tests passed, \d+ tests failed out of \d+\s*$', text, re.M)
-                      summary['failed_tests'][name] = sorted(set(re.findall(r'TestFreeRDPFrdp[A-Za-z0-9_]+(?=\s+\.{2,}\s+\*\*\*)', text)))
+                      summary['failed_tests'][name] = sorted(set(re.findall(r'^\s*\d+\s*-\s*(TestFreeRDPFrdp[A-Za-z0-9_.-]+)\s+\([^\n]*\)', text, re.M)))
+              proof = root / 'lease-red-green.log'
+              if proof.exists():
+                  text = proof.read_text(errors='replace')
+                  summary['lease_baseline_expected_failure'] = 'LEASE_BASELINE_EXPECTED_FAILURE=1' in text
+                  summary['lease_fixed_corpus_and_sanitizers'] = 'LEASE_FIXED_CORPUS_AND_SANITIZERS=1' in text
+              summary['diagnostic_flags'] = {}
+              for name in ('focused.log', 'full-local.log', 'production-asan.log', 'production-noavc.log', 'e2e-xorg-dummy.log', 'e2e-xorg-native.log'):
+                  path = root / name
+                  if path.exists():
+                      text = path.read_text(errors='replace')
+                      summary['diagnostic_flags'][name] = {marker: marker in text for marker in ('scene-v2', 'resync', 'AddressSanitizer', 'runtime error:', 'Segmentation fault', 'timed out', 'No tests were found', 'Error:')}
               (Path(os.environ['RUNNER_TEMP']) / 'verification.json').write_text(json.dumps(summary, indent=2))
               print(json.dumps(summary, indent=2))
           sys.exit(rc)
@@ -97,4 +146,4 @@ jobs:
           compression-level: 0
           if-no-files-found: error
       - if: always()
-        run: sudo rm -rf "$RUNNER_TEMP/review-validation" "$RUNNER_TEMP/review.enc" "$RUNNER_TEMP/verification.json"
+        run: sudo rm -rf "$RUNNER_TEMP/review-validation" "$RUNNER_TEMP/review.enc" "$RUNNER_TEMP/verification.json" "$RUNNER_TEMP/baseline-capture.c"
