@@ -7,6 +7,7 @@ runner-local; only a bounded non-sensitive summary may be uploaded by the caller
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -139,7 +140,7 @@ def capture_proxy_startup_backtrace(
     result["lfc_ui_freerdp_cef_backtrace_frame_count"] = len(frames)
     normalized_frames = "\\n".join(frames).encode("utf-8", errors="replace")
     result["lfc_ui_freerdp_cef_backtrace_frames_sha256"] = (
-        __import__("hashlib").sha256(normalized_frames).hexdigest()
+        hashlib.sha256(normalized_frames).hexdigest()
     )
     if not result["lfc_ui_freerdp_cef_backtrace_sigsegv"]:
         result["lfc_ui_freerdp_cef_backtrace_class"] = "not-reproduced"
