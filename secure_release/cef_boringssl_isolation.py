@@ -20,6 +20,7 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import stat
+import struct
 import subprocess
 import tempfile
 
@@ -64,6 +65,12 @@ MAX_NM_ERROR_BYTES = 16 * 1024**2
 MAX_NM_RECORDS = 20_000_000
 MAX_NM_LINE_BYTES = 8192
 PROFILE_CHUNK_RECORDS = 100_000
+ELF64_HEADER = struct.Struct("<16sHHIQQQIHHHHHH")
+ELF64_SECTION = struct.Struct("<IIQQQQIIQQ")
+AR_HEADER_BYTES = 60
+INIT_ARRAY_ALIGNMENT = 8
+MAX_ARCHIVE_MEMBERS = 2_000_000
+MAX_INIT_ARRAY_SECTIONS = 2_000_000
 ANCHORS = frozenset({"SSL_new", "SSL_use_certificate", "PEM_read_PrivateKey"})
 CXX_ANCHORS = frozenset({
     "_ZNSt9type_infoD0Ev",
@@ -161,6 +168,111 @@ def _archive_size(archive: Path, *, limit: int | None = None) -> int:
         require(stream.read(8) == b"!<arch>\n",
                 "BoringSSL isolation input is not a regular archive")
     return size
+
+
+def _ar_elf_payloads(archive: Path):
+    """Yield bounded regular-archive ELF member payloads in physical order."""
+    _archive_size(archive)
+    with archive.open("rb") as stream:
+        require(stream.read(8) == b"!<arch>\\n",
+                "CEF startup-alignment input is not a regular archive")
+        member_index = 0
+        while True:
+            header = stream.read(AR_HEADER_BYTES)
+            if not header:
+                break
+            require(len(header) == AR_HEADER_BYTES and header[58:] == b"\\x60\\n",
+                    "Malformed CEF archive member header")
+            raw_size = header[48:58].strip()
+            require(raw_size.isdigit(), "Malformed CEF archive member size")
+            size = int(raw_size)
+            require(0 <= size <= safeio.MAX_BYTES,
+                    "CEF archive member exceeds SDK byte budget")
+            payload = stream.read(size)
+            require(len(payload) == size, "Truncated CEF archive member")
+            if size & 1:
+                require(stream.read(1) == b"\\n", "Malformed CEF archive padding")
+            member_index += 1
+            require(member_index <= MAX_ARCHIVE_MEMBERS,
+                    "CEF archive has too many members")
+            if payload.startswith(b"\\x7fELF"):
+                yield member_index, payload
+
+
+def _elf_init_array_sections(payload: bytes):
+    """Return (.init_array*, size, alignment) records from one ELF64 object."""
+    require(len(payload) >= ELF64_HEADER.size, "Truncated CEF ELF member")
+    header = ELF64_HEADER.unpack_from(payload, 0)
+    ident = header[0]
+    require(ident[:7] == b"\\x7fELF\\x02\\x01\\x01",
+            "CEF startup-alignment audit requires little-endian ELF64")
+    e_shoff = header[6]
+    e_ehsize = header[8]
+    e_shentsize = header[11]
+    e_shnum = header[12]
+    e_shstrndx = header[13]
+    require(
+        e_ehsize == ELF64_HEADER.size
+        and e_shentsize == ELF64_SECTION.size
+        and 1 <= e_shnum <= 65535
+        and 0 < e_shstrndx < e_shnum
+        and e_shoff + e_shnum * e_shentsize <= len(payload),
+        "Invalid CEF ELF section table",
+    )
+    sections = [
+        ELF64_SECTION.unpack_from(payload, e_shoff + i * e_shentsize)
+        for i in range(e_shnum)
+    ]
+    shstr = sections[e_shstrndx]
+    names_offset, names_size = shstr[4], shstr[5]
+    require(names_offset + names_size <= len(payload),
+            "Invalid CEF ELF section-name table")
+    names = payload[names_offset:names_offset + names_size]
+
+    def section_name(offset: int) -> str:
+        require(0 <= offset < len(names), "Invalid CEF ELF section-name offset")
+        end = names.find(b"\\0", offset)
+        require(end >= 0, "Unterminated CEF ELF section name")
+        try:
+            return names[offset:end].decode("ascii")
+        except UnicodeDecodeError as error:
+            raise ValueError("Non-ASCII CEF ELF section name") from error
+
+    for values in sections:
+        name = section_name(values[0])
+        size = values[5]
+        alignment = values[8]
+        if (name == ".init_array" or name.startswith(".init_array.")) and size:
+            require(
+                alignment >= 1 and alignment & (alignment - 1) == 0,
+                "Invalid CEF init-array section alignment",
+            )
+            yield name, size, alignment
+
+
+def _init_array_profile(archive: Path) -> list[tuple[int, str, int, int]]:
+    records: list[tuple[int, str, int, int]] = []
+    for member_index, payload in _ar_elf_payloads(archive):
+        for name, size, alignment in _elf_init_array_sections(payload):
+            records.append((member_index, name, size, alignment))
+            require(len(records) <= MAX_INIT_ARRAY_SECTIONS,
+                    "CEF init-array inventory exceeds bounded sections")
+    return records
+
+
+def _normalized_init_array_profile(records):
+    return [
+        (member, name, size, min(alignment, INIT_ARRAY_ALIGNMENT))
+        for member, name, size, alignment in records
+    ]
+
+
+def _profile_sha256(records) -> str:
+    raw = "".join(
+        f"{member}\\t{name}\\t{size}\\t{alignment}\\n"
+        for member, name, size, alignment in records
+    ).encode("ascii")
+    return hashlib.sha256(raw).hexdigest()
 
 
 def _gcc_runtime() -> tuple[dict, list[tuple[str, Path]]]:
@@ -665,6 +777,9 @@ def install(installed: Path, source: Path, diagnostics: Path) -> dict:
     ffmpeg_collisions: set[str] = set()
     atomic_collisions: set[str] = set()
     source_hashes = _archive_hashes(cef)
+    init_profiles: dict[str, list[tuple[int, str, int, int]]] = {
+        name: _init_array_profile(path) for name, path in cef
+    }
     profiles: dict[str, dict[str, int | str]] = {}
     candidates: dict[str, Counter] = {}
     watch = openssl_defined | gcc_defined | ffmpeg_defined | atomic_defined
@@ -755,6 +870,8 @@ def install(installed: Path, source: Path, diagnostics: Path) -> dict:
     cxx_affected: set[str] = set()
     ffmpeg_affected: set[str] = set()
     atomic_affected: set[str] = set()
+    init_array_affected: set[str] = set()
+    init_array_normalized_sections = 0
     try:
         reverse = {new: old for old, new in renamed.items()}
         all_collisions = (
@@ -769,8 +886,16 @@ def install(installed: Path, source: Path, diagnostics: Path) -> dict:
                     if symbol in all_collisions
                 }
             )
-            if not relevant:
+            init_profile = init_profiles[name]
+            over_aligned = [
+                record for record in init_profile
+                if record[3] > INIT_ARRAY_ALIGNMENT
+            ]
+            if not relevant and not over_aligned:
                 continue
+            if over_aligned:
+                init_array_affected.add(name)
+                init_array_normalized_sections += len(over_aligned)
             if any(symbol in collisions for symbol, _ in relevant):
                 boringssl_affected.add(name)
             if any(symbol in cxx_collisions for symbol, _ in relevant):
@@ -787,8 +912,17 @@ def install(installed: Path, source: Path, diagnostics: Path) -> dict:
             temporary = Path(temp_name)
             try:
                 temporary.unlink()
+                alignment_names = sorted({
+                    section_name for _, section_name, _, alignment in over_aligned
+                    if alignment > INIT_ARRAY_ALIGNMENT
+                })
                 subprocess.run(
                     [str(objcopy), "--redefine-syms=" + str(mapping),
+                     *[
+                         "--set-section-alignment="
+                         + section_name + "=" + str(INIT_ARRAY_ALIGNMENT)
+                         for section_name in alignment_names
+                     ],
                      str(path), str(temporary)],
                     check=True, timeout=600,
                 )
@@ -805,6 +939,12 @@ def install(installed: Path, source: Path, diagnostics: Path) -> dict:
                     after_profile == profiles[name],
                     "CEF archive global symbol table changed outside namespace mapping",
                 )
+                normalized_init_profile = _normalized_init_array_profile(init_profile)
+                final_init_profile = _init_array_profile(temporary)
+                require(
+                    final_init_profile == normalized_init_profile,
+                    "CEF init-array alignment normalization is incomplete",
+                )
                 for (old, kind), count in relevant.items():
                     require(
                         after.get((renamed[old], kind), 0) == count,
@@ -817,6 +957,9 @@ def install(installed: Path, source: Path, diagnostics: Path) -> dict:
                     "source_sha256": source_sha,
                     "sha256": derived_sha,
                     "renamed_occurrences": sum(relevant.values()),
+                    "init_array_sections_normalized": len(over_aligned),
+                    "init_array_source_profile_sha256": _profile_sha256(init_profile),
+                    "init_array_final_profile_sha256": _profile_sha256(final_init_profile),
                     "global_symbol_count": profiles[name]["count"],
                     "global_symbol_sha256": profiles[name]["sha256"],
                 }
@@ -889,6 +1032,9 @@ def install(installed: Path, source: Path, diagnostics: Path) -> dict:
         "cxx_affected_archives": sorted(cxx_affected),
         "ffmpeg_affected_archives": sorted(ffmpeg_affected),
         "atomic_affected_archives": sorted(atomic_affected),
+        "init_array_alignment": INIT_ARRAY_ALIGNMENT,
+        "init_array_affected_archives": sorted(init_array_affected),
+        "init_array_normalized_section_count": init_array_normalized_sections,
         "nm_sha256": digest(nm),
         "objcopy_sha256": digest(objcopy),
     }
@@ -1022,6 +1168,10 @@ def verify(installed: Path, source: Path, receipt: dict) -> dict:
     cxx_affected = receipt.get("cxx_affected_archives")
     ffmpeg_affected = receipt.get("ffmpeg_affected_archives")
     atomic_affected = receipt.get("atomic_affected_archives")
+    init_array_affected = receipt.get("init_array_affected_archives")
+    init_array_count = receipt.get("init_array_normalized_section_count")
+    require(receipt.get("init_array_alignment") == INIT_ARRAY_ALIGNMENT,
+            "CEF init-array alignment policy changed")
     require(isinstance(affected, dict)
             and affected and set(affected) <= set(names),
             "CEF runtime affected archive receipt changed")
@@ -1050,29 +1200,58 @@ def verify(installed: Path, source: Path, receipt: dict) -> dict:
         isinstance(atomic_affected, list)
         and atomic_affected == sorted(set(atomic_affected))
         and set(atomic_affected) <= set(affected)
-        and atomic_affected
+        and atomic_affected,
+        "CEF libatomic affected archive receipt changed",
+    )
+    require(
+        isinstance(init_array_affected, list)
+        and init_array_affected == sorted(set(init_array_affected))
+        and set(init_array_affected) <= set(affected)
+        and type(init_array_count) is int
+        and 0 <= init_array_count <= MAX_INIT_ARRAY_SECTIONS
         and set(affected) == (
             set(boringssl_affected) | set(cxx_affected)
             | set(ffmpeg_affected) | set(atomic_affected)
+            | set(init_array_affected)
         ),
-        "CEF libatomic affected archive receipt changed",
+        "CEF init-array affected archive receipt changed",
     )
     for name, record in affected.items():
         require(isinstance(record, dict)
                 and set(record) == {
                     "source_sha256", "sha256", "renamed_occurrences",
+                    "init_array_sections_normalized",
+                    "init_array_source_profile_sha256",
+                    "init_array_final_profile_sha256",
                     "global_symbol_count", "global_symbol_sha256",
                 }
                 and record["sha256"] == receipt["cef_archives"][name]
                 and record["source_sha256"] != record["sha256"]
                 and type(record["renamed_occurrences"]) is int
-                and record["renamed_occurrences"] > 0
+                and record["renamed_occurrences"] >= 0
+                and type(record["init_array_sections_normalized"]) is int
+                and record["init_array_sections_normalized"] >= 0
+                and (record["renamed_occurrences"] > 0
+                     or record["init_array_sections_normalized"] > 0)
+                and isinstance(record["init_array_source_profile_sha256"], str)
+                and re.fullmatch(r"[0-9a-f]{64}", record["init_array_source_profile_sha256"])
+                    is not None
+                and isinstance(record["init_array_final_profile_sha256"], str)
+                and re.fullmatch(r"[0-9a-f]{64}", record["init_array_final_profile_sha256"])
+                    is not None
                 and type(record["global_symbol_count"]) is int
                 and 0 < record["global_symbol_count"] <= MAX_NM_RECORDS
                 and isinstance(record["global_symbol_sha256"], str)
                 and re.fullmatch(r"[0-9a-f]{64}",
                                  record["global_symbol_sha256"]) is not None,
                 "Invalid CEF BoringSSL affected archive receipt")
+        profile = _init_array_profile(prefix / name)
+        require(
+            _profile_sha256(profile) == record["init_array_final_profile_sha256"]
+            and all(alignment <= INIT_ARRAY_ALIGNMENT
+                    for _, _, _, alignment in profile),
+            "CEF init-array alignment changed in transport",
+        )
     return {
         "cef_boringssl_isolation_verified": True,
         "cef_boringssl_collision_count": len(symbols),
@@ -1091,5 +1270,8 @@ def verify(installed: Path, source: Path, receipt: dict) -> dict:
         "cef_atomic_collision_count": len(atomic_symbols),
         "cef_atomic_affected_archive_count": len(atomic_affected),
         "cef_atomic_mapping_sha256": receipt["atomic_mapping_sha256"],
+        "cef_init_array_alignment_verified": True,
+        "cef_init_array_affected_archive_count": len(init_array_affected),
+        "cef_init_array_normalized_section_count": init_array_count,
         "cef_runtime_mapping_sha256": receipt["mapping_sha256"],
     }
