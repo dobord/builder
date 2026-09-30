@@ -373,9 +373,10 @@ class StrictQualificationWorkflowTests(unittest.TestCase):
             def fake_run(command, **kwargs):
                 self.assertEqual(command[:3], ["gdb", "--batch", "--quiet"])
                 kwargs["stdout"].write(
-                    "Program received signal SIGSEGV, Segmentation fault.\\n"
-                    "#0  0x0000000000000000 in __static_initialization_and_destruction_0()\\n"
-                    "#1  0x0000000000000000 in call_init()\\n"
+                    """Program received signal SIGSEGV, Segmentation fault.
+#0  0x0000000000000000 in __static_initialization_and_destruction_0()
+#1  0x0000000000000000 in call_init()
+"""
                 )
                 return Completed()
 
