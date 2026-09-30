@@ -88,7 +88,10 @@ def fixture(root: Path):
         "int ff_hdr_from(void){return 5;} int ff_hdr_to(void){return 7;}\n"
         "int atomic_load(void){return 11;} int atomic_store(void){return 13;}\n"
         "int atomic_load16(void){return 17;} int atomic_store16(void){return 19;}\n"
-        "int atomic_cas16(void){return 23;}\n")
+        "int atomic_cas16(void){return 23;}\n"
+        "static void cef_init_probe(void){}\n"
+        "__attribute__((used,section(\".init_array\"),aligned(16))) "
+        "static void (*const cef_init_probe_ptr)(void)=cef_init_probe;\n")
     user = archive(root, "cef_user",
         "int SSL_new(void); int SSL_use_certificate(void); int PEM_read_PrivateKey(void);\n"
         "int cxx_typeinfo(void) __asm__(\"_ZNSt9type_infoD0Ev\");\n"
@@ -381,14 +384,30 @@ class NativeTests(unittest.TestCase):
         self.assertTrue(receipt["cxx_affected_archives"])
         self.assertTrue(receipt["ffmpeg_affected_archives"])
         self.assertTrue(receipt["atomic_affected_archives"])
+        self.assertTrue(proof["cef_init_array_alignment_verified"])
+        self.assertGreaterEqual(proof["cef_init_array_affected_archive_count"], 1)
+        self.assertGreaterEqual(proof["cef_init_array_normalized_section_count"], 1)
+        self.assertTrue(receipt["init_array_affected_archives"])
+        self.assertEqual(receipt["init_array_alignment"], 8)
         for record in receipt["affected"].values():
             self.assertGreater(record["global_symbol_count"], 0)
             self.assertRegex(record["global_symbol_sha256"], r"^[0-9a-f]{64}$")
+            self.assertGreaterEqual(record["init_array_sections_normalized"], 0)
+            self.assertRegex(
+                record["init_array_source_profile_sha256"], r"^[0-9a-f]{64}$"
+            )
+            self.assertRegex(
+                record["init_array_final_profile_sha256"], r"^[0-9a-f]{64}$"
+            )
         self.assertEqual(
             openssl,
             {name: isolation.digest(self.prefix / name)
              for name in isolation.OPENSSL_ARCHIVES},
         )
+        for name in receipt["init_array_affected_archives"]:
+            profile = isolation._init_array_profile(self.prefix / name)
+            self.assertTrue(profile)
+            self.assertTrue(all(item[3] <= 8 for item in profile))
         consumer(
             self.root, self.prefix, self.names,
             self.runtime_providers + self.atomic_providers + self.ffmpeg_providers,
@@ -607,6 +626,8 @@ class PolicyTests(unittest.TestCase):
         import inspect
         text = inspect.getsource(isolation)
         self.assertIn('"--redefine-syms="', text)
+        self.assertIn('"--set-section-alignment="', text)
+        self.assertEqual(isolation.INIT_ARRAY_ALIGNMENT, 8)
         self.assertIn(
             "watch = openssl_defined | gcc_defined | ffmpeg_defined | atomic_defined",
             text,
