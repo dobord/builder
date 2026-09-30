@@ -1,10 +1,12 @@
 """Fail-closed ELF64 x86-64 startup-constructor audit for final Linux consumers."""
 from __future__ import annotations
 
+from collections import Counter
 import hashlib
 import json
 import mmap
 from pathlib import Path
+import re
 import struct
 
 ELF_HEADER = struct.Struct("<16sHHIQQQIHHHHHH")
@@ -40,6 +42,126 @@ MAX_SECTIONS = 65535
 MAX_CONSTRUCTORS = 1_000_000
 MAX_RELOCATIONS = 10_000_000
 MAX_SYMBOLS = 20_000_000
+MAX_LINK_MAP_BYTES = 512 * 1024**2
+MAP_LINE = re.compile(
+    r"^\s*([0-9A-Fa-f]+)\s+([0-9A-Fa-f]+)\s+([0-9A-Fa-f]+)"
+    r"\s+[0-9A-Fa-f]+\s+(.*\S)\s*$"
+)
+MAP_STARTUP_INPUT = re.compile(
+    r"^(?P<owner>.+):\(\.(?:preinit_array|init_array)(?:\.[^)]*)?\)$"
+)
+CEF_ARCHIVE = re.compile(r"cef_[0-9]{4}_[0-9a-f]{12}\.a\Z")
+
+
+def _owner_category(owner: str) -> str:
+    archive = owner.split("(", 1)[0]
+    name = Path(archive).name
+    if name == "cef_objects.a":
+        return "cef-objects"
+    if CEF_ARCHIVE.fullmatch(name):
+        return "cef-archive"
+    if name == "libstdc++.a":
+        return "gcc-libstdcxx"
+    if name in {"libgcc.a", "libgcc_eh.a"}:
+        return "gcc-libgcc"
+    if name == "libatomic.a":
+        return "gcc-libatomic"
+    if owner.endswith(".o") or owner.endswith(".obj"):
+        return "consumer-object"
+    return "other"
+
+
+def map_bad_constructor_owners(path: Path, details: dict) -> dict:
+    """Map zero startup slots to exact LLD input-section owners."""
+    path = path.resolve(strict=True)
+    if not path.is_file() or path.is_symlink():
+        raise ValueError("LLD map must be a regular file")
+    if not 0 < path.stat().st_size <= MAX_LINK_MAP_BYTES:
+        raise ValueError("LLD map size is outside the diagnostic budget")
+    if not isinstance(details, dict) or details.get("kind") != "elf-startup-constructor-audit":
+        raise ValueError("constructor details are invalid")
+
+    bad = [
+        item for item in details.get("bad", [])
+        if isinstance(item, dict)
+        and item.get("reason") == "zero-unrelocated"
+        and type(item.get("address")) is int
+    ]
+    ranges = []
+    with path.open("r", encoding="utf-8", errors="replace") as stream:
+        for line in stream:
+            match = MAP_LINE.match(line.rstrip("\n"))
+            if match is None:
+                continue
+            owner_match = MAP_STARTUP_INPUT.match(match.group(4))
+            if owner_match is None:
+                continue
+            start = int(match.group(1), 16)
+            size = int(match.group(3), 16)
+            if size > 0:
+                ranges.append((
+                    start, start + size, owner_match.group("owner"),
+                    match.group(4),
+                ))
+
+    mapped, missing = [], []
+    for item in bad:
+        address = item["address"]
+        owners = [
+            (owner, source_section)
+            for start, end, owner, source_section in ranges
+            if start <= address < end
+        ]
+        if len(owners) != 1:
+            missing.append({
+                "section": item.get("section"),
+                "slot": item.get("slot"),
+                "address": address,
+                "owner_matches": len(owners),
+            })
+            continue
+        owner, source_section = owners[0]
+        mapped.append({
+            "section": item.get("section"),
+            "slot": item.get("slot"),
+            "address": address,
+            "owner": owner,
+            "source_section": source_section,
+            "category": _owner_category(owner),
+        })
+
+    canonical_owners = sorted({
+        (entry["category"], entry["owner"], entry["source_section"])
+        for entry in mapped
+    })
+    categories = Counter(entry["category"] for entry in mapped)
+    private = {
+        "schema": 1,
+        "kind": "elf-startup-constructor-owner-map",
+        "bad_slot_count": len(bad),
+        "mapped": mapped,
+        "missing": missing,
+        "owners": [
+            {
+                "category": category,
+                "owner": owner,
+                "source_section": source_section,
+            }
+            for category, owner, source_section in canonical_owners
+        ],
+    }
+    summary = {
+        "constructor_bad_slot_count": len(bad),
+        "constructor_bad_owner_mapped_count": len(mapped),
+        "constructor_bad_owner_unique_count": len(canonical_owners),
+        "constructor_bad_owner_complete": not missing and len(mapped) == len(bad),
+        "constructor_bad_owner_categories": dict(sorted(categories.items())),
+        "constructor_bad_owner_sha256": hashlib.sha256(
+            _canonical(private["owners"])
+        ).hexdigest(),
+    }
+    return {"summary": summary, "details": private}
+
 
 
 def _slice(data: mmap.mmap, offset: int, size: int, label: str) -> bytes:
@@ -282,6 +404,7 @@ def audit(path: Path) -> dict:
                     details["bad"].append({
                         "section": section["name"],
                         "slot": slot,
+                        "address": address,
                         "reason": "multiple-relocations",
                     })
                 if not slot_relocs:
@@ -290,6 +413,7 @@ def audit(path: Path) -> dict:
                         details["bad"].append({
                             "section": section["name"],
                             "slot": slot,
+                            "address": address,
                             "reason": "zero-unrelocated",
                         })
                     elif not _in_exec(raw_value, ranges):
@@ -297,6 +421,7 @@ def audit(path: Path) -> dict:
                         details["bad"].append({
                             "section": section["name"],
                             "slot": slot,
+                            "address": address,
                             "reason": "raw-target-outside-exec",
                             "target": raw_value,
                         })
