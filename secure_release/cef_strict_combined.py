@@ -86,12 +86,15 @@ def classify_proxy_runtime_failure(log: Path, exit_code: int) -> dict[str, objec
 
 MAX_PROXY_BACKTRACE_LOG_BYTES = 4 * 1024 * 1024
 _PROXY_BACKTRACE_DOMAINS = (
-    ("static-initializer", ("__static_initialization_and_destruction_0", "_GLOBAL__sub_I_", "call_init")),
+    # Specific runtime/component frames must win over the generic ELF
+    # constructor trampoline, which is expected to coexist lower in a
+    # pre-main stack and otherwise masks the actual failing component.
     ("logger", ("lfc::ui::detail::logImpl", "__vfprintf_internal", "vfprintf", "fprintf")),
     ("cef", ("CefExecuteProcess", "CefInitialize", "cef_execute_process", "cef_initialize")),
     ("freerdp", ("pf_server_", "freerdp")),
     ("cxx-runtime", ("__cxa_", "std::", "libstdc++")),
     ("libc", ("__libc_start_main", "libc_start_main")),
+    ("static-initializer", ("__static_initialization_and_destruction_0", "_GLOBAL__sub_I_", "call_init")),
 )
 
 
