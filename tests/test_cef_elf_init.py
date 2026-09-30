@@ -20,6 +20,51 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(subject.DT_INIT_ARRAY, 25)
         self.assertEqual(subject.DT_PREINIT_ARRAY, 32)
 
+    def test_lld_map_binds_zero_slots_to_exact_input_owners(self):
+        details = {
+            "kind": "elf-startup-constructor-audit",
+            "bad": [
+                {
+                    "section": ".init_array",
+                    "slot": 2,
+                    "address": 0x500010,
+                    "reason": "zero-unrelocated",
+                },
+                {
+                    "section": ".init_array",
+                    "slot": 3,
+                    "address": 0x500018,
+                    "reason": "zero-unrelocated",
+                },
+            ],
+        }
+        with tempfile.TemporaryDirectory() as folder:
+            link_map = Path(folder) / "consumer.map"
+            link_map.write_text(
+                """             VMA              LMA     Size Align Out     In      Symbol
+          500000           500000       20     8 .init_array
+          500000           500000       10     8         /sdk/lib/cef-static/cef_objects.a(one.o):(.init_array)
+          500010           500010        8     8         /sdk/lib/cef-static/cef_objects.a(two.o):(.init_array.00101)
+          500018           500018        8     8         /usr/lib/gcc/x86_64-linux-gnu/14/libstdc++.a(globals_io.o):(.init_array.00090)
+""",
+                encoding="utf-8",
+            )
+            result = subject.map_bad_constructor_owners(link_map, details)
+        summary = result["summary"]
+        self.assertTrue(summary["constructor_bad_owner_complete"])
+        self.assertEqual(summary["constructor_bad_owner_mapped_count"], 2)
+        self.assertEqual(summary["constructor_bad_owner_unique_count"], 2)
+        self.assertEqual(
+            summary["constructor_bad_owner_categories"],
+            {"cef-objects": 1, "gcc-libstdcxx": 1},
+        )
+        self.assertRegex(
+            summary["constructor_bad_owner_sha256"], r"^[0-9a-f]{64}$"
+        )
+        self.assertEqual(
+            [item["slot"] for item in result["details"]["mapped"]], [2, 3]
+        )
+
 
 @unittest.skipUnless(sys.platform.startswith("linux"), "native ELF regression")
 class NativeTests(unittest.TestCase):
