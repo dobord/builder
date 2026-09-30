@@ -1,0 +1,89 @@
+name: FRDPD PR 124 scoped blocker diagnostics
+on:
+  push:
+    branches: [test/frdpd-124-verify-7b46685-20260930]
+    paths: ['.github/workflows/frdpd-124-diagnose.yml']
+permissions:
+  contents: read
+jobs:
+  diagnostics:
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [full, asan, noavc]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      SOURCE_SHA: 654eb9bccb32e26220c034ab405994a4f563c3ce
+      SOURCE_TREE: ab77d228b89c511476542474468c1402a14f7fa4
+      REVIEW_VARIANT: ${{ matrix.variant }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Reproduce scoped failures inside Docker
+        env:
+          SOURCE_READ_TOKEN: ${{ secrets.SOURCE_READ_TOKEN }}
+        run: |
+          python3 - <<'PY'
+          import json, os, runpy, sys
+          from pathlib import Path
+          api = runpy.run_path('investigations/frdpd-103/review-ci.py')
+          original_run = api['run']
+          original_docker = api['docker']
+          def scoped_run(name, args, **kwargs):
+              if name == 'local-e2e':
+                  return 0
+              return original_run(name, args, **kwargs)
+          def scoped_docker(name, script, timeout=900):
+              if name == 'full-local':
+                  return 0
+              script = script.replace('-DWITH_FRDPD_STRICT_WARNINGS=ON', '-DWITH_FRDPD_STRICT_WARNINGS=ON -DWITH_VERBOSE_WINPR_ASSERT=OFF')
+              script = script.replace('GfxPolicy|ZGfxHistory', 'GfxPolicy|CursorAdapter|ZGfxHistory')
+              script = script.replace('X11WindowTracker|RemoteAppContract', 'X11WindowTracker|X11WindowCapture|X11WindowCompositor|SceneV2.*|WindowLease|X11ImageConvert|GraphicsControl|DamageState|SharedBuffer|NativePath|RemoteAppContract')
+              script = script.replace('set -euo pipefail', 'set -euxo pipefail')
+              script = script.replace('--output-on-failure --timeout', '--output-on-failure --verbose --timeout')
+              return original_docker(name, script, timeout)
+          api['main'].__globals__['run'] = scoped_run
+          api['main'].__globals__['docker'] = scoped_docker
+          rc = 1
+          try:
+              rc = api['main']()
+          finally:
+              root = Path(os.environ['RUNNER_TEMP']) / 'review-validation'
+              summary = {'scope': 'blocker diagnostics only; full-local and local-e2e not run', 'source_sha': os.environ['SOURCE_SHA'], 'tree_sha': os.environ['SOURCE_TREE'], 'builder_sha': os.environ['GITHUB_SHA'], 'run_id': os.environ['GITHUB_RUN_ID'], 'variant': os.environ['REVIEW_VARIANT'], 'exit_code': rc, 'status': api['STATUS']}
+              root.mkdir(mode=0o700, exist_ok=True)
+              (root / 'scope.json').write_text(json.dumps(summary, indent=2))
+              print(json.dumps(summary, indent=2))
+          sys.exit(rc)
+          PY
+      - name: Encrypt diagnostics for the in-session reviewer
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, subprocess, tarfile
+          from pathlib import Path
+          os.umask(0o077)
+          root = Path(os.environ['RUNNER_TEMP'])
+          archive = root / 'diagnostics.tar.gz'
+          with tarfile.open(archive, 'w:gz') as out:
+              for p in (root / 'review-validation').glob('*'):
+                  if p.name not in ('source', 'askpass', 'askpass-export'):
+                      out.add(p, arcname=p.name)
+          provenance = {'source_sha': os.environ['SOURCE_SHA'], 'tree_sha': os.environ['SOURCE_TREE'], 'builder_sha': os.environ['GITHUB_SHA'], 'run_id': os.environ['GITHUB_RUN_ID'], 'variant': os.environ['REVIEW_VARIANT'], 'archive_sha256': hashlib.sha256(archive.read_bytes()).hexdigest()}
+          subprocess.run(['openssl', 'cms', '-encrypt', '-binary', '-aes-256-gcm', '-outform', 'DER', '-in', str(archive), '-out', str(root / 'diagnostics.cms'), '-recip', 'investigations/frdpd-124/session-review-cert.pem', '-keyopt', 'rsa_padding_mode:oaep', '-keyopt', 'rsa_oaep_md:sha256'], check=True, timeout=60)
+          archive.unlink()
+          (root / 'diagnostic-provenance.json').write_text(json.dumps(provenance, indent=2))
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: frdpd-124-diagnostics-${{ matrix.variant }}-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/diagnostics.cms
+            ${{ runner.temp }}/diagnostic-provenance.json
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+      - if: always()
+        run: sudo rm -rf "$RUNNER_TEMP/review-validation" "$RUNNER_TEMP/diagnostics.tar.gz" "$RUNNER_TEMP/diagnostics.cms" "$RUNNER_TEMP/diagnostic-provenance.json"
