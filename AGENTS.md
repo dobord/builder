@@ -4,7 +4,23 @@
 
 Builder Actions intentionally keep compiler/runtime diagnostics private. Use public job status and non-sensitive summary artifacts first. Decrypt encrypted diagnostics only when the public evidence is insufficient to identify an exact failure.
 
-### One-time setup
+### Zero-install OpenSSL fallback
+
+For local diagnostic decryption, prefer the OpenSSL reader when OpenSSL 3 is already available. It uses only Python's standard library plus `libcrypto`; it does not install packages, access a package index, or define a second encryption format:
+
+```bash
+python3 scripts/decrypt-builder-logs-openssl.py --version
+python3 scripts/decrypt-builder-logs-openssl.py \
+  --input /path/to/encrypted-logs-artifact.zip \
+  --private-key ~/builder-ci-log-key.private.b64 \
+  --output /tmp/builder-ci-logs-RUN_ID
+```
+
+The OpenSSL reader accepts the existing base64 transport key or decoded Tink JSON key file. It reads the existing `VCPKGSE1` HPKE + `AES256_GCM_HKDF_1MB` format and validates the recipient fingerprint, authenticated context, every streaming tag, archive paths, manifest identity, sizes, and SHA-256 digests before publishing the output directory. If `libcrypto` is not auto-detected, pass `--openssl-library /path/to/libcrypto` or set `BUILDER_OPENSSL_CRYPTO_LIBRARY`.
+
+Tink remains the encryption/reference implementation. If both readers are available, treat any disagreement as a hard failure; never modify ciphertext, context, key metadata, or acceptance policy to make either reader succeed. The OpenSSL reader is for LOCAL diagnostics only and does not authorize publication.
+
+### Tink reference setup
 
 From the repository root:
 
@@ -37,6 +53,8 @@ rm -rf /tmp/builder-ci-logs-RUN_ID
 ### Rules for agents
 
 - Never print, echo, `cat`, upload, commit, or paste the private key. Pass only its filesystem path to the decryptor.
+- Prefer the zero-install OpenSSL reader for local diagnostics when OpenSSL 3 is already present; use the Tink reader as the reference/fallback. A disagreement is a hard failure, not a reason to weaken validation.
+- Never extend the OpenSSL compatibility reader into an encryption or publication path.
 - Never commit decrypted logs or derived plaintext diagnostics. Keep them under `/tmp` or another disposable local directory.
 - Do not weaken envelope/context/recipient validation to make a decryption succeed.
 - Use the minimum diagnostic content needed to identify the failure. Public summaries should contain bounded failure identity whenever possible.
