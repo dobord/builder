@@ -9,8 +9,8 @@ concurrency:
   group: frdpd-91-final-${{ github.sha }}
   cancel-in-progress: false
 env:
-  SOURCE_SHA: e8a3fa537d0813d10908da31efc3bf7b20659c4a
-  SOURCE_TREE: 8083e1f16406df1107c98d9b87e58c76f77d64a2
+  SOURCE_SHA: c5b33ebc190f33df71034fd68529b2ea61de31f7
+  SOURCE_TREE: 1e0f28763d64b004c91f4c2afd557c93e4462c07
   REVIEW_BASE: 3c9171929662704418ed989cb46aa2c021234c76
   ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
 jobs:
@@ -56,6 +56,15 @@ jobs:
           api['main'].__globals__['docker']=verified
           sys.exit(api['main']())
           PY
+      - name: Sanitized build failure summary
+        if: failure()
+        run: |
+          log="$RUNNER_TEMP/review-validation/docker-build.log"
+          if [ -f "$log" ]; then
+            grep -E '(^|: )(fatal error:|error:|undefined reference|collect2:|ninja: build stopped|FAILED:)' "$log" |
+              sed -E 's#(/[^ :]+)+/server/frdp/#server/frdp/#g' |
+              tail -n 80 || true
+          fi
       - name: Export exact committed corrections without publishing private source
         if: always() && matrix.variant == 'full'
         env:
