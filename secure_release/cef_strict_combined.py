@@ -83,6 +83,75 @@ def classify_proxy_runtime_failure(log: Path, exit_code: int) -> dict[str, objec
     return result
 
 
+MAX_PROXY_BACKTRACE_LOG_BYTES = 4 * 1024 * 1024
+_PROXY_BACKTRACE_DOMAINS = (
+    ("static-initializer", ("__static_initialization_and_destruction_0", "_GLOBAL__sub_I_", "call_init")),
+    ("logger", ("lfc::ui::detail::logImpl", "__vfprintf_internal", "vfprintf", "fprintf")),
+    ("cef", ("CefExecuteProcess", "CefInitialize", "cef_execute_process", "cef_initialize")),
+    ("freerdp", ("pf_server_", "freerdp")),
+    ("cxx-runtime", ("__cxa_", "std::", "libstdc++")),
+    ("libc", ("__libc_start_main", "libc_start_main")),
+)
+
+
+def capture_proxy_startup_backtrace(
+    proxy_exe: Path, cwd: Path, env: dict[str, str], log: Path
+) -> dict[str, object]:
+    """Capture a bounded native stack after an already-observed startup crash.
+
+    The full stack remains runner-local/encrypted. Public output is limited to
+    a signal bit, frame count/hash and one fixed crash-domain label.
+    """
+    with log.open("w", encoding="utf-8") as stream:
+        try:
+            completed = subprocess.run(
+                [
+                    "gdb", "--batch", "--quiet",
+                    "-ex", "set pagination off",
+                    "-ex", "run",
+                    "-ex", "thread apply all bt",
+                    "--args", str(proxy_exe),
+                ],
+                cwd=cwd, env=env, stdout=stream, stderr=subprocess.STDOUT,
+                text=True, timeout=60,
+            )
+            gdb_returncode = completed.returncode
+        except subprocess.TimeoutExpired:
+            gdb_returncode = 124
+    result: dict[str, object] = {
+        "lfc_ui_freerdp_cef_backtrace_gdb_returncode": gdb_returncode,
+    }
+    if not log.is_file() or log.is_symlink():
+        result["lfc_ui_freerdp_cef_backtrace_class"] = "log-missing"
+        return result
+    size = log.stat().st_size
+    result["lfc_ui_freerdp_cef_backtrace_log_bytes"] = size
+    if size > MAX_PROXY_BACKTRACE_LOG_BYTES:
+        result["lfc_ui_freerdp_cef_backtrace_class"] = "log-oversized"
+        return result
+    data = log.read_bytes()
+    result["lfc_ui_freerdp_cef_backtrace_log_sha256"] = crypto.digest(log)
+    text = data.decode("utf-8", errors="replace")
+    result["lfc_ui_freerdp_cef_backtrace_sigsegv"] = (
+        "Program received signal SIGSEGV" in text
+    )
+    frames = [line for line in text.splitlines() if re.match(r"^#[0-9]+\\s", line)]
+    result["lfc_ui_freerdp_cef_backtrace_frame_count"] = len(frames)
+    normalized_frames = "\\n".join(frames).encode("utf-8", errors="replace")
+    result["lfc_ui_freerdp_cef_backtrace_frames_sha256"] = (
+        __import__("hashlib").sha256(normalized_frames).hexdigest()
+    )
+    if not result["lfc_ui_freerdp_cef_backtrace_sigsegv"]:
+        result["lfc_ui_freerdp_cef_backtrace_class"] = "not-reproduced"
+        return result
+    for domain, markers in _PROXY_BACKTRACE_DOMAINS:
+        if any(marker in text for marker in markers):
+            result["lfc_ui_freerdp_cef_backtrace_class"] = domain
+            return result
+    result["lfc_ui_freerdp_cef_backtrace_class"] = "unknown"
+    return result
+
+
 def git_head(path: Path) -> str:
     return subprocess.check_output(
         ["git", "-C", str(path), "rev-parse", "HEAD"], text=True, timeout=30
@@ -1481,9 +1550,16 @@ PrivateKeyFile={private_key}
                 while time.monotonic() < deadline:
                     code = process.poll()
                     if code is not None:
-                        summary.update(
-                            classify_proxy_runtime_failure(lifecycle_log, code)
-                        )
+                        failure = classify_proxy_runtime_failure(lifecycle_log, code)
+                        summary.update(failure)
+                        if failure.get("lfc_ui_freerdp_cef_runtime_failure_class") in {
+                            "signal-before-log", "signal-unclassified",
+                            "early-exit-unclassified",
+                        }:
+                            summary.update(capture_proxy_startup_backtrace(
+                                proxy_exe, proxy_exe.parent, build_env,
+                                root / "lfc-ui-freerdp-cef-gdb.log",
+                            ))
                         raise RuntimeError(
                             "Final FreeRDP/CEF process exited before proxy listener startup"
                         )
