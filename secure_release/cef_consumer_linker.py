@@ -11,10 +11,11 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import re
+import shlex
 import subprocess
 import tempfile
 
-from . import cef_sdk_example as checked, cef_x11_static, crypto
+from . import cef_sdk_example as checked, cef_x11_static, crypto, cef_elf_init
 
 GXX = Path("/usr/bin/g++-14")
 LLD_DIR = Path("/usr/lib/llvm-18/bin")
@@ -26,7 +27,7 @@ def driver_flags(lld_dir: Path = LLD_DIR) -> str:
     """Select reviewed LLD and keep GCC C++/unwind runtimes static."""
     return (
         f"-B{lld_dir.as_posix()} -fuse-ld=lld "
-        "-static-libstdc++ -static-libgcc"
+        "-static-libstdc++ -static-libgcc -Wl,-Map=cef-consumer-link.map"
     )
 
 
@@ -81,11 +82,10 @@ def _verify(root: Path, *, gxx: Path, lld_dir: Path, major: int) -> dict:
         executable = work / "probe"
         linked = subprocess.run(
             [
-                str(gxx), f"-B{lld_dir}", "-fuse-ld=lld",
-                "-static-libstdc++", "-static-libgcc",
+                str(gxx), *shlex.split(driver_flags(lld_dir)),
                 "-Wl,--fatal-warnings", str(source), "-o", str(executable),
             ],
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            cwd=work, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, timeout=60,
         )
         checked.require(
@@ -104,6 +104,12 @@ def _verify(root: Path, *, gxx: Path, lld_dir: Path, major: int) -> dict:
             and "libstdc++.so.6" not in needed
             and "libgcc_s.so.1" not in needed,
             "Consumer probe imports non-OS GCC runtime libraries",
+        )
+        constructor_proof = cef_elf_init.audit(executable)["summary"]
+        checked.require(
+            constructor_proof["constructor_integrity_verified"]
+            and constructor_proof["constructor_source_map_available"],
+            "Consumer linker map does not prove the probe constructors",
         )
         ran = subprocess.run(
             [str(executable)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
