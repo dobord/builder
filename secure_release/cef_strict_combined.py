@@ -1345,10 +1345,20 @@ def main() -> None:
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, timeout=120,
         )
+        (root / "lfc-ui-freerdp-cef-usage.log").write_text(
+            usage.stdout, encoding="utf-8"
+        )
         summary["lfc_ui_freerdp_cef_usage_returncode"] = usage.returncode
         summary["lfc_ui_freerdp_cef_usage_marker_verified"] = "Usage:" in usage.stdout
-        if usage.returncode != 2 or not summary["lfc_ui_freerdp_cef_usage_marker_verified"]:
-            raise RuntimeError("Final FreeRDP/CEF executable did not reach its usage path")
+        usage_failed = (
+            usage.returncode != 2
+            or not summary["lfc_ui_freerdp_cef_usage_marker_verified"]
+        )
+        summary["lfc_ui_freerdp_cef_usage_sanity_verified"] = not usage_failed
+        # Keep the usage sanity fail-closed, but defer the failure until after
+        # the real config-driven runtime/listener and hidden-root consumer proof.
+        # This distinguishes an auxiliary no-args crash from a production-path
+        # runtime regression without allowing a failed usage sanity to qualify.
         summary["lfc_ui_freerdp_cef_link_verified"] = True
         summary["lfc_ui_freerdp_cef_runtime_loader_verified"] = True
         summary["target_shared_payload_count"] = 0
@@ -1490,6 +1500,13 @@ PrivateKeyFile={private_key}
         )
         if final_key != build_key or final_contract != expected_contract:
             raise RuntimeError("Final strict Linux contract identity changed")
+        summary["hidden_root_consumer_verified"] = True
+
+        if usage_failed:
+            stage = "lfc-ui-freerdp-cef-usage-sanity"
+            raise RuntimeError(
+                "Final FreeRDP/CEF executable did not reach its usage path"
+            )
 
         summary.update({
             "status": "success",
