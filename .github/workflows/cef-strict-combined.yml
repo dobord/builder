@@ -63,9 +63,11 @@ on:
       - secure_release/cef_x11_static.py
       - secure_release/cef_unwind_backtrace.py
       - secure_release/cef_unwind_backtrace.h
+      - secure_release/cef_elf_init.py
       - tests/test_cef_native_link_static.py
       - tests/test_cef_x11_static.py
       - tests/test_cef_unwind_backtrace.py
+      - tests/test_cef_elf_init.py
       - tests/test_cef_qualification_workflows.py
       - ci/cef-strict-combined-lock.json
 permissions:
@@ -158,7 +160,7 @@ jobs:
           sudo apt-get install -y gcc-14 g++-14 lld-18 gdb autoconf autoconf-archive automake libtool pkg-config ninja-build gperf flex bison nasm gettext texinfo libltdl-dev x11proto-dev xvfb xauth fonts-dejavu-core ccache openssl
           df -h /
       - name: Validate final combined helper syntax
-        run: python -m py_compile secure_release/cef_dependency_source.py secure_release/cef_strict_combined.py secure_release/cef_combined_identity.py secure_release/cef_consumer_linker.py secure_release/cef_boringssl_isolation.py secure_release/cef_nss_isolation.py secure_release/cef_native_link_static.py secure_release/cef_x11_static.py secure_release/cef_unwind_backtrace.py
+        run: python -m py_compile secure_release/cef_dependency_source.py secure_release/cef_strict_combined.py secure_release/cef_combined_identity.py secure_release/cef_consumer_linker.py secure_release/cef_boringssl_isolation.py secure_release/cef_nss_isolation.py secure_release/cef_native_link_static.py secure_release/cef_x11_static.py secure_release/cef_unwind_backtrace.py secure_release/cef_elf_init.py
       - name: Verify Chromium BoringSSL namespace isolation before restore
         env:
           CEF_BORINGSSL_UPSTREAM: ${{ github.workspace }}/private-vcpkg/.full-upstream
@@ -284,6 +286,7 @@ jobs:
           python -m unittest discover -s tests -p test_cef_native_link_static.py -v
           python -m unittest discover -s tests -p test_cef_x11_static.py -v
           python -m unittest discover -s tests -p test_cef_unwind_backtrace.py -v
+          python -m unittest discover -s tests -p test_cef_elf_init.py -v
           python -m unittest discover -s tests -p test_cef_qualification_workflows.py -v
       - name: Run checkpoint-resumed final combined SDK qualification
         id: combined
