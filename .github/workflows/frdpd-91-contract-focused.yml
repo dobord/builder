@@ -6,8 +6,8 @@ on:
 permissions:
   contents: read
 env:
-  SOURCE_SHA: 7a4236cd60d8e60af12ad373489d8a67fa2f9268
-  SOURCE_TREE: 3386f6dd8a177a446da98782775920fd8dfce54d
+  SOURCE_SHA: 848722d32ececa72d65de1bdc132d47c6ed9e243
+  SOURCE_TREE: def64967e8c4a30dfe71c17c8b20b7c7b620126a
 jobs:
   focused:
     runs-on: ubuntu-24.04
