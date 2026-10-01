@@ -24,7 +24,7 @@ import struct
 import subprocess
 import tempfile
 
-from . import safeio
+from . import cef_crel_compat, safeio
 
 TRIPLET = "x64-linux-static-release"
 OPENSSL_VERSION = "3.6.3"
@@ -883,6 +883,7 @@ def install(installed: Path, source: Path, diagnostics: Path) -> dict:
     atomic_affected: set[str] = set()
     init_array_affected: set[str] = set()
     init_array_normalized_sections = 0
+    crel_normalized: dict[str, dict] = {}
     try:
         reverse = {new: old for old, new in renamed.items()}
         all_collisions = (
@@ -902,7 +903,11 @@ def install(installed: Path, source: Path, diagnostics: Path) -> dict:
                 record for record in init_profile
                 if record[3] > INIT_ARRAY_ALIGNMENT
             ]
-            if not relevant and not over_aligned:
+            # LLD18 cannot interpret Chromium's experimental SHT_CREL.
+            # Inventory every CEF-owned member, not just collision archives or
+            # constructors: all encoded relocations must survive final linking.
+            crel_plan = cef_crel_compat.inventory(_ar_elf_payloads(path))
+            if not relevant and not over_aligned and not crel_plan["section_count"]:
                 continue
             if over_aligned:
                 init_array_affected.add(name)
@@ -927,17 +932,31 @@ def install(installed: Path, source: Path, diagnostics: Path) -> dict:
                     section_name for _, section_name, _, alignment in over_aligned
                     if alignment > INIT_ARRAY_ALIGNMENT
                 })
-                subprocess.run(
-                    [str(objcopy), "--redefine-syms=" + str(mapping),
-                     *[
-                         "--set-section-alignment="
-                         + section_name + "=" + str(INIT_ARRAY_ALIGNMENT)
-                         for section_name in alignment_names
-                     ],
-                     str(path), str(temporary)],
-                    check=True, timeout=600,
-                )
+                with cef_crel_compat.options(crel_plan, path.parent) as crel_options:
+                    subprocess.run(
+                        [str(objcopy), "--redefine-syms=" + str(mapping),
+                         *crel_options,
+                         *[
+                             "--set-section-alignment="
+                             + section_name + "=" + str(INIT_ARRAY_ALIGNMENT)
+                             for section_name in alignment_names
+                         ],
+                         str(path), str(temporary)],
+                        check=True, timeout=600,
+                    )
                 temporary.chmod(old_mode)
+                # Verify decoded semantics after the official LLVM writer has
+                # re-encoded CREL as RELA and applied the reviewed namespaces.
+                # Keep the SOURCE-derived archive budget for temporary files.
+                cef_crel_compat.inventory(
+                    _ar_elf_payloads(temporary, archive_limit=_archive_limit(path)),
+                    plan=crel_plan, reverse=reverse,
+                )
+                if crel_plan["section_count"]:
+                    crel_normalized[name] = {
+                        key: crel_plan[key]
+                        for key in ("section_count", "relocation_count", "sha256")
+                    }
                 after_profile, after = _profile_symbols(
                     nm,
                     temporary,
@@ -1048,6 +1067,8 @@ def install(installed: Path, source: Path, diagnostics: Path) -> dict:
         "init_array_alignment": INIT_ARRAY_ALIGNMENT,
         "init_array_affected_archives": sorted(init_array_affected),
         "init_array_normalized_section_count": init_array_normalized_sections,
+        "crel_encoding": cef_crel_compat.ENCODING,
+        "crel_normalized": crel_normalized,
         "nm_sha256": digest(nm),
         "objcopy_sha256": digest(objcopy),
     }
@@ -1177,6 +1198,15 @@ def verify(installed: Path, source: Path, receipt: dict) -> dict:
                 "OpenSSL provider changed in SDK transport")
 
     affected = receipt.get("affected")
+    crel_normalized = receipt.get("crel_normalized")
+    cef_crel_compat.validate_receipt(
+        receipt.get("crel_encoding"), crel_normalized, set(names)
+    )
+    # Hashes bind the same semantic proof to exported/relocated archive bytes.
+    # Also reject an unconverted section even in an archive with no collisions.
+    for _, path in cef:
+        require(cef_crel_compat.inventory(_ar_elf_payloads(path))["section_count"] == 0,
+                "Transported CEF archive still contains CREL")
     boringssl_affected = receipt.get("boringssl_affected_archives")
     cxx_affected = receipt.get("cxx_affected_archives")
     ffmpeg_affected = receipt.get("ffmpeg_affected_archives")
@@ -1225,7 +1255,7 @@ def verify(installed: Path, source: Path, receipt: dict) -> dict:
         and set(affected) == (
             set(boringssl_affected) | set(cxx_affected)
             | set(ffmpeg_affected) | set(atomic_affected)
-            | set(init_array_affected)
+            | set(init_array_affected) | set(crel_normalized)
         ),
         "CEF init-array affected archive receipt changed",
     )
@@ -1245,7 +1275,8 @@ def verify(installed: Path, source: Path, receipt: dict) -> dict:
                 and type(record["init_array_sections_normalized"]) is int
                 and record["init_array_sections_normalized"] >= 0
                 and (record["renamed_occurrences"] > 0
-                     or record["init_array_sections_normalized"] > 0)
+                     or record["init_array_sections_normalized"] > 0
+                     or name in crel_normalized)
                 and isinstance(record["init_array_source_profile_sha256"], str)
                 and re.fullmatch(r"[0-9a-f]{64}", record["init_array_source_profile_sha256"])
                     is not None
@@ -1253,7 +1284,8 @@ def verify(installed: Path, source: Path, receipt: dict) -> dict:
                 and re.fullmatch(r"[0-9a-f]{64}", record["init_array_final_profile_sha256"])
                     is not None
                 and type(record["global_symbol_count"]) is int
-                and 0 < record["global_symbol_count"] <= MAX_NM_RECORDS
+                and (0 if name in crel_normalized else 1)
+                    <= record["global_symbol_count"] <= MAX_NM_RECORDS
                 and isinstance(record["global_symbol_sha256"], str)
                 and re.fullmatch(r"[0-9a-f]{64}",
                                  record["global_symbol_sha256"]) is not None,
@@ -1283,6 +1315,10 @@ def verify(installed: Path, source: Path, receipt: dict) -> dict:
         "cef_atomic_collision_count": len(atomic_symbols),
         "cef_atomic_affected_archive_count": len(atomic_affected),
         "cef_atomic_mapping_sha256": receipt["atomic_mapping_sha256"],
+        "cef_crel_relocations_verified": True,
+        "cef_crel_affected_archive_count": len(crel_normalized),
+        "cef_crel_section_count": sum(r["section_count"] for r in crel_normalized.values()),
+        "cef_crel_relocation_count": sum(r["relocation_count"] for r in crel_normalized.values()),
         "cef_init_array_alignment_verified": True,
         "cef_init_array_affected_archive_count": len(init_array_affected),
         "cef_init_array_normalized_section_count": init_array_count,

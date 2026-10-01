@@ -46,7 +46,7 @@ retaining the corresponding old private key for older artifacts.
 
 Current recipient fingerprint:
 
-`971c2f6f6070c0cd2f1e5fc109351b8e6fd079eb29d24d173fec6479d6772864`
+`ace06f7c92062012382beb875e78f07ea6da31dfc99bf69c2726cc46b96e256b`
 
 The matching private key must be stored as `BUILDER_LOGS_PRIVATE_KEY_B64` in
 `dobord/builder-logs`; it must never be committed to either repository.

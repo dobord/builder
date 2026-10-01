@@ -646,5 +646,15 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(isolation.OPENSSL_VERSION, "3.6.3")
 
 
+def load_tests(loader, tests, pattern):
+    # The existing Strict namespace preflight must exercise the compatibility
+    # verifier too. Broad discovery will discover the new module separately.
+    if pattern == "test_cef_boringssl_isolation.py":
+        import importlib
+        module = importlib.import_module("test_cef_crel_compat")
+        tests.addTests(loader.loadTestsFromModule(module))
+    return tests
+
+
 if __name__ == "__main__":
     unittest.main()
