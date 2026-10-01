@@ -1,0 +1,112 @@
+name: FRDPD issue 92 encrypted surface qualification
+on:
+  push:
+    branches: [test/frdpd-92-surface-manager-20261001]
+    paths: ['.github/workflows/frdpd-92-verify.yml']
+permissions:
+  contents: read
+concurrency:
+  group: frdpd-92-${{ github.sha }}
+  cancel-in-progress: false
+env:
+  SOURCE_SHA: 'b00d4bcff552d1cfe076a184e59fa0884ba6bab1'
+  SOURCE_TREE: '82256c7f7c2abddfdcb0649b81140fd37f835f69'
+  ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
+jobs:
+  regression:
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [full, asan, noavc]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    env:
+      REVIEW_VARIANT: ${{ matrix.variant }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.13'
+      - name: Install exact hash-pinned public dependencies
+        run: |
+          python -m pip install --require-hashes --only-binary=:all: -r requirements.lock
+      - name: Verify exact source only inside Docker
+        env:
+          SOURCE_READ_TOKEN: ${{ secrets.SOURCE_READ_TOKEN }}
+        run: |
+          python - <<'PY'
+          import hashlib, json, os, re, runpy, sys, traceback
+          from pathlib import Path
+          os.umask(0o077)
+          root = Path(os.environ['RUNNER_TEMP']) / 'review-validation'
+          root.mkdir(mode=0o700, exist_ok=True)
+          rc = 1
+          try:
+              for field in ('SOURCE_SHA', 'SOURCE_TREE'):
+                  if not re.fullmatch(r'[0-9a-f]{40}', os.environ[field]):
+                      raise ValueError('Invalid immutable source identity')
+              driver = Path('investigations/frdpd-103/review-ci.py')
+              data = driver.read_bytes()
+              if hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest() != '4e2d834907346471c343414fa482190445cc366a':
+                  raise ValueError('Existing regression driver changed; review it first')
+              api = runpy.run_path(str(driver))
+              original = api['docker']
+              def verified(name, script, timeout=900):
+                  script = script.replace('-DWITH_FRDPD_STRICT_WARNINGS=ON', '-DWITH_FRDPD_STRICT_WARNINGS=ON -DWITH_VERBOSE_WINPR_ASSERT=OFF')
+                  script = script.replace('GfxPolicy|ZGfxHistory', 'GfxPolicy|CursorAdapter|ZGfxHistory')
+                  script = script.replace('X11WindowTracker|RemoteAppContract', 'X11WindowTracker|X11WindowCapture|X11WindowCompositor|SceneV2.*|WindowLease|X11ImageConvert|GraphicsControl|DamageState|SharedBuffer|NativePath|SurfaceManager|WindowRegistry|SurfaceIntegration|RemoteAppContract')
+                  if name == 'focused':
+                      script = "grep -q '^#define WITH_GFX_H264' /opt/freerdp-build/include/freerdp/config.h && " + script
+                  if name.startswith('production-'):
+                      positive = "grep -q '^#define WITH_GFX_H264' /tmp/review-prod/include/freerdp/config.h"
+                      gate = ('! ' + positive) if os.environ['REVIEW_VARIANT'] == 'noavc' else positive
+                      script = script.replace('ctest --test-dir /tmp/review-prod', gate + '\nctest --test-dir /tmp/review-prod')
+                  script = script.replace('--output-on-failure --timeout', '--output-on-failure --verbose --timeout')
+                  status = original(name, script, timeout)
+                  if name == 'focused' and status == 0:
+                      original('surface-state-repeat', 'ctest --test-dir /opt/freerdp-build --no-tests=error --output-on-failure --verbose --timeout 120 --repeat until-fail:10 -R "^TestFreeRDPFrdp(SurfaceManager|WindowRegistry)$"', 300)
+                      original('agent-stop-repeat', 'ctest --test-dir /opt/freerdp-build --no-tests=error --output-on-failure --verbose --timeout 120 --repeat until-fail:3 -R "^TestFreeRDPFrdpAgentStop$"', 400)
+                  return status
+              api['main'].__globals__['docker'] = verified
+              rc = api['main']()
+          except Exception:
+              (root / 'driver-error.log').write_text(traceback.format_exc())
+          finally:
+              os.environ.pop('SOURCE_READ_TOKEN', None)
+              proof = {'source_sha': os.environ['SOURCE_SHA'], 'tree_sha': os.environ['SOURCE_TREE'], 'builder_sha': os.environ['GITHUB_SHA'], 'run_id': os.environ['GITHUB_RUN_ID'], 'attempt': os.environ['GITHUB_RUN_ATTEMPT'], 'variant': os.environ['REVIEW_VARIANT'], 'exit_code': rc}
+              (root / 'verification.json').write_text(json.dumps(proof, indent=2))
+          sys.exit(rc)
+          PY
+      - name: Encrypt complete diagnostics with existing Tink envelope code
+        if: always()
+        run: |
+          python - <<'PY'
+          import hashlib, os, tarfile
+          from pathlib import Path
+          os.umask(0o077)
+          data = Path('secure_release/crypto.py').read_bytes()
+          if hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest() != 'cfbe7a904805f71ca94f8245e3bf5f83c9a6be69':
+              raise ValueError('Existing envelope implementation changed; review it first')
+          from secure_release.crypto import encrypt_file
+          root = Path(os.environ['RUNNER_TEMP'])
+          archive = root / 'review-evidence.tar.gz'
+          with tarfile.open(archive, 'w:gz') as out:
+              for p in (root / 'review-validation').glob('*'):
+                  if p.name not in ('source', 'askpass', 'askpass-export'):
+                      out.add(p, arcname=p.name)
+          context = {'purpose': 'frdpd-92-review-validation-v1', 'source_sha': os.environ['SOURCE_SHA'], 'tree_sha': os.environ['SOURCE_TREE'], 'run_id': os.environ['GITHUB_RUN_ID'], 'attempt': os.environ['GITHUB_RUN_ATTEMPT'], 'builder_sha': os.environ['GITHUB_SHA'], 'variant': os.environ['REVIEW_VARIANT'], 'repository': os.environ['GITHUB_REPOSITORY']}
+          encrypt_file(archive, root / 'review.enc', os.environ['ARTIFACT_ENCRYPTION_PUBLIC_KEY'], context)
+          archive.unlink()
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: frdpd-92-encrypted-${{ matrix.variant }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/review.enc
+          retention-days: 3
+          compression-level: 0
+          if-no-files-found: error
+      - if: always()
+        run: sudo rm -rf "$RUNNER_TEMP/review-validation" "$RUNNER_TEMP/review.enc" "$RUNNER_TEMP/review-evidence.tar.gz"
