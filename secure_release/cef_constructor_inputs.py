@@ -231,6 +231,8 @@ def inspect_inputs(root: Path, slots: list[dict]) -> dict:
         groups.setdefault(archive, []).append((member, slot))
     for archive, entries in groups.items():
         before = archive.stat()
+        _check(8 <= before.st_size <= (MAX_ARCHIVE if archive.name == "cef_objects.a" else 1024**3),
+               "Constructor archive size outside bounds")
         with archive.open("rb") as stream:
             archive_sha = hashlib.file_digest(stream, "sha256").hexdigest()
         matches = {name: [] for name, _ in entries}
@@ -264,7 +266,7 @@ def inspect_inputs(root: Path, slots: list[dict]) -> dict:
                 counts["unknown_relocation_format"] += 1
             if not relocs and not unknown:
                 counts["without_relocation"] += 1
-            elif len(relocs) != 1:
+            elif len(relocs) > 1:
                 counts["multiple_relocations"] += 1
             for rel in relocs:
                 if rel["shndx"] == 0:
