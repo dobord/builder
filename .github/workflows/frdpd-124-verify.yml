@@ -1,4 +1,4 @@
-name: FRDPD PR 124 exact HEAD verification
+name: FRDPD PR 124 encrypted regression verification
 on:
   push:
     branches: [test/frdpd-124-verify-7b46685-20260930]
@@ -9,8 +9,8 @@ concurrency:
   group: frdpd-124-${{ github.sha }}
   cancel-in-progress: false
 env:
-  SOURCE_SHA: 654eb9bccb32e26220c034ab405994a4f563c3ce
-  SOURCE_TREE: ab77d228b89c511476542474468c1402a14f7fa4
+  SOURCE_SHA: '48b2152db696946fec7ee8058b35d84624bc7fcd'
+  SOURCE_TREE: 'd88a26e343b728a448ce38392610d4127b3a2f6d'
   ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
 jobs:
   regression:
@@ -29,102 +29,62 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
         with:
           python-version: '3.13'
-      - run: |
+      - name: Install exact hash-pinned public dependencies
+        run: |
           python -m pip install --require-hashes --only-binary=:all: -r requirements.lock
-      - name: Verify exact source in isolated Docker containers
+      - name: Verify exact source only inside Docker
         env:
           SOURCE_READ_TOKEN: ${{ secrets.SOURCE_READ_TOKEN }}
         run: |
           python - <<'PY'
-          import base64, hashlib, json, os, re, runpy, sys, urllib.request
+          import hashlib, json, os, re, runpy, sys, traceback
           from pathlib import Path
-          api = runpy.run_path('investigations/frdpd-103/review-ci.py')
-          original = api['docker']
-          baseline = Path(os.environ['RUNNER_TEMP']) / 'baseline-capture.c'
-          if os.environ['REVIEW_VARIANT'] == 'full':
-              blob = 'bc03a5450817be5e5a811b589895e7782cfed372'
-              request = urllib.request.Request('https://api.github.com/repos/dobord/frdpd/git/blobs/' + blob, headers={'Authorization': 'Bearer ' + os.environ['SOURCE_READ_TOKEN'], 'Accept': 'application/vnd.github+json'})
-              with urllib.request.urlopen(request, timeout=30) as response:
-                  data = base64.b64decode(json.load(response)['content'])
-              if hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest() != blob:
-                  raise ValueError('baseline blob mismatch')
-              baseline.write_bytes(data)
-              baseline.chmod(0o600)
-          def lease_regression():
-              script = r'''set -euo pipefail
-          mkdir -p /tmp/lease-proof
-          cd /tmp/lease-proof
-          agent=/src/server/frdp/frdp-session-agent
-          test=/src/server/frdp/test/TestFreeRDPFrdpX11WindowCapture.c
-          lease=/src/server/frdp/graphics-control/window-lease.c
-          flags=(-std=c11 -D_POSIX_C_SOURCE=200809L -Wall -Wextra -Werror -I/src/server/frdp -I"$agent")
-          libs=(-lXcomposite -lXdamage -lXfixes -lXrender -lXext -lX11)
-          gcc "${flags[@]}" "$test" /baseline.c "$lease" "${libs[@]}" -o baseline-test
-          set +e
-          timeout 120 xvfb-run -a ./baseline-test >baseline.log 2>&1
-          status=$?
-          set -e
-          test "$status" -eq 1
-          grep -qx 'window capture regression failed: late finish after lease reclamation preserves damage' baseline.log
-          echo 'LEASE_BASELINE_EXPECTED_FAILURE=1'
-          gcc "${flags[@]}" "$test" "$agent/x11_window_capture.c" "$lease" "${libs[@]}" -o fixed-test
-          timeout 120 xvfb-run -a ./fixed-test
-          timeout 120 xvfb-run -a -s '-screen 0 1280x1024x24 -extension Composite' ./fixed-test --expect-no-composite
-          timeout 120 xvfb-run -a -s '-screen 0 1280x1024x24 -extension DAMAGE' ./fixed-test --expect-no-damage
-          timeout 120 xvfb-run -a -s '-screen 0 1280x1024x24 -extension XFIXES' ./fixed-test --expect-no-xfixes
-          gcc "${flags[@]}" -g -fno-omit-frame-pointer -fsanitize=address,undefined "$test" "$agent/x11_window_capture.c" "$lease" "${libs[@]}" -o sanitized-test
-          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 timeout 120 xvfb-run -a ./sanitized-test
-          echo 'LEASE_FIXED_CORPUS_AND_SANITIZERS=1'
-          '''
-              return api['run']('lease-red-green', ['docker', 'run', '--rm', '--init', '--network', 'none', '--entrypoint', 'bash', '-v', str(baseline) + ':/baseline.c:ro', api['IMAGE'], '-lc', script], timeout=240)
-          def verified(name, script, timeout=900):
-              script = script.replace('-DWITH_FRDPD_STRICT_WARNINGS=ON', '-DWITH_FRDPD_STRICT_WARNINGS=ON -DWITH_VERBOSE_WINPR_ASSERT=OFF')
-              script = script.replace('GfxPolicy|ZGfxHistory', 'GfxPolicy|CursorAdapter|ZGfxHistory')
-              script = script.replace('X11WindowTracker|RemoteAppContract', 'X11WindowTracker|X11WindowCapture|X11WindowCompositor|SceneV2.*|WindowLease|X11ImageConvert|GraphicsControl|DamageState|SharedBuffer|NativePath|RemoteAppContract')
-              if name == 'focused':
-                  lease_regression()
-                  script = "grep -q '^#define WITH_GFX_H264' /opt/freerdp-build/include/freerdp/config.h && " + script
-              if name.startswith('production-'):
-                  positive = "grep -q '^#define WITH_GFX_H264' /tmp/review-prod/include/freerdp/config.h"
-                  gate = ('! ' + positive) if os.environ['REVIEW_VARIANT'] == 'noavc' else positive
-                  script = script.replace('ctest --test-dir /tmp/review-prod', gate + '\nctest --test-dir /tmp/review-prod')
-              script = script.replace('--output-on-failure --timeout', '--output-on-failure --verbose --timeout')
-              return original(name, script, timeout)
-          api['main'].__globals__['docker'] = verified
+          os.umask(0o077)
+          root = Path(os.environ['RUNNER_TEMP']) / 'review-validation'
+          root.mkdir(mode=0o700, exist_ok=True)
           rc = 1
           try:
+              for field in ('SOURCE_SHA', 'SOURCE_TREE'):
+                  if not re.fullmatch(r'[0-9a-f]{40}', os.environ[field]):
+                      raise ValueError('Invalid immutable source identity')
+              driver = Path('investigations/frdpd-103/review-ci.py')
+              data = driver.read_bytes()
+              if hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest() != '4e2d834907346471c343414fa482190445cc366a':
+                  raise ValueError('Existing regression driver changed; review it first')
+              api = runpy.run_path(str(driver))
+              original = api['docker']
+              def verified(name, script, timeout=900):
+                  script = script.replace('-DWITH_FRDPD_STRICT_WARNINGS=ON', '-DWITH_FRDPD_STRICT_WARNINGS=ON -DWITH_VERBOSE_WINPR_ASSERT=OFF')
+                  script = script.replace('GfxPolicy|ZGfxHistory', 'GfxPolicy|CursorAdapter|ZGfxHistory')
+                  script = script.replace('X11WindowTracker|RemoteAppContract', 'X11WindowTracker|X11WindowCapture|X11WindowCompositor|SceneV2.*|WindowLease|X11ImageConvert|GraphicsControl|DamageState|SharedBuffer|NativePath|RemoteAppContract')
+                  if name == 'focused':
+                      script = "grep -q '^#define WITH_GFX_H264' /opt/freerdp-build/include/freerdp/config.h && " + script
+                  if name.startswith('production-'):
+                      positive = "grep -q '^#define WITH_GFX_H264' /tmp/review-prod/include/freerdp/config.h"
+                      gate = ('! ' + positive) if os.environ['REVIEW_VARIANT'] == 'noavc' else positive
+                      script = script.replace('ctest --test-dir /tmp/review-prod', gate + '\nctest --test-dir /tmp/review-prod')
+                  script = script.replace('--output-on-failure --timeout', '--output-on-failure --verbose --timeout')
+                  return original(name, script, timeout)
+              api['main'].__globals__['docker'] = verified
               rc = api['main']()
+          except Exception:
+              (root / 'driver-error.log').write_text(traceback.format_exc())
           finally:
-              root = Path(os.environ['RUNNER_TEMP']) / 'review-validation'
-              status = json.loads((root / 'status.json').read_text()) if (root / 'status.json').exists() else {}
-              summary = {'source_sha': os.environ['SOURCE_SHA'], 'tree_sha': os.environ['SOURCE_TREE'], 'builder_sha': os.environ['GITHUB_SHA'], 'run_id': os.environ['GITHUB_RUN_ID'], 'variant': os.environ['REVIEW_VARIANT'], 'exit_code': rc, 'status': status, 'ctest_summaries': {}, 'failed_tests': {}}
-              for name in ('focused.log', 'full-local.log', 'production-asan.log', 'production-noavc.log'):
-                  path = root / name
-                  if path.exists():
-                      text = path.read_text(errors='replace')
-                      summary['ctest_summaries'][name] = re.findall(r'^\d+% tests passed, \d+ tests failed out of \d+\s*$', text, re.M)
-                      summary['failed_tests'][name] = sorted(set(re.findall(r'^\s*\d+\s*-\s*(TestFreeRDPFrdp[A-Za-z0-9_.-]+)\s+\([^\n]*\)', text, re.M)))
-              proof = root / 'lease-red-green.log'
-              if proof.exists():
-                  text = proof.read_text(errors='replace')
-                  summary['lease_baseline_expected_failure'] = 'LEASE_BASELINE_EXPECTED_FAILURE=1' in text
-                  summary['lease_fixed_corpus_and_sanitizers'] = 'LEASE_FIXED_CORPUS_AND_SANITIZERS=1' in text
-              summary['diagnostic_flags'] = {}
-              for name in ('focused.log', 'full-local.log', 'production-asan.log', 'production-noavc.log', 'e2e-xorg-dummy.log', 'e2e-xorg-native.log'):
-                  path = root / name
-                  if path.exists():
-                      text = path.read_text(errors='replace')
-                      summary['diagnostic_flags'][name] = {marker: marker in text for marker in ('scene-v2', 'resync', 'AddressSanitizer', 'runtime error:', 'Segmentation fault', 'timed out', 'No tests were found', 'Error:')}
-              (Path(os.environ['RUNNER_TEMP']) / 'verification.json').write_text(json.dumps(summary, indent=2))
-              print(json.dumps(summary, indent=2))
+              os.environ.pop('SOURCE_READ_TOKEN', None)
+              proof = {'source_sha': os.environ['SOURCE_SHA'], 'tree_sha': os.environ['SOURCE_TREE'], 'builder_sha': os.environ['GITHUB_SHA'], 'run_id': os.environ['GITHUB_RUN_ID'], 'attempt': os.environ['GITHUB_RUN_ATTEMPT'], 'variant': os.environ['REVIEW_VARIANT'], 'exit_code': rc}
+              (root / 'verification.json').write_text(json.dumps(proof, indent=2))
           sys.exit(rc)
           PY
-      - name: Encrypt diagnostics using the existing review recipient
+      - name: Encrypt complete diagnostics with existing Tink envelope code
         if: always()
         run: |
           python - <<'PY'
-          import os, tarfile
+          import hashlib, os, tarfile
           from pathlib import Path
+          os.umask(0o077)
+          data = Path('secure_release/crypto.py').read_bytes()
+          if hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest() != 'cfbe7a904805f71ca94f8245e3bf5f83c9a6be69':
+              raise ValueError('Existing envelope implementation changed; review it first')
           from secure_release.crypto import encrypt_file
           root = Path(os.environ['RUNNER_TEMP'])
           archive = root / 'review-evidence.tar.gz'
@@ -132,18 +92,17 @@ jobs:
               for p in (root / 'review-validation').glob('*'):
                   if p.name not in ('source', 'askpass', 'askpass-export'):
                       out.add(p, arcname=p.name)
-          encrypt_file(archive, root / 'review.enc', os.environ['ARTIFACT_ENCRYPTION_PUBLIC_KEY'], {'purpose': 'frdpd-124-review-validation', 'source_sha': os.environ['SOURCE_SHA'], 'tree_sha': os.environ['SOURCE_TREE'], 'run_id': os.environ['GITHUB_RUN_ID'], 'variant': os.environ['REVIEW_VARIANT']})
+          context = {'purpose': 'frdpd-124-review-validation-v2', 'source_sha': os.environ['SOURCE_SHA'], 'tree_sha': os.environ['SOURCE_TREE'], 'run_id': os.environ['GITHUB_RUN_ID'], 'attempt': os.environ['GITHUB_RUN_ATTEMPT'], 'builder_sha': os.environ['GITHUB_SHA'], 'variant': os.environ['REVIEW_VARIANT'], 'repository': os.environ['GITHUB_REPOSITORY']}
+          encrypt_file(archive, root / 'review.enc', os.environ['ARTIFACT_ENCRYPTION_PUBLIC_KEY'], context)
           archive.unlink()
           PY
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
-          name: frdpd-124-verification-${{ matrix.variant }}-${{ github.run_id }}
-          path: |
-            ${{ runner.temp }}/review.enc
-            ${{ runner.temp }}/verification.json
+          name: frdpd-124-encrypted-${{ matrix.variant }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/review.enc
           retention-days: 3
           compression-level: 0
           if-no-files-found: error
       - if: always()
-        run: sudo rm -rf "$RUNNER_TEMP/review-validation" "$RUNNER_TEMP/review.enc" "$RUNNER_TEMP/verification.json" "$RUNNER_TEMP/baseline-capture.c"
+        run: sudo rm -rf "$RUNNER_TEMP/review-validation" "$RUNNER_TEMP/review.enc" "$RUNNER_TEMP/review-evidence.tar.gz"
