@@ -138,10 +138,43 @@ def inspect_map(path: Path, sections: list[dict], details: dict) -> dict:
                 inputs[name][index + 1] if index + 1 < len(inputs[name]) else None
             )
         attributed.append(record)
-    relocation_evidence = cef_constructor_inputs.inspect_inputs(
-        path.parent.parent / "consumer-sdk/installed/x64-linux-static-release/lib/cef-static",
-        attributed,
-    )
+    member_classes = {
+        "empty": 0,
+        "forward_slash": 0,
+        "backslash": 0,
+        "control": 0,
+    }
+    for record in attributed:
+        if record.get("kind") != "inside-input":
+            continue
+        owner = record["input"].get("owner", "")
+        if not owner.endswith(")") or "(" not in owner:
+            continue
+        member = owner.rsplit("(", 1)[1][:-1]
+        if not member:
+            member_classes["empty"] += 1
+        if "/" in member:
+            member_classes["forward_slash"] += 1
+        if "\\" in member:
+            member_classes["backslash"] += 1
+        if any(ord(c) < 32 for c in member):
+            member_classes["control"] += 1
+    if any(member_classes.values()):
+        relocation_evidence = {
+            "summary": {
+                "constructor_input_relocations_available": False,
+                **{
+                    "constructor_input_member_identifier_" + name + "_count": count
+                    for name, count in member_classes.items()
+                },
+            },
+            "details": [],
+        }
+    else:
+        relocation_evidence = cef_constructor_inputs.inspect_inputs(
+            path.parent.parent / "consumer-sdk/installed/x64-linux-static-release/lib/cef-static",
+            attributed,
+        )
     return {
         "summary": {
             **relocation_evidence["summary"],
