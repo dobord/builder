@@ -18,7 +18,7 @@ import subprocess
 import tempfile
 import time
 
-from . import build_support
+from . import build_support, cef_libuuid_source
 
 URL = "https://chromium.googlesource.com/chromiumos/platform/minigbm.git"
 REVISION = "9d21b5cb5896c0cde186b54d430131f9f537104c"
@@ -107,7 +107,7 @@ def _git(executable: str, arguments: list[str], cwd: Path, env: dict[str, str],
     return result
 
 
-def prefetch(registry: Path, upstream: Path, root: Path, env: dict[str, str],
+def _prefetch_minigbm(registry: Path, upstream: Path, root: Path, env: dict[str, str],
              summary: dict) -> dict:
     """Acquire the exact port revision and publish its regular cached archive.
 
@@ -191,3 +191,10 @@ def prefetch(registry: Path, upstream: Path, root: Path, env: dict[str, str],
                             "dependency_source_archive_sha256": sha256})
             return receipt
     raise AssertionError("Unreachable pinned dependency fetch state")
+
+
+def prefetch(registry: Path, upstream: Path, root: Path, env: dict[str, str],
+             summary: dict) -> dict:
+    """Acquire both exact source archives before the unchanged engine restore."""
+    cef_libuuid_source.prefetch(upstream, root, summary)
+    return _prefetch_minigbm(registry, upstream, root, env, summary)
