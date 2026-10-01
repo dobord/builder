@@ -13,7 +13,7 @@ from secure_release import cef_constructor_inputs as subject
 class BudgetTests(unittest.TestCase):
     def test_archive_limit_precedes_hashing(self):
         with tempfile.TemporaryDirectory() as name:
-            root = Path(name)
+            root = Path(name).resolve()
             archive = root/'cef_0001_012345abcdef.a'
             with archive.open('wb') as stream:
                 stream.write(b'!<arch>\n')
