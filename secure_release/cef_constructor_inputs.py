@@ -156,9 +156,22 @@ def inspect_object(data: bytes, section_name: str, offset: int, size: int,
     result = {"member_sha256": hashlib.sha256(data).hexdigest(),
               "section_index": index, "section_type": selected[1],
               "section_flags": selected[2], "raw_value": int.from_bytes(slot, "little"),
-              "groups": groups_for(index), "relocations": []}
-    for rel in sections:
-        if rel[1] not in (4, 9) or rel[7] != index:
+              "groups": groups_for(index), "relocations": [], "relocation_sections": []}
+    for rel_index, rel in enumerate(sections):
+        rel_name = section_names[rel_index]
+        if rel[7] != index or not rel[6]:
+            continue
+        if rel[1] not in (4, 9) and not rel_name.startswith((".rel", ".crel")):
+            continue
+        rel_bytes = payload(rel)
+        result["relocation_sections"].append({
+            "name": rel_name, "type": rel[1], "size": rel[5], "entsize": rel[9],
+            "link": rel[6], "info": rel[7], "sha256": hashlib.sha256(rel_bytes).hexdigest(),
+        })
+        if rel[1] not in (4, 9):
+            # Unknown producer encodings must not be mislabeled as no
+            # relocation. Preserve bounded bytes privately for inspection.
+            result["relocation_sections"][-1]["prefix_hex"] = rel_bytes[:4096].hex()
             continue
         _check(rel[1] == 4 and rel[9] == RELA.size and rel[5] % RELA.size == 0,
                "Unsupported constructor relocation table")
@@ -245,7 +258,11 @@ def inspect_inputs(root: Path, slots: list[dict]) -> dict:
                 continue
             counts["matched"] += 1
             relocs = candidates[0]["relocations"]
-            if not relocs:
+            unknown = any(s["type"] not in (4, 9)
+                          for s in candidates[0]["relocation_sections"])
+            if unknown:
+                counts["unknown_relocation_format"] += 1
+            if not relocs and not unknown:
                 counts["without_relocation"] += 1
             elif len(relocs) != 1:
                 counts["multiple_relocations"] += 1
@@ -265,5 +282,6 @@ def inspect_inputs(root: Path, slots: list[dict]) -> dict:
     return {"summary": {"constructor_input_relocations_available": True,
         **{"constructor_input_"+key+"_count": counts[key] for key in (
             "matched", "missing", "ambiguous", "unsupported_owner", "without_relocation",
+            "unknown_relocation_format",
             "multiple_relocations", "undefined_weak", "undefined_other", "defined_target",
             "excluded_target", "nonexec_target")}}, "details": reports}
