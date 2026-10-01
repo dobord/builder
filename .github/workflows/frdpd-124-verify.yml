@@ -9,8 +9,8 @@ concurrency:
   group: frdpd-124-${{ github.sha }}
   cancel-in-progress: false
 env:
-  SOURCE_SHA: '48b2152db696946fec7ee8058b35d84624bc7fcd'
-  SOURCE_TREE: 'd88a26e343b728a448ce38392610d4127b3a2f6d'
+  SOURCE_SHA: 'a878906518325c6787361d8f653f771ee0dde707'
+  SOURCE_TREE: 'bff6b55ac4a84631f41ce4bb7824a1caee23a5af'
   ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
 jobs:
   regression:
@@ -64,7 +64,10 @@ jobs:
                       gate = ('! ' + positive) if os.environ['REVIEW_VARIANT'] == 'noavc' else positive
                       script = script.replace('ctest --test-dir /tmp/review-prod', gate + '\nctest --test-dir /tmp/review-prod')
                   script = script.replace('--output-on-failure --timeout', '--output-on-failure --verbose --timeout')
-                  return original(name, script, timeout)
+                  status = original(name, script, timeout)
+                  if name == 'focused' and status == 0:
+                      original('agent-stop-repeat', 'ctest --test-dir /opt/freerdp-build --no-tests=error --output-on-failure --verbose --timeout 120 --repeat until-fail:3 -R "^TestFreeRDPFrdpAgentStop$"', 400)
+                  return status
               api['main'].__globals__['docker'] = verified
               rc = api['main']()
           except Exception:
