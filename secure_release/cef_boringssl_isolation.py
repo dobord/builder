@@ -24,7 +24,7 @@ import struct
 import subprocess
 import tempfile
 
-from . import safeio
+from . import cef_crel, safeio
 
 TRIPLET = "x64-linux-static-release"
 OPENSSL_VERSION = "3.6.3"
@@ -659,7 +659,10 @@ def _owner(
             and owner.name.endswith("_" + TRIPLET + ".list"),
             "Static archive owner package changed")
     result = {
-        **identity,
+        "package": package,
+        "version": version,
+        "port_version": port_version,
+        "triplet": TRIPLET,
         "owner": owner.name,
         "owner_sha256": digest(owner),
         "required_count": len(required),
@@ -788,6 +791,11 @@ def install(installed: Path, source: Path, diagnostics: Path) -> dict:
     ffmpeg_collisions: set[str] = set()
     atomic_collisions: set[str] = set()
     source_hashes = _archive_hashes(cef)
+    relocation_receipt = cef_crel.install(cef, objcopy)
+    relocation_affected = set(relocation_receipt["archives"])
+    require(all(record["source_sha256"] == source_hashes[name]
+                for name, record in relocation_receipt["archives"].items()),
+            "CEF relocation source identity changed")
     init_profiles: dict[str, list[tuple[int, str, int, int]]] = {
         name: _init_array_profile(path) for name, path in cef
     }
@@ -902,7 +910,7 @@ def install(installed: Path, source: Path, diagnostics: Path) -> dict:
                 record for record in init_profile
                 if record[3] > INIT_ARRAY_ALIGNMENT
             ]
-            if not relevant and not over_aligned:
+            if not relevant and not over_aligned and name not in relocation_affected:
                 continue
             if over_aligned:
                 init_array_affected.add(name)
@@ -1041,6 +1049,7 @@ def install(installed: Path, source: Path, diagnostics: Path) -> dict:
         "cef_archives": final_hashes,
         "ownership": ownership_receipt,
         "affected": affected,
+        "relocation_compatibility": relocation_receipt,
         "boringssl_affected_archives": sorted(boringssl_affected),
         "cxx_affected_archives": sorted(cxx_affected),
         "ffmpeg_affected_archives": sorted(ffmpeg_affected),
@@ -1183,6 +1192,8 @@ def verify(installed: Path, source: Path, receipt: dict) -> dict:
     atomic_affected = receipt.get("atomic_affected_archives")
     init_array_affected = receipt.get("init_array_affected_archives")
     init_array_count = receipt.get("init_array_normalized_section_count")
+    cef_crel.verify_receipt(receipt)
+    relocation_affected = set(receipt["relocation_compatibility"]["archives"])
     require(receipt.get("init_array_alignment") == INIT_ARRAY_ALIGNMENT,
             "CEF init-array alignment policy changed")
     require(isinstance(affected, dict)
@@ -1225,7 +1236,7 @@ def verify(installed: Path, source: Path, receipt: dict) -> dict:
         and set(affected) == (
             set(boringssl_affected) | set(cxx_affected)
             | set(ffmpeg_affected) | set(atomic_affected)
-            | set(init_array_affected)
+            | set(init_array_affected) | relocation_affected
         ),
         "CEF init-array affected archive receipt changed",
     )
@@ -1245,7 +1256,8 @@ def verify(installed: Path, source: Path, receipt: dict) -> dict:
                 and type(record["init_array_sections_normalized"]) is int
                 and record["init_array_sections_normalized"] >= 0
                 and (record["renamed_occurrences"] > 0
-                     or record["init_array_sections_normalized"] > 0)
+                     or record["init_array_sections_normalized"] > 0
+                     or name in relocation_affected)
                 and isinstance(record["init_array_source_profile_sha256"], str)
                 and re.fullmatch(r"[0-9a-f]{64}", record["init_array_source_profile_sha256"])
                     is not None
@@ -1253,7 +1265,8 @@ def verify(installed: Path, source: Path, receipt: dict) -> dict:
                 and re.fullmatch(r"[0-9a-f]{64}", record["init_array_final_profile_sha256"])
                     is not None
                 and type(record["global_symbol_count"]) is int
-                and 0 < record["global_symbol_count"] <= MAX_NM_RECORDS
+                and 0 <= record["global_symbol_count"] <= MAX_NM_RECORDS
+                and (record["global_symbol_count"] > 0 or name in relocation_affected)
                 and isinstance(record["global_symbol_sha256"], str)
                 and re.fullmatch(r"[0-9a-f]{64}",
                                  record["global_symbol_sha256"]) is not None,
@@ -1266,6 +1279,11 @@ def verify(installed: Path, source: Path, receipt: dict) -> dict:
             "CEF init-array alignment changed in transport",
         )
     return {
+        "cef_relocation_compatibility_verified": True,
+        "cef_crel_affected_archive_count": len(relocation_affected),
+        "cef_crel_converted_section_count": sum(
+            item["crel_sections"] for item in receipt["relocation_compatibility"]["archives"].values()
+        ),
         "cef_boringssl_isolation_verified": True,
         "cef_boringssl_collision_count": len(symbols),
         "cef_boringssl_affected_archive_count": len(boringssl_affected),
