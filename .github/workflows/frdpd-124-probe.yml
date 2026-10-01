@@ -1,0 +1,101 @@
+name: FRDPD PR 124 encrypted popup diagnostic
+on:
+  push:
+    branches: [test/frdpd-124-verify-7b46685-20260930]
+    paths: ['.github/workflows/frdpd-124-probe.yml']
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      SOURCE_SHA: a878906518325c6787361d8f653f771ee0dde707
+      SOURCE_TREE: bff6b55ac4a84631f41ce4bb7824a1caee23a5af
+      PROBE_BLOB: 3ac12e50344016134dfdcfc40266ccb285d941bd
+      REVIEW_VARIANT: full
+      ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.13'
+      - run: |
+          python -m pip install --require-hashes --only-binary=:all: -r requirements.lock
+      - name: Reproduce only the failing test in Docker with a hash-locked diagnostic overlay
+        env:
+          SOURCE_READ_TOKEN: ${{ secrets.SOURCE_READ_TOKEN }}
+        run: |
+          python - <<'PY'
+          import base64, hashlib, json, os, runpy, subprocess, sys, traceback, urllib.request
+          from pathlib import Path
+          os.umask(0o077)
+          root = Path(os.environ['RUNNER_TEMP']) / 'review-validation'
+          root.mkdir(mode=0o700, exist_ok=True)
+          rc = 1
+          class ProbeDone(Exception):
+              def __init__(self, status): self.status = status
+          try:
+              sha = os.environ['PROBE_BLOB']
+              req = urllib.request.Request('https://api.github.com/repos/dobord/frdpd/git/blobs/' + sha, headers={'Authorization': 'Bearer ' + os.environ['SOURCE_READ_TOKEN'], 'Accept': 'application/vnd.github+json'})
+              with urllib.request.urlopen(req, timeout=30) as response:
+                  patch = base64.b64decode(json.load(response)['content'])
+              if hashlib.sha1(b'blob ' + str(len(patch)).encode() + b'\0' + patch).hexdigest() != sha:
+                  raise ValueError('Diagnostic overlay mismatch')
+              overlay = Path(os.environ['RUNNER_TEMP']) / 'probe.patch'
+              overlay.write_bytes(patch)
+              api = runpy.run_path('investigations/frdpd-103/review-ci.py')
+              g = api['main'].__globals__
+              original_run, original_docker = g['run'], g['docker']
+              def checked_run(name, args, **kwargs):
+                  if name == 'docker-build':
+                      with (root / 'probe-apply.log').open('wb') as log:
+                          for flags in (['--check'], []):
+                              subprocess.run(['git', 'apply', *flags, '--whitespace=error-all', str(overlay)], cwd=root / 'source', stdout=log, stderr=log, check=True, timeout=30)
+                  return original_run(name, args, **kwargs)
+              def scoped(name, script, timeout=900):
+                  if name != 'focused':
+                      raise ValueError('Unexpected diagnostic stage')
+                  status = original_docker('agent-popup-probe', 'ctest --test-dir /opt/freerdp-build --no-tests=error --output-on-failure --verbose --timeout 120 -R "^TestFreeRDPFrdpAgentStop$"', 180)
+                  raise ProbeDone(status)
+              g['run'], g['docker'] = checked_run, scoped
+              rc = api['main']()
+          except ProbeDone as result:
+              rc = result.status
+          except Exception:
+              (root / 'probe-error.log').write_text(traceback.format_exc())
+          finally:
+              os.environ.pop('SOURCE_READ_TOKEN', None)
+              (root / 'diagnostic-identity.json').write_text(json.dumps({'source_sha': os.environ['SOURCE_SHA'], 'tree_sha': os.environ['SOURCE_TREE'], 'diagnostic_overlay': os.environ['PROBE_BLOB'], 'qualification': False, 'exit_code': rc}))
+          sys.exit(rc)
+          PY
+      - name: Encrypt all detailed logs with the existing Tink implementation
+        if: always()
+        run: |
+          python - <<'PY'
+          import os, tarfile
+          from pathlib import Path
+          from secure_release.crypto import encrypt_file
+          os.umask(0o077)
+          root = Path(os.environ['RUNNER_TEMP'])
+          archive = root / 'probe.tar.gz'
+          with tarfile.open(archive, 'w:gz') as out:
+              for p in (root / 'review-validation').glob('*'):
+                  if p.name not in ('source', 'askpass', 'askpass-export'):
+                      out.add(p, arcname=p.name)
+          context = {'purpose': 'frdpd-124-probe-v1', 'source_sha': os.environ['SOURCE_SHA'], 'tree_sha': os.environ['SOURCE_TREE'], 'probe_blob': os.environ['PROBE_BLOB'], 'run_id': os.environ['GITHUB_RUN_ID'], 'attempt': os.environ['GITHUB_RUN_ATTEMPT'], 'builder_sha': os.environ['GITHUB_SHA'], 'repository': os.environ['GITHUB_REPOSITORY']}
+          encrypt_file(archive, root / 'probe.enc', os.environ['ARTIFACT_ENCRYPTION_PUBLIC_KEY'], context)
+          archive.unlink()
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: frdpd-124-probe-${{ github.run_id }}
+          path: ${{ runner.temp }}/probe.enc
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+      - if: always()
+        run: sudo rm -rf "$RUNNER_TEMP/review-validation" "$RUNNER_TEMP/probe.enc" "$RUNNER_TEMP/probe.tar.gz" "$RUNNER_TEMP/probe.patch"
