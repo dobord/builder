@@ -119,7 +119,14 @@ def object_profile(data):
         name = string(names, s[0])
         kind = s[1]
         if kind == CREL:
-            require(re.fullmatch(r"\.crel\.[A-Za-z0-9_.$+\-]+", name) is not None,
+            # LLVM 53d18800 ELFWriter::createRelocationSection concatenates
+            # ".crel" + target name, without inserting a dot. Profile/coverage
+            # targets such as __llvm_prf_data therefore have .crel__... names.
+            # Bind the exact name to sh_info, not a guessed punctuation rule.
+            require(0 < s[7] < len(sections), "Invalid CEF relocation section links")
+            target_name = string(names, sections[s[7]][0])
+            require(re.fullmatch(r"[A-Za-z0-9_.$+\-]+", target_name) is not None
+                    and name == ".crel" + target_name,
                     "Unsupported CEF CREL section name")
             require(s[9] == 1 and not s[2] & 0x802, "Unsupported CEF CREL section flags")
             crel_names.add(name)
