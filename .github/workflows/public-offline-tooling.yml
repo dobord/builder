@@ -1,0 +1,27 @@
+name: Public offline Tink tooling
+on:
+  push:
+    branches: [test/frdpd-129-review-20261001]
+    paths: ['.github/workflows/public-offline-tooling.yml']
+permissions:
+  contents: read
+jobs:
+  public-tooling:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: a45e17c8c9afe4fa402edec5ab007f4c12d74ce5
+          persist-credentials: false
+      - name: Verify and package committed public files only
+        run: |
+          python3 tools/verify_wheelhouse.py
+          tar -czf "$RUNNER_TEMP/public-tooling.tar.gz" secure_release tools vendor/wheels requirements.lock
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: public-offline-tooling-${{ github.run_id }}
+          path: ${{ runner.temp }}/public-tooling.tar.gz
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
