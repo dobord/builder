@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 from secure_release import cef_consumer_linker as subject
 
@@ -15,6 +16,33 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class PolicyTests(unittest.TestCase):
+    def test_constructor_map_keeps_input_metadata_private(self):
+        from secure_release import cef_constructor_map as maps
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder).resolve()
+            build = root / 'consumer-build'
+            build.mkdir()
+            mapping = build / maps.MAP_NAME
+            def row(tail):
+                return f'{0x1000:x} {0x1000:x} 8 8 {tail}\n'
+            mapping.write_text('VMA LMA Size Align Out In Symbol\n'
+                + row('.init_array') + row('        example.a(ctor.o):(.init_array)'),
+                encoding='utf-8')
+            sections = [dict(name='.init_array', addr=0x1000, size=8, align=8)]
+            details = {'bad': [dict(reason='zero-unrelocated', section='.init_array', slot=0)]}
+            evidence = {'summary': {'constructor_input_matched_count': 1},
+                        'details': [{'symbol': 'private-fixture-constructor'}]}
+            with mock.patch.object(maps.cef_constructor_inputs, 'inspect_inputs', return_value=evidence) as inspect_inputs:
+                result = maps.inspect_map(mapping, sections, details)
+            inspect_inputs.assert_called_once_with(
+                root / 'consumer-sdk/installed/x64-linux-static-release/lib/cef-static',
+                result['details']['zero_slots'])
+            self.assertEqual(result['summary']['constructor_input_matched_count'], 1)
+            self.assertEqual(result['summary']['constructor_zero_inside_input_count'], 1)
+            self.assertEqual(result['details']['input_relocations'], evidence['details'])
+            self.assertNotIn('private-fixture-constructor', repr(result['summary']))
+            self.assertNotIn('constructor_integrity_verified', result['summary'])
+
     def test_pinned_ubuntu_lld_profile_and_cmake_flag(self):
         self.assertEqual(subject.GXX, Path("/usr/bin/g++-14"))
         self.assertEqual(subject.LLD_DIR, Path("/usr/lib/llvm-18/bin"))
