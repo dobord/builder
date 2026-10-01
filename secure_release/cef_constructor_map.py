@@ -11,6 +11,8 @@ import hashlib
 from pathlib import Path
 import re
 
+from . import cef_constructor_inputs
+
 MAP_NAME = "cef-consumer-link.map"
 MAX_MAP_BYTES = 512 * 1024**2
 MAX_MAP_LINE_BYTES = 1024**2
@@ -136,8 +138,13 @@ def inspect_map(path: Path, sections: list[dict], details: dict) -> dict:
                 inputs[name][index + 1] if index + 1 < len(inputs[name]) else None
             )
         attributed.append(record)
+    relocation_evidence = cef_constructor_inputs.inspect_inputs(
+        path.parent.parent / "consumer-sdk/installed/x64-linux-static-release/lib/cef-static",
+        attributed,
+    )
     return {
         "summary": {
+            **relocation_evidence["summary"],
             "constructor_source_map_available": True,
             "constructor_source_map_sha256": hasher.hexdigest(),
             "constructor_source_map_bytes": total,
@@ -145,5 +152,6 @@ def inspect_map(path: Path, sections: list[dict], details: dict) -> dict:
             "constructor_zero_inside_input_count": inside,
             "constructor_zero_linker_padding_count": padding,
         },
-        "details": {"inputs": inputs, "zero_slots": attributed},
+        "details": {"inputs": inputs, "zero_slots": attributed,
+                    "input_relocations": relocation_evidence["details"]},
     }
