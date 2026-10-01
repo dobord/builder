@@ -66,6 +66,24 @@ class PolicyTests(unittest.TestCase):
         self.assertIn('"--binarysource=clear"', worker)
 
 
+    def test_combined_prefetch_requires_libuuid_before_minigbm(self):
+        sequence = []
+        args = [Path("registry"), Path("upstream"), Path("work"), {}, {}]
+        with mock.patch.object(source.cef_libuuid_source, "prefetch",
+                               side_effect=lambda *a: sequence.append("libuuid")) as uuid, \
+             mock.patch.object(source, "_prefetch_minigbm",
+                               side_effect=lambda *a: sequence.append("minigbm") or {"ok": True}) as gbm:
+            self.assertEqual(source.prefetch(*args), {"ok": True})
+            uuid.assert_called_once_with(args[1], args[2], args[4])
+            gbm.assert_called_once_with(*args)
+            self.assertEqual(sequence, ["libuuid", "minigbm"])
+            uuid.side_effect = ValueError("bad source checksum")
+            gbm.reset_mock()
+            with self.assertRaisesRegex(ValueError, "checksum"):
+                source.prefetch(*args)
+            gbm.assert_not_called()
+
+
 @contextmanager
 def git_server(root: Path, failures: int, status: int = 502):
     """Local smart HTTP server, with genuine transient responses before Git CGI."""
@@ -171,7 +189,7 @@ class NativeTests(unittest.TestCase):
     def test_real_http_502_then_exact_git_archive_and_pinned_vcpkg_cache(self):
         report = {}
         with git_server(self.server_root, failures=2) as (url, requests), self.configuration(url) as sleeper:
-            receipt = source.prefetch(self.registry, self.upstream, self.work, dict(os.environ), report)
+            receipt = source._prefetch_minigbm(self.registry, self.upstream, self.work, dict(os.environ), report)
             self.assertEqual(receipt["attempts"], 3)
             self.assertEqual([c.args[0] for c in sleeper.call_args_list], [2, 5])
         self.assertTrue(report["dependency_source_prefetch_verified"])
@@ -227,7 +245,7 @@ vcpkg_from_git(OUT_SOURCE_PATH actual URL "https://not-contacted.invalid/repo" R
             with self.subTest(status=status), git_server(self.server_root, failures=20, status=status) as (url, requests), self.configuration(url):
                 report = {}
                 with self.assertRaises(RuntimeError):
-                    source.prefetch(self.registry, self.upstream, self.work, dict(os.environ), report)
+                    source._prefetch_minigbm(self.registry, self.upstream, self.work, dict(os.environ), report)
                 self.assertEqual(len(requests), count)
                 self.assertEqual(report["dependency_source_fetch_attempts"], count)
                 self.assertFalse(report["dependency_source_prefetch_verified"])
@@ -241,13 +259,13 @@ vcpkg_from_git(OUT_SOURCE_PATH actual URL "https://not-contacted.invalid/repo" R
         path.write_bytes(raw + b"# changed\n")
         with mock.patch.object(source, "_git") as git:
             with self.assertRaisesRegex(ValueError, "policy changed"):
-                source.prefetch(self.registry, self.upstream, self.work, dict(os.environ), {})
+                source._prefetch_minigbm(self.registry, self.upstream, self.work, dict(os.environ), {})
             git.assert_not_called()
         path.write_bytes(raw)
         (self.upstream / "downloads").symlink_to(self.work, target_is_directory=True)
         with mock.patch.object(source, "_git") as git:
             with self.assertRaisesRegex(ValueError, "Redirected"):
-                source.prefetch(self.registry, self.upstream, self.work, dict(os.environ), {})
+                source._prefetch_minigbm(self.registry, self.upstream, self.work, dict(os.environ), {})
             git.assert_not_called()
 
     def test_changed_port_and_existing_cache_never_fetch_or_overwrite(self):
@@ -256,7 +274,7 @@ vcpkg_from_git(OUT_SOURCE_PATH actual URL "https://not-contacted.invalid/repo" R
         port.write_bytes(raw.replace(source.REVISION.encode(), b"0" * 40))
         with mock.patch.object(source, "_git") as git:
             with self.assertRaisesRegex(ValueError, "policy changed"):
-                source.prefetch(self.registry, self.upstream, self.work, dict(os.environ), {})
+                source._prefetch_minigbm(self.registry, self.upstream, self.work, dict(os.environ), {})
             git.assert_not_called()
         port.write_bytes(raw)
         downloads = self.upstream / "downloads"
@@ -265,7 +283,7 @@ vcpkg_from_git(OUT_SOURCE_PATH actual URL "https://not-contacted.invalid/repo" R
         cached.write_bytes(b"unverified fixture archive")
         with mock.patch.object(source, "_git") as git:
             with self.assertRaisesRegex(ValueError, "cache already exists"):
-                source.prefetch(self.registry, self.upstream, self.work, dict(os.environ), {})
+                source._prefetch_minigbm(self.registry, self.upstream, self.work, dict(os.environ), {})
             git.assert_not_called()
         self.assertEqual(cached.read_bytes(), b"unverified fixture archive")
 
@@ -283,7 +301,7 @@ vcpkg_from_git(OUT_SOURCE_PATH actual URL "https://not-contacted.invalid/repo" R
                     return actual_git(exe, args, *pos, **kw)
                 with mock.patch.object(source, "_git", side_effect=command):
                     with self.assertRaises((ValueError, RuntimeError)):
-                        source.prefetch(self.registry, self.upstream, self.work, dict(os.environ), {})
+                        source._prefetch_minigbm(self.registry, self.upstream, self.work, dict(os.environ), {})
                 sleeper.assert_not_called()
                 self.assertFalse(list((self.upstream / "downloads").glob("*.tar.gz")))
                 (self.work / "dependency-source-fetch.log").unlink()
@@ -291,3 +309,10 @@ vcpkg_from_git(OUT_SOURCE_PATH actual URL "https://not-contacted.invalid/repo" R
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def load_tests(loader, suite, pattern):
+    if pattern == "test_cef_dependency_source.py":
+        import test_cef_libuuid_source
+        suite.addTests(loader.loadTestsFromModule(test_cef_libuuid_source))
+    return suite
