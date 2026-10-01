@@ -20,6 +20,7 @@ RELA = struct.Struct("<QQq")
 ARCHIVE = re.compile(r"(?:cef_objects|cef_[0-9]{4}_[0-9a-f]{12})\.a\Z")
 MAX_ARCHIVE = 12 * 1024**3
 MAX_MEMBER = 128 * 1024**2
+MAX_MEMBER_NAME = 4096
 MAX_NAMES = 16 * 1024**2
 MAX_MEMBERS = 2_000_000
 MAX_CANDIDATES = 64
@@ -29,6 +30,23 @@ MAX_SLOTS = 1024
 def _check(ok: bool, message: str) -> None:
     if not ok:
         raise ValueError(message)
+
+
+def _member_identifier(name: str) -> None:
+    """Validate an exact regular-ar identifier, never a filesystem path.
+
+    LLVM can retain relative path components when flattening a thin archive
+    into a regular archive. #136 incorrectly required a basename and stopped
+    before reading those members. Keep the spelling intact: no basename
+    fallback, path normalization, extraction, or filesystem lookup is allowed.
+    Only canonical relative POSIX spellings are admitted, with a byte bound.
+    The independently validated archive path remains the sole read authority.
+    """
+    _check(isinstance(name, str) and 0 < len(name.encode("utf-8")) <= MAX_MEMBER_NAME
+           and "\\" not in name and not re.match(r"^[A-Za-z]:", name)
+           and all(ord(c) >= 32 and ord(c) != 127 for c in name)
+           and all(part not in ("", ".", "..") for part in name.split("/")),
+           "Unsafe constructor member identifier")
 
 
 def _regular(path: Path, root: Path) -> Path:
@@ -225,8 +243,7 @@ def inspect_inputs(root: Path, slots: list[dict]) -> dict:
         if not ARCHIVE.fullmatch(archive.name):
             counts["unsupported_owner"] += 1
             continue
-        _check(member and "/" not in member and "\\" not in member and
-               all(ord(c) >= 32 for c in member), "Unsafe constructor member identifier")
+        _member_identifier(member)
         archive = _regular(archive, root)
         groups.setdefault(archive, []).append((member, slot))
     for archive, entries in groups.items():

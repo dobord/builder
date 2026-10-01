@@ -128,5 +128,14 @@ class NativeTests(unittest.TestCase):
         self.assertFalse(set(receipt["needed"]) - subject.cef_x11_static.OS_NEEDED)
 
 
+def load_tests(loader, standard_tests, pattern):
+    # The Strict workflow invokes this exact preflight before restore. Full
+    # discovery already loads the new module, so do not run it twice there.
+    if pattern == "test_cef_consumer_linker.py":
+        import test_cef_constructor_member_paths as regression
+        standard_tests.addTests(loader.loadTestsFromModule(regression))
+    return standard_tests
+
+
 if __name__ == "__main__":
     unittest.main()
