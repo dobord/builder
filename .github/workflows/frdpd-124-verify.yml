@@ -9,8 +9,8 @@ concurrency:
   group: frdpd-124-${{ github.sha }}
   cancel-in-progress: false
 env:
-  SOURCE_SHA: 'a878906518325c6787361d8f653f771ee0dde707'
-  SOURCE_TREE: 'bff6b55ac4a84631f41ce4bb7824a1caee23a5af'
+  SOURCE_SHA: '657f02d969f131e9169122f361acbf41fdbbb93e'
+  SOURCE_TREE: '3b08762dcc8d4e2947f31b09896d136460f5c84d'
   ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
 jobs:
   regression:
@@ -37,27 +37,64 @@ jobs:
           SOURCE_READ_TOKEN: ${{ secrets.SOURCE_READ_TOKEN }}
         run: |
           python - <<'PY'
-          import hashlib, json, os, re, runpy, sys, traceback
+          import base64, hashlib, json, os, re, runpy, sys, traceback, urllib.request
           from pathlib import Path
           os.umask(0o077)
           root = Path(os.environ['RUNNER_TEMP']) / 'review-validation'
           root.mkdir(mode=0o700, exist_ok=True)
+          baseline = Path(os.environ['RUNNER_TEMP']) / 'baseline-capture.c'
           rc = 1
           try:
               for field in ('SOURCE_SHA', 'SOURCE_TREE'):
                   if not re.fullmatch(r'[0-9a-f]{40}', os.environ[field]):
                       raise ValueError('Invalid immutable source identity')
+              if os.environ['REVIEW_VARIANT'] == 'full':
+                  blob = '0a743d12b077ee4c697b2385d8f838dd66562a29'
+                  request = urllib.request.Request('https://api.github.com/repos/dobord/frdpd/git/blobs/' + blob, headers={'Authorization': 'Bearer ' + os.environ['SOURCE_READ_TOKEN'], 'Accept': 'application/vnd.github+json'})
+                  with urllib.request.urlopen(request, timeout=30) as response:
+                      data = base64.b64decode(json.load(response)['content'])
+                  if hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest() != blob:
+                      raise ValueError('Baseline object mismatch')
+                  baseline.write_bytes(data)
               driver = Path('investigations/frdpd-103/review-ci.py')
               data = driver.read_bytes()
               if hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest() != '4e2d834907346471c343414fa482190445cc366a':
                   raise ValueError('Existing regression driver changed; review it first')
               api = runpy.run_path(str(driver))
               original = api['docker']
+              def damage_regression():
+                  script = r'''set -euo pipefail
+          mkdir -p /tmp/damage-proof
+          cd /tmp/damage-proof
+          agent=/src/server/frdp/frdp-session-agent
+          test=/src/server/frdp/test/TestFreeRDPFrdpX11WindowCapture.c
+          lease=/src/server/frdp/graphics-control/window-lease.c
+          flags=(-std=c11 -D_POSIX_C_SOURCE=200809L -Wall -Wextra -Werror -I/src/server/frdp -I"$agent")
+          libs=(-lXcomposite -lXdamage -lXfixes -lXrender -lXext -lX11)
+          gcc "${flags[@]}" "$test" /baseline.c "$lease" "${libs[@]}" -o baseline-test
+          set +e
+          timeout 120 xvfb-run -a ./baseline-test >baseline.log 2>&1
+          status=$?
+          set -e
+          test "$status" -eq 1
+          grep -qx 'window capture regression failed: destroy of an active source releases Damage and snapshot ownership' baseline.log
+          echo 'DAMAGE_BASELINE_EXPECTED_FAILURE=1'
+          gcc "${flags[@]}" "$test" "$agent/x11_window_capture.c" "$lease" "${libs[@]}" -o fixed-test
+          timeout 120 xvfb-run -a ./fixed-test
+          timeout 120 xvfb-run -a -s '-screen 0 1280x1024x24 -extension Composite' ./fixed-test --expect-no-composite
+          timeout 120 xvfb-run -a -s '-screen 0 1280x1024x24 -extension DAMAGE' ./fixed-test --expect-no-damage
+          timeout 120 xvfb-run -a -s '-screen 0 1280x1024x24 -extension XFIXES' ./fixed-test --expect-no-xfixes
+          gcc "${flags[@]}" -g -fno-omit-frame-pointer -fsanitize=address,undefined "$test" "$agent/x11_window_capture.c" "$lease" "${libs[@]}" -o sanitized-test
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 timeout 120 xvfb-run -a ./sanitized-test
+          echo 'DAMAGE_FIXED_CORPUS_AND_SANITIZERS=1'
+          '''
+                  return api['run']('damage-red-green', ['docker', 'run', '--rm', '--init', '--network', 'none', '--entrypoint', 'bash', '-v', str(baseline) + ':/baseline.c:ro', api['IMAGE'], '-lc', script], timeout=300)
               def verified(name, script, timeout=900):
                   script = script.replace('-DWITH_FRDPD_STRICT_WARNINGS=ON', '-DWITH_FRDPD_STRICT_WARNINGS=ON -DWITH_VERBOSE_WINPR_ASSERT=OFF')
                   script = script.replace('GfxPolicy|ZGfxHistory', 'GfxPolicy|CursorAdapter|ZGfxHistory')
                   script = script.replace('X11WindowTracker|RemoteAppContract', 'X11WindowTracker|X11WindowCapture|X11WindowCompositor|SceneV2.*|WindowLease|X11ImageConvert|GraphicsControl|DamageState|SharedBuffer|NativePath|RemoteAppContract')
                   if name == 'focused':
+                      damage_regression()
                       script = "grep -q '^#define WITH_GFX_H264' /opt/freerdp-build/include/freerdp/config.h && " + script
                   if name.startswith('production-'):
                       positive = "grep -q '^#define WITH_GFX_H264' /tmp/review-prod/include/freerdp/config.h"
@@ -108,4 +145,4 @@ jobs:
           compression-level: 0
           if-no-files-found: error
       - if: always()
-        run: sudo rm -rf "$RUNNER_TEMP/review-validation" "$RUNNER_TEMP/review.enc" "$RUNNER_TEMP/review-evidence.tar.gz"
+        run: sudo rm -rf "$RUNNER_TEMP/review-validation" "$RUNNER_TEMP/review.enc" "$RUNNER_TEMP/review-evidence.tar.gz" "$RUNNER_TEMP/baseline-capture.c"
