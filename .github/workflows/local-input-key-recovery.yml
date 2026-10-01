@@ -1,0 +1,39 @@
+name: Temporary encrypted INPUT key recovery
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [temporary/input-key-recovery-20261001]
+    paths:
+      - .github/workflows/local-input-key-recovery.yml
+      - scripts/local-input-key-recovery.py
+
+permissions:
+  contents: read
+
+jobs:
+  encrypted-recovery:
+    if: github.repository == 'dobord/builder' && github.ref == 'refs/heads/temporary/input-key-recovery-20261001'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.12'
+      - name: Install the hash-pinned Tink implementation
+        run: python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r requirements.lock
+      - name: Encrypt the INPUT key for the local recovery recipient
+        env:
+          BUILDER_INPUT_PRIVATE_KEY: ${{ secrets.BUILDER_INPUT_PRIVATE_KEY }}
+        run: python scripts/local-input-key-recovery.py
+      - name: Store only the encrypted recovery envelope
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: encrypted-input-key-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/local-input-key-recovery/input-key.enc
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
