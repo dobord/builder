@@ -133,7 +133,11 @@ def load_tests(loader, standard_tests, pattern):
     # discovery already loads the new module, so do not run it twice there.
     if pattern == "test_cef_consumer_linker.py":
         import test_cef_constructor_member_paths as regression
+        import test_cef_crel as crel
+        import test_cef_crel_transport as transport
         standard_tests.addTests(loader.loadTestsFromModule(regression))
+        standard_tests.addTests(loader.loadTestsFromModule(crel))
+        standard_tests.addTests(loader.loadTestsFromModule(transport))
     return standard_tests
 
 
