@@ -19,6 +19,7 @@ import tempfile
 import zipfile
 
 from . import cef_cache, cef_contract, crypto, safeio
+from . import cef_windows_source_repair as source_repair
 from .github import Client
 from .protocol import BUILDER, check_run
 
@@ -118,14 +119,19 @@ def output(name: str, value: bool) -> None:
 
 def qualification_lock(workspace: Path) -> dict:
     path = workspace / "ci/cef-windows-engine-lock.json"
-    value = json.loads(path.read_text(encoding="utf-8"))
-    if (not isinstance(value, dict)
-            or set(value) != {"schema", "platform", "vcpkg_commit",
-                              "cef_recipe_commit", "checkpoint"}
-            or value["schema"] != 1 or value["platform"] != "windows"
+    value = crypto.parse(path.read_bytes())
+    fields = {"schema", "platform", "vcpkg_commit", "cef_recipe_commit", "checkpoint"}
+    if (not isinstance(value, dict) or type(value.get("schema")) is not int
+            or value["schema"] not in {1, 2}
+            or set(value) != fields | ({"source_repair"} if value["schema"] == 2 else set())
+            or value["platform"] != "windows"
             or value["vcpkg_commit"] != VCPKG
             or value["cef_recipe_commit"] != CEF):
         raise ValueError("Invalid Windows CEF qualification lock")
+    # Retain schema-1 inspection for archived locks; main requires schema 2.
+    if (value["schema"] == 2 and crypto.canonical(value["source_repair"])
+            != crypto.canonical(source_repair.profile())):
+        raise ValueError("Windows source repair lock profile mismatch")
     selected = value["checkpoint"]
     if selected is not None:
         if (not isinstance(selected, dict)
@@ -185,6 +191,7 @@ def verify_producer_summary(api: Client, selected: dict) -> dict:
             or value.get("vcpkg_commit") != VCPKG
             or value.get("cef_recipe_commit") != CEF):
         raise ValueError("Windows CEF producer summary does not qualify checkpoint")
+    source_repair.verify_summary(value, selected)
     return value
 
 
@@ -203,11 +210,13 @@ def restore_checkpoint(selected: dict, destination: Path, build_key: str,
     check_run(
         producer, BUILDER, WORKFLOW, revision, attempt, "push", success=False
     )
-    if producer.get("status") != "completed":
-        raise ValueError("Windows CEF checkpoint producer is still running")
+    if (producer.get("status") != "completed"
+            or producer.get("conclusion") != "success"):
+        raise ValueError("Windows CEF checkpoint producer is not successful and complete")
     current = api.get(f"/repos/{BUILDER}/actions/runs/{run_id}")
     if (current.get("run_attempt") != attempt
             or current.get("status") != "completed"
+            or current.get("conclusion") != "success"
             or current.get("head_sha") != revision):
         raise ValueError("Windows CEF checkpoint producer changed or was rerun")
 
@@ -269,6 +278,7 @@ def restore_checkpoint(selected: dict, destination: Path, build_key: str,
     stable = api.get(f"/repos/{BUILDER}/actions/runs/{run_id}")
     if (stable.get("run_attempt") != attempt
             or stable.get("status") != "completed"
+            or stable.get("conclusion") != "success"
             or stable.get("head_sha") != revision):
         shutil.rmtree(destination, ignore_errors=True)
         raise ValueError("Windows CEF checkpoint producer changed during restore")
@@ -292,11 +302,13 @@ def main() -> None:
             or cfg["recipe_commit"] != CEF
             or cfg["platforms"]["windows"]["mode"] != "source-fresh"):
         raise ValueError("Unexpected Windows strict CEF plan")
-    build_key = cef_contract.build_key(cfg, "windows")
+    base_build_key = cef_contract.build_key(cfg, "windows")
+    build_key = source_repair.build_key(base_build_key)
     lock = qualification_lock(workspace)
+    if lock["schema"] != 2:
+        raise ValueError("Windows source repair requires an explicit schema-2 lock")
     selected = lock["checkpoint"]
-    if selected is not None and selected["build_key"] != build_key:
-        raise ValueError("Locked Windows CEF build key no longer matches plan")
+    input_build_key, repair_origin = source_repair.restore_contract(selected, base_build_key)
 
     engine_work = temp / "cef-windows-engine-work"
     engine_logs = temp / "cef-windows-engine-logs"
@@ -317,6 +329,10 @@ def main() -> None:
         "vcpkg_commit": VCPKG,
         "cef_recipe_commit": CEF,
         "build_key": build_key,
+        "base_build_key": base_build_key,
+        "source_repair": source_repair.profile(),
+        "source_repair_verified": False,
+        "input_build_key": input_build_key,
     }
     clean_env = {
         key: value for key, value in os.environ.items()
@@ -341,14 +357,14 @@ def main() -> None:
         if selected is not None:
             restored = temp / "cef-windows-restored-checkpoint"
             restore_checkpoint(
-                selected, restored, build_key,
+                selected, restored, input_build_key,
                 os.environ["BUILDER_INPUT_PRIVATE_KEY"],
             )
             run(
                 [
                     sys.executable, recipe / "vcpkg/integration/driver.py", "restore",
                     "--work", engine_work, "--logs", engine_logs,
-                    "--contract", build_key,
+                    "--contract", input_build_key,
                     "--state", temp / "cef-windows-restore.json",
                     "--checkpoint", restored,
                 ],
@@ -371,6 +387,12 @@ def main() -> None:
             log=temp / "cef-windows-source-prepare.log", timeout=10800,
         )
 
+        stage = "source-repair"
+        if git_head(engine_work / "download/chromium/src") != source_repair.CHROMIUM:
+            raise ValueError("Windows source repair Chromium revision mismatch")
+        summary["source_repair_state"] = source_repair.apply(engine_work, build_key, repair_origin)
+        summary["source_repair_verified"] = True
+
         stage = "compile-slice"
         state = temp / "cef-windows-engine-state.json"
         slice_result = run(
@@ -385,6 +407,7 @@ def main() -> None:
             log=temp / "cef-windows-engine-slice.log",
             timeout=14400, check=False,
         )
+        source_repair.apply(engine_work, build_key, "resume")
         summary["slice_exit_code"] = slice_result.returncode
         summary["slice_state_present"] = state.is_file()
         state_value = json.loads(state.read_text()) if state.is_file() else {}
@@ -425,6 +448,7 @@ def main() -> None:
                     or receipt.get("smoke", {}).get("third_party_modules_static")
                         is not True):
                 raise RuntimeError("Windows strict CEF runtime receipt is incomplete")
+            source_repair.apply(engine_work, build_key, "resume")
             summary["runtime_verified"] = True
 
         progress = state_value.get("progress")
