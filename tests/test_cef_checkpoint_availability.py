@@ -4,6 +4,9 @@ from __future__ import annotations
 import copy
 from datetime import datetime, timedelta, timezone
 import json
+import os
+import shutil
+import textwrap
 from pathlib import Path
 import subprocess
 import sys
@@ -184,6 +187,58 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn('test_cef_checkpoint_availability.py',gate)
         self.assertNotIn('BUILDER_INPUT_PRIVATE_KEY',gate)
         self.assertNotIn('pip install',gate)
+
+    def test_real_python_shell_script_imports_checkout_from_runner_temp(self):
+        # Unlike exec() inside the test process, an actual script located in
+        # RUNNER_TEMP does not put cwd on sys.path. Reproduce Actions faithfully.
+        workflow=(ROOT/'.github/workflows/cef-strict-combined.yml').read_text()
+        gate=workflow.split('      - name: Require an explicit reviewed checkpoint before expensive work',1)[1]
+        body=textwrap.dedent(gate.split('        run: |\n',1)[1].split('\n  linux:',1)[0])
+        with tempfile.TemporaryDirectory() as name:
+            root=Path(name).resolve();checkout=root/'checkout';scratch=root/'runner-temp'
+            checkout.mkdir();scratch.mkdir();(checkout/'ci').mkdir();(checkout/'secure_release').mkdir()
+            (checkout/'secure_release/__init__.py').write_text('')
+            shutil.copyfile(ROOT/'secure_release/cef_checkpoint_availability.py',
+                            checkout/'secure_release/cef_checkpoint_availability.py')
+            (checkout/'ci/cef-strict-combined-lock.json').write_text(json.dumps({'checkpoint':SELECTOR}))
+            output=root/'github-output'
+            metadata=responses()
+            # Far-future fake metadata only. No real token or network is used.
+            for path,value in metadata.items():
+                if '/artifacts/' in path:value['expires_at']='2999-01-01T00:00:00Z'
+            bootstrap=("import sys, types, urllib.error\n"
+                       "api=types.ModuleType('secure_release.github')\n"
+                       "class Client:\n"
+                       "    def __init__(self, token): self.token=token\n"
+                       "    def get(self, path):\n"
+                       "        if path not in DATA: raise urllib.error.HTTPError('public-fixture',404,'missing',{},None)\n"
+                       "        return DATA[path]\n"
+                       "api.Client=Client\n"
+                       "sys.modules['secure_release.github']=api\n")
+            env={k:v for k,v in os.environ.items() if k not in ('PYTHONPATH','PYTHONHOME')}
+            env.update(GITHUB_TOKEN='public-fixture-only',GITHUB_OUTPUT=str(output))
+            script=scratch/'step.py'
+            for mode in ('old-import','available','missing-summary','missing-checkpoint'):
+                data=copy.deepcopy(metadata);source=body
+                if mode=='old-import':
+                    source=source.replace('sys.path.insert(0, str(pathlib.Path.cwd()))','pass')
+                elif mode.startswith('missing-'):
+                    number=23456 if mode=='missing-summary' else 34567
+                    del data[f'/repos/dobord/builder/actions/artifacts/{number}']
+                script.write_text(bootstrap+'DATA='+repr(data)+'\n'+source)
+                output.unlink(missing_ok=True)
+                run=subprocess.run([sys.executable,'-S',str(script)],cwd=checkout,env=env,
+                                   capture_output=True,text=True,timeout=10)
+                with self.subTest(mode=mode):
+                    if mode=='available':
+                        self.assertEqual(run.returncode,0,run.stderr)
+                        self.assertEqual(output.read_text(),'ready=true\n')
+                    else:
+                        self.assertNotEqual(run.returncode,0)
+                        self.assertFalse(output.exists())
+                        expected=('ModuleNotFoundError' if mode=='old-import'
+                                  else 'CEF_CHECKPOINT_ARTIFACT_UNAVAILABLE: '+mode[8:])
+                        self.assertIn(expected,run.stderr)
 
     def test_engine_checks_selected_checkpoint_before_checkout_and_tools(self):
         source=(ROOT/'.github/workflows/cef-strict-engine-iteration.yml').read_text()

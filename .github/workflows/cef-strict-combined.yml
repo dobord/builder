@@ -97,7 +97,9 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         shell: python
         run: |
-          import json, os, pathlib
+          import json, os, pathlib, sys
+          # Actions executes shell:python from RUNNER_TEMP, not the checkout.
+          sys.path.insert(0, str(pathlib.Path.cwd()))
           from secure_release.cef_checkpoint_availability import verify_available
           from secure_release.github import Client
           value = json.loads(pathlib.Path("ci/cef-strict-combined-lock.json").read_text())
