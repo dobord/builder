@@ -58,6 +58,8 @@ on:
       - tests/test_cef_dependency_source.py
       - tests/fixtures/cef-dependency-source/**
       - secure_release/cef_combined_identity.py
+      - secure_release/cef_checkpoint_availability.py
+      - tests/test_cef_checkpoint_availability.py
       - tests/test_cef_combined_identity.py
       - secure_release/cef_nss_isolation.py
       - secure_release/cef_native_link_static.py
@@ -87,13 +89,21 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+      - name: Verify checkpoint availability guard
+        run: python -m unittest discover -s tests -p test_cef_checkpoint_availability.py -v
       - name: Require an explicit reviewed checkpoint before expensive work
         id: lock
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         shell: python
         run: |
           import json, os, pathlib
+          from secure_release.cef_checkpoint_availability import verify_available
+          from secure_release.github import Client
           value = json.loads(pathlib.Path("ci/cef-strict-combined-lock.json").read_text())
           ready = isinstance(value, dict) and value.get("checkpoint") is not None
+          if ready:
+              verify_available(value["checkpoint"], Client(os.environ["GITHUB_TOKEN"]))
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as stream:
               stream.write("ready=" + ("true" if ready else "false") + "\n")
           if not ready:
