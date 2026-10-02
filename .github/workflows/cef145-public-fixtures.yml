@@ -1,0 +1,40 @@
+name: Public CEF145 analysis fixtures
+# Isolated workbench only. No private repositories, keys, diagnostics or SDK.
+on:
+  push:
+    branches: [tools/cef145-public-fixtures]
+    paths: [.github/workflows/cef145-public-fixtures.yml]
+permissions:
+  contents: read
+jobs:
+  public-source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 41e9aa4ef6b0279a6569dbafa133129e8103474a
+          persist-credentials: false
+      - name: Capture exact public source bytes only
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/cef145-public-fixtures"
+          mkdir -p "$out/chromium/net/base" "$out/chromium/base/memory"
+          test "$(git rev-parse HEAD)" = 41e9aa4ef6b0279a6569dbafa133129e8103474a
+          git archive --format=tar HEAD > "$out/builder-source.tar"
+          git rev-parse HEAD > "$out/source-commit.txt"
+          git rev-parse 'HEAD^{tree}' > "$out/source-tree.txt"
+          for path in net/base/net_error_list.h base/memory/scoped_refptr.h; do
+            curl --fail --location --retry 3 --connect-timeout 15 --max-time 90 --proto '=https' --proto-redir '=https' -o "$out/chromium/$path" "https://raw.githubusercontent.com/chromium/chromium/79460ebecaa5625e57a5fb679a735659e73dc687/$path"
+          done
+          test "$(git hash-object "$out/chromium/net/base/net_error_list.h")" = fa9cf124d038b3191eee1587c00e3dca820e104a
+          test "$(git hash-object "$out/chromium/base/memory/scoped_refptr.h")" = 669b07211f5ab91a05bcd3dafa321c1ff350dc59
+          (cd "$out" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: cef145-public-fixtures-${{ github.run_id }}
+          path: ${{ runner.temp }}/cef145-public-fixtures
+          retention-days: 7
+          compression-level: 0
+          if-no-files-found: error
