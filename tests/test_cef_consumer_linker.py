@@ -138,12 +138,14 @@ def load_tests(loader, standard_tests, pattern):
         import test_cef_crel_section_names as section_names
         import test_cef_objcopy_groups as groups
         import test_cef_runtime_symbols as runtime_symbols
+        import test_cef_constructor_map_scale as map_scale
         standard_tests.addTests(loader.loadTestsFromModule(regression))
         standard_tests.addTests(loader.loadTestsFromModule(crel))
         standard_tests.addTests(loader.loadTestsFromModule(transport))
         standard_tests.addTests(loader.loadTestsFromModule(section_names))
         standard_tests.addTests(loader.loadTestsFromModule(groups))
         standard_tests.addTests(loader.loadTestsFromModule(runtime_symbols))
+        standard_tests.addTests(loader.loadTestsFromModule(map_scale))
     return standard_tests
 
 
