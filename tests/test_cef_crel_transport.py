@@ -10,6 +10,7 @@ import unittest
 import test_cef_crel as encoding
 import test_cef_boringssl_isolation as fixture
 from secure_release import cef_boringssl_isolation as isolation
+from secure_release import cef_objcopy_groups as groups
 
 
 @unittest.skipUnless(sys.platform.startswith('linux'), 'native ELF transport')
@@ -28,11 +29,13 @@ class TransportTests(unittest.TestCase):
             # CREL-only archive with no global symbols: retained, never skipped.
             asm, obj = h.root/'local.s', h.root/'local.o'
             asm.write_text('''
-.text
+.local group_signature
+.section .text.startup,"axG",@progbits,group_signature,comdat
+group_signature:
 .local startup
 .type startup,@function
 startup: ret
-.section .init_array,"aw",@init_array
+.section .init_array,"awG",@init_array,group_signature,comdat
 .p2align 3
 .quad startup
 .section .note.GNU-stack,"",@progbits
@@ -53,6 +56,7 @@ startup: ret
                 self.assertEqual(receipt['affected'][name]['source_sha256'],original[name])
                 self.assertEqual(receipt['relocation_compatibility']['archives'][name]['source_sha256'],original[name])
             self.assertEqual(receipt['affected'][extra]['global_symbol_count'],0)
+            self.assertEqual(len(groups.profile(h.prefix/extra,1024**3)['patches']),1)
             proof = isolation.verify(h.installed,h.source,receipt)
             self.assertTrue(proof['cef_relocation_compatibility_verified'])
             moved = h.root/'relocated'
