@@ -147,6 +147,8 @@ class CaptureTests(unittest.TestCase):
             self.config.unlink()
             with self.config.open("wb") as stream:
                 stream.truncate(probe.MAX_CONFIG_BYTES+1)
+            with self.assertRaises(ValueError):
+                probe.capture(self.exe, self.root, self.env, self.log, config=self.config)
             self.config.write_bytes(original)
             self.log.write_bytes(b"existing evidence")
             with self.assertRaises(FileExistsError):
