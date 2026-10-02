@@ -1,0 +1,69 @@
+name: Encrypted source snapshot for GFX sender review
+on:
+  push:
+    branches: [test/frdpd-33-gfx-sender-20261002]
+    paths: ['.github/workflows/frdpd-33-source-review.yml']
+permissions:
+  contents: read
+jobs:
+  snapshot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      SOURCE_SHA: '9f53e8bc8b75a849f92a11dd148554ad0e292821'
+      SOURCE_TREE: '8d25b116139493149e62509aee975e141640f5fc'
+      ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.13'
+      - name: Install hash-pinned public encryption dependencies
+        run: python -m pip install --require-hashes --only-binary=:all: -r requirements.lock
+      - name: Collect exact source and encrypt locally on runner
+        env:
+          SOURCE_READ_TOKEN: ${{ secrets.SOURCE_READ_TOKEN }}
+        run: |
+          python - <<'PY'
+          import hashlib, os, subprocess
+          from pathlib import Path
+          os.umask(0o077)
+          root = Path(os.environ['RUNNER_TEMP']) / 'gfx-source-review'
+          root.mkdir(mode=0o700)
+          ask = root / 'askpass'
+          ask.write_text('#!/bin/sh\ncase "$1" in *Username*) echo x-access-token ;; *) printf "%s\\n" "$SOURCE_READ_TOKEN" ;; esac\n')
+          ask.chmod(0o700)
+          try:
+              env = dict(os.environ, GIT_ASKPASS=str(ask), GIT_TERMINAL_PROMPT='0')
+              source = root / 'source'
+              with (root / 'fetch.log').open('wb') as log:
+                  def git(*args):
+                      subprocess.run(['git', *args], env=env, stdout=log, stderr=log, check=True, timeout=180)
+                  git('init', str(source))
+                  git('-C', str(source), 'remote', 'add', 'origin', 'https://github.com/dobord/frdpd.git')
+                  git('-C', str(source), 'fetch', '--depth=1', 'origin', os.environ['SOURCE_SHA'])
+                  tree = subprocess.check_output(['git', '-C', str(source), 'rev-parse', 'FETCH_HEAD^{tree}'], env=env, stderr=log, text=True).strip()
+                  if tree != os.environ['SOURCE_TREE']:
+                      raise ValueError('Source identity mismatch')
+                  git('-C', str(source), 'archive', '--format=tar', '--output=' + str(root / 'source.tar'), 'FETCH_HEAD')
+              data = Path('secure_release/crypto.py').read_bytes()
+              if hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest() != 'cfbe7a904805f71ca94f8245e3bf5f83c9a6be69':
+                  raise ValueError('Envelope implementation requires review')
+              from secure_release.crypto import encrypt_file
+              context = {'purpose':'frdpd-33-source-review-v1','source_sha':os.environ['SOURCE_SHA'],'tree_sha':tree,'run_id':os.environ['GITHUB_RUN_ID'],'attempt':os.environ['GITHUB_RUN_ATTEMPT'],'builder_sha':os.environ['GITHUB_SHA'],'repository':os.environ['GITHUB_REPOSITORY']}
+              encrypt_file(root / 'source.tar', Path(os.environ['RUNNER_TEMP']) / 'source-review.enc', os.environ['ARTIFACT_ENCRYPTION_PUBLIC_KEY'], context)
+          finally:
+              ask.unlink(missing_ok=True)
+              os.environ.pop('SOURCE_READ_TOKEN', None)
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: gfx-source-encrypted-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/source-review.enc
+          retention-days: 3
+          compression-level: 0
+          if-no-files-found: error
+      - if: always()
+        run: rm -rf "$RUNNER_TEMP/gfx-source-review" "$RUNNER_TEMP/source-review.enc"
