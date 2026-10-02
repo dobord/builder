@@ -449,7 +449,7 @@ BUILDER_GDB_PC_ZERO=0
                 "static-initializer",
             )
 
-    def test_windows_engine_iteration_is_dormant_encrypted_and_exact(self):
+    def test_windows_engine_iteration_is_explicit_encrypted_and_exact(self):
         workflow = (ROOT / ".github/workflows/cef-windows-engine-iteration.yml").read_text()
         worker = (ROOT / "secure_release/cef_windows_iteration.py").read_text()
         self.assertIn("workflow_dispatch:", workflow)
@@ -481,7 +481,49 @@ BUILDER_GDB_PC_ZERO=0
         self.assertIn('"platform": "windows"', lock)
         self.assertIn('"vcpkg_commit": "39dccd415da14d8051559d66069019475d95787c"', lock)
         self.assertIn('"cef_recipe_commit": "03abd124ebe3b8a57fb78470a75b5aa3ce064e31"', lock)
-        self.assertIn('"checkpoint": null', lock)
+        # A reviewed continuation is valid; null was only the initial state.
+        # Exercise the unchanged production selector, not a textual fixture.
+        from secure_release import cef_windows_iteration as windows
+        self.assertEqual(windows.qualification_lock(ROOT), json.loads(lock))
+
+    def test_windows_resume_lock_retains_exact_selector_validation(self):
+        from secure_release import cef_windows_iteration as windows
+        selected = {
+            "run": 101, "attempt": 1, "producer_sha": "a" * 40,
+            "artifact_id": 102, "artifact_sha256": "b" * 64,
+            "summary_artifact_id": 103, "summary_artifact_sha256": "c" * 64,
+            "build_key": "d" * 64,
+        }
+        fixture = {
+            "schema": 1, "platform": "windows",
+            "vcpkg_commit": "39dccd415da14d8051559d66069019475d95787c",
+            "cef_recipe_commit": "03abd124ebe3b8a57fb78470a75b5aa3ce064e31",
+            "checkpoint": None,
+        }
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder).resolve()
+            (root / "ci").mkdir()
+            path = root / "ci/cef-windows-engine-lock.json"
+            for checkpoint in (None, selected):
+                fixture["checkpoint"] = checkpoint
+                data = json.dumps(fixture).encode()
+                path.write_bytes(data)
+                self.assertEqual(windows.qualification_lock(root), fixture)
+                self.assertEqual(path.read_bytes(), data)
+            for field, value in (
+                ("run", True), ("attempt", 0), ("artifact_id", -1),
+                ("summary_artifact_id", False), ("producer_sha", "x" * 40),
+                ("artifact_sha256", "b" * 63),
+                ("summary_artifact_sha256", "g" * 64), ("build_key", ""),
+                ("unreviewed", "extra"),
+            ):
+                with self.subTest(field=field):
+                    fixture["checkpoint"] = dict(selected, **{field: value})
+                    data = json.dumps(fixture).encode()
+                    path.write_bytes(data)
+                    with self.assertRaises(ValueError):
+                        windows.qualification_lock(root)
+                    self.assertEqual(path.read_bytes(), data)
 
     def test_windows_msvc_stl_full_source_gate_builds_lfc_ui_example(self):
         text = (ROOT / ".github/workflows/cef-windows-source-msvc-stl.yml").read_text()
