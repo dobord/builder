@@ -169,7 +169,13 @@ class InventoryTests(unittest.TestCase):
                                     stream.seek(data.index(b"private-constructor"))
                                     stream.write(b"changed-constructor")
                         return line
-                with mock.patch.object(subject.os, "fdopen", side_effect=lambda *a: ChangingStream(original_fdopen(*a))):
+                # Deliberately freeze metadata observations: Windows exposed
+                # that a same-size write can leave the compared times intact.
+                # The real byte change must fail without sleeps/forced mtimes,
+                # even when the first read buffered the entire original map.
+                with mock.patch.object(subject, "_identity", **(
+                        {"wraps": subject._identity} if action == "replace" else {"return_value": (1,)})), \
+                     mock.patch.object(subject.os, "fdopen", side_effect=lambda *a: ChangingStream(original_fdopen(*a))):
                     with self.assertRaises(ValueError):
                         self.audit()
 
