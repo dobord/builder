@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import tracemalloc
+from types import SimpleNamespace
 import unittest
 from unittest import mock
 
@@ -45,6 +46,24 @@ class InventoryTests(unittest.TestCase):
 
     def audit(self, bad=None):
         return subject.inspect_map(self.path, self.sections, {"bad": bad or []})
+
+    def test_windows_creation_and_handle_change_times_are_not_conflated(self):
+        fields = dict(st_dev=1, st_ino=2, st_mode=0o100666, st_size=99,
+                      st_mtime_ns=10, st_birthtime_ns=1, st_ctime_ns=1)
+        by_path = SimpleNamespace(**fields)
+        by_handle = SimpleNamespace(**(fields | {"st_ctime_ns": 11}))
+        with mock.patch.object(subject, "_WINDOWS", True):
+            self.assertEqual(subject._path_identity(by_path), subject._path_identity(by_handle))
+            # Full same-API snapshots still protect the real change timestamp.
+            self.assertNotEqual(subject._identity(by_path), subject._identity(by_handle))
+            for field in ("st_dev", "st_ino", "st_mode", "st_size", "st_mtime_ns", "st_birthtime_ns"):
+                changed = SimpleNamespace(**(vars(by_handle) | {field: getattr(by_handle, field) + 1}))
+                with self.subTest(field=field):
+                    self.assertNotEqual(subject._path_identity(by_path), subject._path_identity(changed))
+        with mock.patch.object(subject, "_WINDOWS", False):
+            # The original POSIX metadata check remains exact, including ctime.
+            self.assertNotEqual(subject._path_identity(by_path), subject._path_identity(by_handle))
+            self.assertEqual(subject._path_identity(by_path), subject._identity(by_path))
 
     def test_exact_boundary_complete_hash_privacy_and_unchanged_inputs(self):
         with mock.patch.object(subject, "MAX_MAP_BYTES", len(self.data)):
