@@ -137,11 +137,13 @@ def load_tests(loader, standard_tests, pattern):
         import test_cef_crel_transport as transport
         import test_cef_crel_section_names as section_names
         import test_cef_objcopy_groups as groups
+        import test_cef_runtime_symbols as runtime_symbols
         standard_tests.addTests(loader.loadTestsFromModule(regression))
         standard_tests.addTests(loader.loadTestsFromModule(crel))
         standard_tests.addTests(loader.loadTestsFromModule(transport))
         standard_tests.addTests(loader.loadTestsFromModule(section_names))
         standard_tests.addTests(loader.loadTestsFromModule(groups))
+        standard_tests.addTests(loader.loadTestsFromModule(runtime_symbols))
     return standard_tests
 
 

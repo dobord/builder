@@ -26,7 +26,7 @@ from . import (
 from . import (
     cef_combined_identity, cef_combined_port, cef_combined_smoke, cef_consumer_linker, cef_dependency_source,
     cef_freerdp_profile, cef_frozen_dependencies, cef_sdk_example, cef_sdk_headers, cef_sdk_aliases, cef_sdk_protoc, cef_sdk_xz, cef_sdk_objects, cef_sdk_source_interfaces, cef_strict_iteration,
-    cef_boringssl_isolation,
+    cef_boringssl_isolation, cef_runtime_symbols,
 )
 
 ENGINE_VCPKG = "b4bb281192ea8bb004542012ac804b988a4ff403"
@@ -745,28 +745,12 @@ ISOLATED_RUNTIME_SYMBOLS = frozenset({
 })
 
 
-def verify_isolated_runtime_symbols(executable: Path) -> int:
-    """Prove relocated re-link consumed derived NSS/JPEG/TIFF providers."""
-    if not executable.is_file() or executable.is_symlink():
-        raise RuntimeError("Relocated CEF smoke executable is missing")
-    nm = shutil.which("nm")
-    if not nm:
-        raise RuntimeError("nm is required for relocated isolation verification")
-    result = subprocess.run(
-        [nm, "-a", "--defined-only", str(executable)],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        text=True, timeout=180,
+def verify_isolated_runtime_symbols(executable: Path, *, report: dict | None = None,
+                                    stderr_log: Path | None = None) -> int:
+    """Prove the same NSS/JPEG/TIFF definitions using a complete bounded stream."""
+    return cef_runtime_symbols.verify(
+        executable, ISOLATED_RUNTIME_SYMBOLS, report=report, stderr_log=stderr_log
     )
-    if result.returncode or len(result.stdout) > 64 * 1024**2:
-        raise RuntimeError("Cannot inspect relocated CEF isolation symbols")
-    names = {
-        fields[-1]
-        for line in result.stdout.splitlines()
-        if (fields := line.split())
-    }
-    if ISOLATED_RUNTIME_SYMBOLS - names:
-        raise RuntimeError("Relocated CEF executable lost isolated static providers")
-    return len(ISOLATED_RUNTIME_SYMBOLS)
 
 
 def verify_os_only_elf(executable: Path) -> int:
@@ -1368,14 +1352,25 @@ def main() -> None:
         ]
         if len(relocated_smokes) != 1:
             raise RuntimeError("Relocated SDK CEF smoke executable is missing")
-        summary["relocated_engine_isolation_symbol_count"] = (
-            verify_isolated_runtime_symbols(relocated_smokes[0])
-        )
+        stage = "relocated-isolation-symbol-proof"
+        symbol_report: dict = {}
+        try:
+            summary["relocated_engine_isolation_symbol_count"] = (
+                verify_isolated_runtime_symbols(
+                    relocated_smokes[0], report=symbol_report,
+                    stderr_log=root / "relocated-isolation-nm.log",
+                )
+            )
+        finally:
+            for key, value in symbol_report.items():
+                summary["relocated_isolation_nm_" + key] = value
         summary["relocated_engine_isolation_symbols_verified"] = True
+        stage = "relocated-os-only-elf"
         summary["relocated_engine_os_needed_count"] = verify_os_only_elf(
             relocated_smokes[0]
         )
         summary["relocated_engine_os_only_elf_verified"] = True
+        stage = "combined-consumer-tests"
         run(
             ["ctest", "--test-dir", smoke_build, "-C", "Release",
              "--output-on-failure", "--timeout", "120"],
