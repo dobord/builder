@@ -16,6 +16,7 @@ import stat
 from . import cef_constructor_inputs
 
 MAP_NAME = "cef-consumer-link.map"
+_WINDOWS = os.name == "nt"
 # LLD prints demangled symbols in the *whole* image map. A native 1.5 MiB
 # ELF can produce over 512 MiB of valid rows. The map is already streamed;
 # use the same 2 GiB/20M-record inventory scale as the final nm proof, not
@@ -32,6 +33,16 @@ ROW = re.compile(rb"^\s*([0-9a-fA-F]+)\s+([0-9a-fA-F]+)\s+([0-9a-fA-F]+)\s+([0-9
 def _identity(value: os.stat_result) -> tuple[int, ...]:
     return (value.st_dev, value.st_ino, value.st_mode, value.st_size,
             value.st_mtime_ns, value.st_ctime_ns)
+
+
+def _path_identity(value: os.stat_result) -> tuple[int, ...]:
+    # CPython 3.12 Windows lstat reports creation time in st_ctime, while
+    # fstat reports ChangeTime (CPython #157671). Compare creation time across
+    # the two APIs; compare full fstat snapshots, including ChangeTime, below.
+    identity = _identity(value)
+    if _WINDOWS:
+        return identity[:-1] + (value.st_birthtime_ns,)
+    return identity
 
 
 def inspect_map(path: Path, sections: list[dict], details: dict) -> dict:
@@ -73,7 +84,8 @@ def inspect_map(path: Path, sections: list[dict], details: dict) -> dict:
     except OSError:
         raise ValueError("constructor link map open failed") from None
     with os.fdopen(descriptor, "rb") as stream:
-        if _identity(os.fstat(stream.fileno())) != _identity(before):
+        opened = os.fstat(stream.fileno())
+        if _path_identity(opened) != _path_identity(before):
             raise ValueError("constructor link map changed before inspection")
         header = stream.readline(MAX_MAP_LINE_BYTES + 1)
         if (len(header) > MAX_MAP_LINE_BYTES or not header.endswith(b"\n")
@@ -161,8 +173,8 @@ def inspect_map(path: Path, sections: list[dict], details: dict) -> dict:
             after = path.lstat()
         except OSError:
             raise ValueError("constructor link map changed during inspection") from None
-        if (total != before.st_size or _identity(after) != _identity(before)
-                or _identity(os.fstat(stream.fileno())) != _identity(before)):
+        if (total != before.st_size or _path_identity(after) != _path_identity(before)
+                or _identity(os.fstat(stream.fileno())) != _identity(opened)):
             raise ValueError("constructor link map changed during inspection")
     if set(found) != set(expected):
         raise ValueError("constructor map is missing final ELF sections")
