@@ -64,6 +64,14 @@ def _regular(path: Path, limit: int) -> tuple:
 
 def command(executable: Path, config: Path, env: dict[str, str]) -> list[str]:
     """Fixed debugger program: paths are inferior argv, never GDB commands."""
+    # GDB --args quotes each literal argument for its startup shell. Distro
+    # GDB releases before the 2025 no-shell argv fix split whitespace/retain
+    # escapes if startup-with-shell is changed after --args processing.
+    # Use the supported quoting path, never interpolate paths into "run".
+    if (env.get("SHELL", "/bin/sh") not in {
+            "/bin/sh", "/usr/bin/sh", "/bin/bash", "/usr/bin/bash"}
+            or any(env.get(name) for name in ("ENV", "BASH_ENV", "SHELLOPTS", "BASHOPTS"))):
+        raise ValueError("Unreviewed proxy debugger shell environment")
     tools = [shutil.which(name, path=env.get("PATH", os.defpath))
              for name in ("xvfb-run", "timeout", "gdb")]
     if any(value is None for value in tools):
@@ -77,7 +85,7 @@ def command(executable: Path, config: Path, env: dict[str, str]) -> list[str]:
         "-iex", "set debuginfod enabled off",
         "-ex", "set pagination off",
         "-ex", "set confirm off",
-        "-ex", "set startup-with-shell off",
+        "-eiex", "set startup-with-shell on",
         "-ex", "set disable-randomization off",
         "-ex", "set follow-fork-mode parent",
         "-ex", "set print frame-arguments none",
