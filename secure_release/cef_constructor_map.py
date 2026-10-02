@@ -142,6 +142,21 @@ def inspect_map(path: Path, sections: list[dict], details: dict) -> dict:
                 })
                 if sum(len(values) for values in inputs.values()) > MAX_INPUTS:
                     raise ValueError("constructor source inventory is oversized")
+        # A buffered scan may retain old bytes after an in-place write. File
+        # times alone are insufficient (notably st_ctime on Windows). Re-read
+        # the same descriptor without Python's read buffer and require exactly
+        # the scanned bytes. Never reopen a pathname or keep a whole-map copy.
+        os.lseek(stream.fileno(), 0, os.SEEK_SET)
+        remaining = before.st_size
+        verified_hash = hashlib.sha256()
+        while remaining:
+            chunk = os.read(stream.fileno(), min(1024**2, remaining))
+            if not chunk:
+                raise ValueError("constructor link map changed during inspection")
+            verified_hash.update(chunk)
+            remaining -= len(chunk)
+        if os.read(stream.fileno(), 1) or verified_hash.digest() != hasher.digest():
+            raise ValueError("constructor link map changed during inspection")
         try:
             after = path.lstat()
         except OSError:
