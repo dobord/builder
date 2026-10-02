@@ -18,6 +18,7 @@ import tempfile
 import zipfile
 
 from . import cef_cache, cef_contract, cef_gtk_loader, cef_nss_isolation, crypto, safeio
+from . import cef_checkpoint_backup
 from .github import Client
 from .protocol import BUILDER, check_run
 
@@ -937,26 +938,31 @@ def qualification_lock(
 def verify_producer_summary(
         api: Client, selected: dict, *, allow_resumable: bool = True) -> dict:
     run, revision = selected["run"], selected["producer_sha"]
-    expected = f"cef-strict-iteration-summary-{run}-{selected['attempt']}"
-    matches = [
-        item for item in api.artifacts(BUILDER, run)
-        if item.get("id") == selected["summary_artifact_id"]
-    ]
-    if len(matches) != 1:
-        raise ValueError("Selected strict CEF summary artifact is missing")
-    artifact = matches[0]
-    if (artifact.get("name") != expected or artifact.get("expired") is not False
-            or artifact.get("digest") != "sha256:" + selected["summary_artifact_sha256"]
-            or artifact.get("workflow_run", {}).get("id") != run
-            or artifact.get("workflow_run", {}).get("head_sha") != revision):
-        raise ValueError("Strict CEF summary artifact provenance mismatch")
+    backup = cef_checkpoint_backup.applies(selected)
+    if not backup:
+        expected = f"cef-strict-iteration-summary-{run}-{selected['attempt']}"
+        matches = [
+            item for item in api.artifacts(BUILDER, run)
+            if item.get("id") == selected["summary_artifact_id"]
+        ]
+        if len(matches) != 1:
+            raise ValueError("Selected strict CEF summary artifact is missing")
+        artifact = matches[0]
+        if (artifact.get("name") != expected or artifact.get("expired") is not False
+                or artifact.get("digest") != "sha256:" + selected["summary_artifact_sha256"]
+                or artifact.get("workflow_run", {}).get("id") != run
+                or artifact.get("workflow_run", {}).get("head_sha") != revision):
+            raise ValueError("Strict CEF summary artifact provenance mismatch")
     with tempfile.TemporaryDirectory(prefix=".strict-cef-summary-") as folder:
         root = Path(folder)
         archive = root / "summary.zip"
-        api.download(
-            f"/repos/{BUILDER}/actions/artifacts/{artifact['id']}/zip",
-            archive, selected["summary_artifact_sha256"], max_size=4 * 1024**2
-        )
+        if backup:
+            cef_checkpoint_backup.copy_original(api, selected, "summary", archive)
+        else:
+            api.download(
+                f"/repos/{BUILDER}/actions/artifacts/{artifact['id']}/zip",
+                archive, selected["summary_artifact_sha256"], max_size=4 * 1024**2
+            )
         extracted = root / "payload"
         safeio.extract_zip(archive, extracted)
         files = [path for path in extracted.rglob("*") if path.is_file()]
@@ -1037,28 +1043,33 @@ def restore_checkpoint(selected: dict, destination: Path, build_key: str,
     if (current.get("run_attempt") != attempt or current.get("status") != "completed"
             or current.get("head_sha") != revision):
         raise ValueError("Strict CEF checkpoint producer changed or was rerun")
-    expected_name = f"cef-strict-checkpoint-linux-{run}-{attempt}"
-    matches = [
-        item for item in api.artifacts(BUILDER, run)
-        if item.get("id") == selected["artifact_id"]
-    ]
-    if len(matches) != 1:
-        raise ValueError("Selected strict CEF checkpoint artifact is missing")
-    artifact = matches[0]
-    if (artifact.get("name") != expected_name or artifact.get("expired") is not False
-            or artifact.get("digest") != "sha256:" + selected["artifact_sha256"]
-            or artifact.get("workflow_run", {}).get("id") != run
-            or artifact.get("workflow_run", {}).get("head_sha") != revision):
-        raise ValueError("Strict CEF checkpoint artifact provenance mismatch")
+    backup = cef_checkpoint_backup.applies(selected)
+    if not backup:
+        expected_name = f"cef-strict-checkpoint-linux-{run}-{attempt}"
+        matches = [
+            item for item in api.artifacts(BUILDER, run)
+            if item.get("id") == selected["artifact_id"]
+        ]
+        if len(matches) != 1:
+            raise ValueError("Selected strict CEF checkpoint artifact is missing")
+        artifact = matches[0]
+        if (artifact.get("name") != expected_name or artifact.get("expired") is not False
+                or artifact.get("digest") != "sha256:" + selected["artifact_sha256"]
+                or artifact.get("workflow_run", {}).get("id") != run
+                or artifact.get("workflow_run", {}).get("head_sha") != revision):
+            raise ValueError("Strict CEF checkpoint artifact provenance mismatch")
     destination.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(
             prefix=".strict-cef-fetch-", dir=destination.parent) as folder:
         root = Path(folder)
         archive = root / "artifact.zip"
-        api.download(
-            f"/repos/{BUILDER}/actions/artifacts/{artifact['id']}/zip",
-            archive, selected["artifact_sha256"], max_size=cef_cache.MAX_TOTAL
-        )
+        if backup:
+            cef_checkpoint_backup.copy_original(api, selected, "checkpoint", archive)
+        else:
+            api.download(
+                f"/repos/{BUILDER}/actions/artifacts/{artifact['id']}/zip",
+                archive, selected["artifact_sha256"], max_size=cef_cache.MAX_TOTAL
+            )
         encrypted = root / "ciphertext"
         encrypted.mkdir()
         with zipfile.ZipFile(archive) as stream:
@@ -1094,6 +1105,12 @@ def restore_checkpoint(selected: dict, destination: Path, build_key: str,
             or stable.get("head_sha") != revision):
         shutil.rmtree(destination, ignore_errors=True)
         raise ValueError("Strict CEF checkpoint producer changed during restore")
+    if backup:
+        try:
+            cef_checkpoint_backup.verify_available(selected, api)
+        except BaseException:
+            shutil.rmtree(destination, ignore_errors=True)
+            raise
     return result
 
 
