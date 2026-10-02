@@ -1,5 +1,6 @@
 """Native regression for the diagnosed LLVM CREL / LLD18 format mismatch."""
 from __future__ import annotations
+import ast
 import copy
 import hashlib
 import os
@@ -124,7 +125,21 @@ class DecoderTests(unittest.TestCase):
 
     def test_no_converter_without_ownership_installer_hook(self):
         source = (Path(__file__).resolve().parents[1]/'secure_release/cef_boringssl_isolation.py').read_text()
-        self.assertIn('relocation_receipt = cef_crel.install(cef, objcopy)', source)
+        # Check the actual call, not whitespace or the closing parenthesis:
+        # private diagnostics are a keyword, not a different archive/tool input.
+        tree = ast.parse(source)
+        install = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'install')
+        calls = [n for n in ast.walk(install) if isinstance(n, ast.Call)
+                 and isinstance(n.func, ast.Attribute) and n.func.attr == 'install'
+                 and isinstance(n.func.value, ast.Name) and n.func.value.id == 'cef_crel']
+        self.assertEqual(len(calls), 1)
+        call = calls[0]
+        self.assertEqual([ast.dump(a) for a in call.args],
+                         [ast.dump(ast.Name(id=n, ctx=ast.Load())) for n in ('cef', 'objcopy')])
+        self.assertEqual([k.arg for k in call.keywords], ['diagnostics'])
+        expected = ast.parse('diagnostics.with_name(diagnostics.name + "-crel-failure.json")',
+                             mode='eval').body
+        self.assertEqual(ast.dump(call.keywords[0].value), ast.dump(expected))
         self.assertLess(source.index('ownership_receipt = _ownership('),
                         source.index('relocation_receipt = cef_crel.install('))
         self.assertIn('cef_crel.verify_receipt(receipt)', source)
