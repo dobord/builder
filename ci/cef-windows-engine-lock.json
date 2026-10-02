@@ -3,5 +3,14 @@
   "platform": "windows",
   "vcpkg_commit": "39dccd415da14d8051559d66069019475d95787c",
   "cef_recipe_commit": "03abd124ebe3b8a57fb78470a75b5aa3ce064e31",
-  "checkpoint": null
+  "checkpoint": {
+    "run": 37007852614,
+    "attempt": 1,
+    "producer_sha": "312f6ca48ab6a26982a4bb21ec0e1514af38e859",
+    "artifact_id": 11237383883,
+    "artifact_sha256": "3a3788d8b2c6ed29daeba5ac357f751aa374a6b05ba9aab94591001165ea402f",
+    "summary_artifact_id": 11237488572,
+    "summary_artifact_sha256": "343ce6fe1876f7cf5bf295ad626c2f88a52973667dc6d92797421d004af518e3",
+    "build_key": "60a369f6b051ba651cb301af299e7dadcc99608d0db6894bccab87b953817602"
+  }
 }
