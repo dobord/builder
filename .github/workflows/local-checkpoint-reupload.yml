@@ -1,0 +1,56 @@
+name: Restore exact local Strict checkpoint backup to CI
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [temporary/checkpoint-reupload-20261002]
+    paths:
+      - .github/workflows/local-checkpoint-reupload.yml
+      - scripts/reupload-local-checkpoint.py
+
+permissions:
+  # Reading an unpublished draft transport requires repository push access.
+  contents: write
+  actions: read
+
+jobs:
+  checkpoint-backup:
+    if: github.repository == 'dobord/builder' && github.ref == 'refs/heads/temporary/checkpoint-reupload-20261002'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Reassemble and verify the exact original ciphertext and summary ZIPs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 scripts/reupload-local-checkpoint.py
+      - name: Retain the exact saved checkpoint archives for 90 days
+        id: backup
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: cef-strict-checkpoint-backup-linux-36069973563-1-${{ github.run_id }}
+          path: ${{ runner.temp }}/exact-checkpoint-backup/
+          retention-days: 90
+          if-no-files-found: error
+          compression-level: 0
+      - name: Verify uploaded artifact metadata and retention
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          BACKUP_ARTIFACT_ID: ${{ steps.backup.outputs.artifact-id }}
+          BACKUP_ARTIFACT_DIGEST: ${{ steps.backup.outputs.artifact-digest }}
+        run: |
+          python3 - <<'PY'
+          import datetime, json, os
+          from secure_release.github import Client
+          api = Client(os.environ["GITHUB_TOKEN"])
+          value = api.get("/repos/dobord/builder/actions/artifacts/" + os.environ["BACKUP_ARTIFACT_ID"])
+          expected = "cef-strict-checkpoint-backup-linux-36069973563-1-" + os.environ["GITHUB_RUN_ID"]
+          assert value["name"] == expected and value["expired"] is False
+          assert value["digest"] == "sha256:" + os.environ["BACKUP_ARTIFACT_DIGEST"]
+          assert value["workflow_run"]["head_sha"] == os.environ["GITHUB_SHA"]
+          expires = datetime.datetime.fromisoformat(value["expires_at"].replace("Z", "+00:00"))
+          assert expires > datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=89)
+          print(json.dumps({key: value[key] for key in ("id", "name", "digest", "size_in_bytes", "expires_at")}))
+          PY
