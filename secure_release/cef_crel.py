@@ -89,7 +89,7 @@ def decode_crel(data):
     require(pos == len(data), "Trailing CEF CREL payload")
 
 
-def object_profile(data):
+def object_profile(data, *, record_callback=None):
     require(len(data) >= HEADER.size, "Truncated CEF relocation object")
     h = HEADER.unpack_from(data)
     require(h[0][:7] == b"\x7fELF\x02\x01\x01" and h[1:4] == (1, 62, 1),
@@ -111,7 +111,12 @@ def object_profile(data):
 
     names = payload(sections[h[13]])
     hasher = hashlib.sha256()
-    _feed(hasher, [h[0].hex(), h[1], h[2], h[3], h[4], h[7], h[12], h[13]])
+    def feed(value):
+        _feed(hasher, value)
+        if record_callback is not None:
+            record_callback(value)
+
+    feed([h[0].hex(), h[1], h[2], h[3], h[4], h[7], h[12], h[13]])
     crel_names = set()
     nonrel_names = set()
     count = crel_count = 0
@@ -134,7 +139,7 @@ def object_profile(data):
         elif kind != 4:
             nonrel_names.add(name)
         logical_kind = 4 if kind == CREL else kind
-        _feed(hasher, [index, name, logical_kind, s[2], s[3], s[6], s[7],
+        feed([index, name, logical_kind, s[2], s[3], s[6], s[7],
                        8 if kind == CREL else s[8], 24 if kind == CREL else s[9]])
         if kind in (CREL, 4):
             require(0 < s[6] < len(sections) and 0 < s[7] < len(sections),
@@ -155,21 +160,21 @@ def object_profile(data):
                         "CEF relocation symbol index escaped table")
                 count += 1
                 require(count <= MAX_RECORDS, "CEF relocation inventory exceeds bound")
-                _feed(hasher, record)
+                feed(record)
         elif kind == 2:
             require(s[9] == SYMBOL.size and s[5] % SYMBOL.size == 0
                     and 0 < s[6] < len(sections), "Invalid CEF symbol table")
             strings = payload(sections[s[6]])
             for sym in SYMBOL.iter_unpack(payload(s)):
-                _feed(hasher, [string(strings, sym[0]), *sym[1:]])
+                feed([string(strings, sym[0]), *sym[1:]])
         elif kind == 3:
             # LLVM may repack string tables. Every used string is authenticated
             # above through symbol records and section names; no code lives here.
             payload(s)
         elif kind == 8:
-            _feed(hasher, ["nobits", s[5]])
+            feed(["nobits", s[5]])
         else:
-            _feed(hasher, [s[5], hashlib.sha256(payload(s)).hexdigest()])
+            feed([s[5], hashlib.sha256(payload(s)).hexdigest()])
     require(not crel_names.intersection(nonrel_names), "Ambiguous CEF CREL section type")
     return {"sha256": hasher.hexdigest(), "names": sorted(crel_names),
             "crel_sections": crel_count, "relocations": count,
@@ -236,8 +241,10 @@ def archive_profile(path, *, limit):
             "members": objects}
 
 
-def install(archives, objcopy):
+def install(archives, objcopy, *, diagnostics=None):
     """Called after unique CEF ownership proof, before namespace rewriting."""
+    from . import cef_objcopy_groups
+
     result = {"format": FORMAT, "tool_sha256": digest(objcopy), "archives": {}}
     for name, path in archives:
         limit = MAX_ARCHIVE if path.name == "cef_objects.a" else 1024**3
@@ -252,13 +259,15 @@ def install(archives, objcopy):
             root = Path(temp)
             args, output = root/"options", root/"converted.a"
             args.write_text(options, encoding="ascii")
-            subprocess.run([str(objcopy), "@"+str(args), str(path), str(output)],
-                           check=True, timeout=600)
+            cef_objcopy_groups.run(objcopy, ["@"+str(args)], path, output, limit=limit)
             after = archive_profile(output, limit=limit)
-            require(after["crel_sections"] == 0 and after["sha256"] == before["sha256"]
-                    and after["members"] == before["members"]
-                    and after["relocations"] == before["relocations"],
-                    "CEF CREL conversion changed object semantics")
+            equivalent = (after["crel_sections"] == 0 and after["sha256"] == before["sha256"]
+                          and after["members"] == before["members"]
+                          and after["relocations"] == before["relocations"])
+            if not equivalent and diagnostics is not None:
+                from .cef_crel_diagnostics import write_mismatch
+                write_mismatch(path, output, diagnostics, before, after, limit=limit)
+            require(equivalent, "CEF CREL conversion changed object semantics")
             output.chmod(path.stat().st_mode & 0o777)
             final_sha = digest(output)
             require(final_sha != source_sha and digest(path) == source_sha,

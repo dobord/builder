@@ -24,7 +24,7 @@ import struct
 import subprocess
 import tempfile
 
-from . import cef_crel, safeio
+from . import cef_crel, cef_objcopy_groups, safeio
 
 TRIPLET = "x64-linux-static-release"
 OPENSSL_VERSION = "3.6.3"
@@ -791,7 +791,9 @@ def install(installed: Path, source: Path, diagnostics: Path) -> dict:
     ffmpeg_collisions: set[str] = set()
     atomic_collisions: set[str] = set()
     source_hashes = _archive_hashes(cef)
-    relocation_receipt = cef_crel.install(cef, objcopy)
+    relocation_receipt = cef_crel.install(
+        cef, objcopy, diagnostics=diagnostics.with_name(diagnostics.name + "-crel-failure.json")
+    )
     relocation_affected = set(relocation_receipt["archives"])
     require(all(record["source_sha256"] == source_hashes[name]
                 for name, record in relocation_receipt["archives"].items()),
@@ -935,15 +937,15 @@ def install(installed: Path, source: Path, diagnostics: Path) -> dict:
                     section_name for _, section_name, _, alignment in over_aligned
                     if alignment > INIT_ARRAY_ALIGNMENT
                 })
-                subprocess.run(
-                    [str(objcopy), "--redefine-syms=" + str(mapping),
+                cef_objcopy_groups.run(
+                    objcopy, ["--redefine-syms=" + str(mapping),
                      *[
                          "--set-section-alignment="
                          + section_name + "=" + str(INIT_ARRAY_ALIGNMENT)
                          for section_name in alignment_names
                      ],
-                     str(path), str(temporary)],
-                    check=True, timeout=600,
+                     ], path, temporary,
+                    limit=_archive_limit(path), reverse=reverse,
                 )
                 temporary.chmod(old_mode)
                 after_profile, after = _profile_symbols(

@@ -136,10 +136,12 @@ def load_tests(loader, standard_tests, pattern):
         import test_cef_crel as crel
         import test_cef_crel_transport as transport
         import test_cef_crel_section_names as section_names
+        import test_cef_objcopy_groups as groups
         standard_tests.addTests(loader.loadTestsFromModule(regression))
         standard_tests.addTests(loader.loadTestsFromModule(crel))
         standard_tests.addTests(loader.loadTestsFromModule(transport))
         standard_tests.addTests(loader.loadTestsFromModule(section_names))
+        standard_tests.addTests(loader.loadTestsFromModule(groups))
     return standard_tests
 
 
