@@ -9,8 +9,8 @@ concurrency:
   group: frdpd-32-${{ github.sha }}
   cancel-in-progress: false
 env:
-  SOURCE_SHA: 'f06164a961e965d065c7a6a5e910be1cef4579ef'
-  SOURCE_TREE: '2761d4dd92e03799f77f55a44bfaadd222b66d6e'
+  SOURCE_SHA: '9f53e8bc8b75a849f92a11dd148554ad0e292821'
+  SOURCE_TREE: '8d25b116139493149e62509aee975e141640f5fc'
   ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
 jobs:
   regression:
@@ -55,7 +55,7 @@ jobs:
               original = api['docker']
               def verified(name, script, timeout=900):
                   script = script.replace('-DWITH_FRDPD_STRICT_WARNINGS=ON', '-DWITH_FRDPD_STRICT_WARNINGS=ON -DWITH_VERBOSE_WINPR_ASSERT=OFF')
-                  script = script.replace('GfxPolicy|ZGfxHistory', 'GfxPolicy|CursorAdapter|FrameScheduler|FramePipeline|WindowExchange|ZGfxHistory')
+                  script = script.replace('GfxPolicy|ZGfxHistory', 'GfxPolicy|CursorAdapter|FrameScheduler|FramePipeline|WindowExchange|PipelineStages|ZGfxHistory')
                   script = script.replace('X11WindowTracker|RemoteAppContract', 'X11WindowTracker|X11WindowCapture|X11WindowCompositor|SceneV2.*|WindowLease|X11ImageConvert|GraphicsControl|DamageState|SharedBuffer|NativePath|SurfaceManager|WindowRegistry|SurfaceIntegration|RemoteAppContract')
                   if name == 'focused':
                       script = "grep -q '^#define WITH_GFX_H264' /opt/freerdp-build/include/freerdp/config.h && " + script
@@ -66,8 +66,8 @@ jobs:
                   script = script.replace('--output-on-failure --timeout', '--output-on-failure --verbose --timeout')
                   status = original(name, script, timeout)
                   if name == 'focused' and status == 0:
-                      original('pipeline-repeat', 'ctest --test-dir /opt/freerdp-build --no-tests=error --output-on-failure --verbose --timeout 120 --repeat until-fail:10 -R "^TestFreeRDPFrdp(FramePipeline|WindowExchange|FrameScheduler|SurfaceManager|WindowRegistry)$"', 300)
-                      original('agent-stop-repeat', 'ctest --test-dir /opt/freerdp-build --no-tests=error --output-on-failure --verbose --timeout 120 --repeat until-fail:3 -R "^TestFreeRDPFrdpAgentStop$"', 400)
+                      original('pipeline-repeat', 'ctest --test-dir /opt/freerdp-build --no-tests=error --output-on-failure --verbose --timeout 120 --repeat until-fail:10 -R "^TestFreeRDPFrdp(FramePipeline|WindowExchange|PipelineStages|FrameScheduler|SurfaceManager|WindowRegistry)$"', 300)
+                      original('agent-stop-repeat', 'ctest --test-dir /opt/freerdp-build --no-tests=error --output-on-failure --verbose --timeout 120 --repeat until-fail:10 -R "^TestFreeRDPFrdpAgentStop$"', 400)
                   return status
               api['main'].__globals__['docker'] = verified
               rc = api['main']()
