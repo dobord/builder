@@ -1,43 +1,36 @@
-name: Windows CEF local repair sources
+name: Windows CEF source repair verification
 on:
   push:
     branches: [repair/windows-cef-35-openssl]
-    paths: [.github/workflows/windows-cef-local-repair.yml]
 permissions:
   contents: read
 jobs:
-  source:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
+  tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-          path: builder
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/cef
           ref: 03abd124ebe3b8a57fb78470a75b5aa3ce064e31
+          path: private-cef
           persist-credentials: false
-          path: cef
-      - name: Snapshot tracked public source only
-        shell: bash
-        run: |
-          set -euo pipefail
-          out="$RUNNER_TEMP/public-repair-source"
-          mkdir "$out"
-          test "$(git -C cef rev-parse HEAD)" = 03abd124ebe3b8a57fb78470a75b5aa3ce064e31
-          git -C builder archive --format=tar HEAD > "$out/builder-source.tar"
-          git -C cef archive --format=tar HEAD > "$out/cef-source.tar"
-          git -C builder rev-parse HEAD > "$out/builder-commit.txt"
-          git -C builder rev-parse 'HEAD^{tree}' > "$out/builder-tree.txt"
-          git -C cef rev-parse HEAD > "$out/cef-commit.txt"
-          git -C cef rev-parse 'HEAD^{tree}' > "$out/cef-tree.txt"
-          (cd "$out" && sha256sum *.tar *.txt > SHA256SUMS)
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
         with:
-          name: public-windows-repair-source-${{ github.run_id }}
-          path: ${{ runner.temp }}/public-repair-source
-          retention-days: 3
-          compression-level: 0
-          if-no-files-found: error
+          python-version: '3.12'
+      - name: Install hash-pinned test runtime
+        run: python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r requirements.lock
+      - name: Verify syntax
+        run: python -m compileall -q secure_release tests
+      - name: Test source repair, native checkpoint boundaries and encrypted diagnostics
+        env:
+          CEF_REPAIR_RECIPE_DIR: ${{ github.workspace }}/private-cef
+          REQUIRE_TINK_TESTS: '1'
+        run: python -m unittest tests.test_cef_windows_source_repair tests.test_cef_windows_diagnostics tests.test_cef_qualification_workflows tests.test_openssl_tink_logs tests.test_encrypted_logs -v

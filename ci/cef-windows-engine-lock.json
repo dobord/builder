@@ -1,5 +1,5 @@
 {
-  "schema": 1,
+  "schema": 2,
   "platform": "windows",
   "vcpkg_commit": "39dccd415da14d8051559d66069019475d95787c",
   "cef_recipe_commit": "03abd124ebe3b8a57fb78470a75b5aa3ce064e31",
@@ -12,5 +12,14 @@
     "summary_artifact_id": 11237488572,
     "summary_artifact_sha256": "343ce6fe1876f7cf5bf295ad626c2f88a52973667dc6d92797421d004af518e3",
     "build_key": "60a369f6b051ba651cb301af299e7dadcc99608d0db6894bccab87b953817602"
+  },
+  "source_repair": {
+    "schema": 1,
+    "id": "websocket-string-include-v1",
+    "chromium_commit": "79460ebecaa5625e57a5fb679a735659e73dc687",
+    "path": "net/websockets/websocket_handshake_challenge.h",
+    "before_sha256": "e9c2a8404032abb4080a5f6855ca396a5ecee841f017e932d49b9bbc2574e184",
+    "after_sha256": "38eb8b609bea01c37e3799feaba074c79f189568ff9b7df8c6943707433ef713",
+    "implementation_sha256": "3559f90ee09b9ecf1d9eac7327670fd45bf57a34090af4b01ba6ef580d694581"
   }
 }
