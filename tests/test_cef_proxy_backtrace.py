@@ -32,11 +32,20 @@ class PolicyTests(unittest.TestCase):
         self.assertIn("--signal=INT", argv)
         self.assertIn("--nx", argv)
         self.assertIn("--nh", argv)
-        for value in ("set auto-load off", "set debuginfod enabled off", "set startup-with-shell off",
+        for value in ("set auto-load off", "set debuginfod enabled off", "set startup-with-shell on",
                       "set disable-randomization off", "thread apply all bt 32", "kill"):
             self.assertIn(value, argv)
+        self.assertEqual(argv[argv.index("set startup-with-shell on")-1], "-eiex")
         self.assertNotIn("private", str(argv))
         self.assertEqual(env, {"PATH": "/tools", "PRIVATE_TEST_ENV": "private"})
+
+    def test_unreviewed_shell_and_startup_hook_environments_are_rejected(self):
+        for name, value in (("SHELL", "/tmp/unreviewed-shell"), ("ENV", "/tmp/hook"),
+                            ("BASH_ENV", "/tmp/hook"), ("SHELLOPTS", "xtrace"), ("BASHOPTS", "extdebug")):
+            with self.subTest(name=name), mock.patch.object(probe.shutil, "which") as which:
+                with self.assertRaisesRegex(ValueError, "shell environment"):
+                    probe.command(Path("/exe"), Path("/config"), {name: value})
+                which.assert_not_called()
 
     def test_missing_debugger_is_not_silently_replaced(self):
         with mock.patch.object(probe.shutil, "which", return_value=None):
@@ -138,8 +147,6 @@ class CaptureTests(unittest.TestCase):
             self.config.unlink()
             with self.config.open("wb") as stream:
                 stream.truncate(probe.MAX_CONFIG_BYTES+1)
-            with self.assertRaises(ValueError):
-                probe.capture(self.exe, self.root, self.env, self.log, config=self.config)
             self.config.write_bytes(original)
             self.log.write_bytes(b"existing evidence")
             with self.assertRaises(FileExistsError):
@@ -205,7 +212,7 @@ int main(int argc, char **argv) {
 }
 ''')
             exe = root / "proxy fixture"
-            config = root / "config with spaces;literal.ini"
+            config = root / "config with spaces;${PROXY_FIXTURE_TOKEN};$(touch UNEXPECTED);'literal'.ini"
             config.write_text("config-bound\n")
             (root / "relative-token").write_text("cwd-bound")
             (root / ".gdbinit").write_text("shell touch SHOULD_NOT_EXIST\n")
@@ -215,6 +222,9 @@ int main(int argc, char **argv) {
             before = hashlib.sha256(exe.read_bytes()).hexdigest()
             usage = subprocess.run([str(exe)], cwd=root, env=env, capture_output=True, timeout=10)
             self.assertEqual(usage.returncode, 2)
+            direct = subprocess.run(["xvfb-run", "-a", str(exe), str(config)],
+                                    cwd=root, env=env, capture_output=True, timeout=10)
+            self.assertEqual(direct.returncode, 139)
             # Exact defect: the old no-argument debugger only reaches Usage.
             old = subprocess.run(["gdb", "--batch", "--quiet", "--nx", "-ex", "run", "--args", str(exe)],
                                  cwd=root, env=env, capture_output=True, timeout=30)
@@ -222,12 +232,13 @@ int main(int argc, char **argv) {
             self.assertNotIn(b"received signal SIGSEGV", old.stdout + old.stderr)
             log = root / "capture.log"
             result = probe.capture(exe, root, env, log, config=config)
-            self.assertTrue(result[KEY+"sigsegv"])
+            self.assertTrue(result[KEY+"sigsegv"], log.read_text(errors="replace"))
             self.assertTrue(result[KEY+"complete"])
             self.assertEqual(result[KEY+"class"], "freerdp")
             self.assertGreater(result[KEY+"frame_count"], 0)
             self.assertEqual(hashlib.sha256(exe.read_bytes()).hexdigest(), before)
             self.assertFalse((root / "SHOULD_NOT_EXIST").exists())
+            self.assertFalse((root / "UNEXPECTED").exists())
             self.assertNotIn("config with spaces", json.dumps(result))
             print("CEF_PROXY_CONFIG_GDB_VERIFIED config=1 xvfb=1 immutable=1")
 
