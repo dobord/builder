@@ -54,6 +54,13 @@ def prepare_environment(selected: dict, environment: dict[str, str],
             raise ValueError("GITHUB_TOKEN is required for combined producer review")
         api = Client(token)
     producer = engine.verify_producer_summary(api, selected, allow_resumable=False)
+    from . import cef_checkpoint_backup
+    if cef_checkpoint_backup.applies(selected):
+        summary.update({
+            "checkpoint_backup_run": cef_checkpoint_backup.BACKUP_RUN,
+            "checkpoint_backup_artifact_id": cef_checkpoint_backup.BACKUP_ID,
+            "checkpoint_original_zip_hashes_verified": True,
+        })
     progress = producer.get("progress")
     if (not isinstance(progress, dict)
             or progress.get("engine_compilation_complete") is not True):

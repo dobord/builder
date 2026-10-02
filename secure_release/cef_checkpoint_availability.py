@@ -65,6 +65,9 @@ def verify_available(selected: object, api, *, now: datetime | None = None,
     require(now.tzinfo is not None and now.utcoffset() == timedelta(0),
             "CEF_CHECKPOINT_CLOCK_INVALID")
     require(type(require_success) is bool, "CEF_CHECKPOINT_MODE_INVALID")
+    from . import cef_checkpoint_backup
+    if cef_checkpoint_backup.applies(selected):
+        return cef_checkpoint_backup.verify_available(selected, api, now=now)
     root = "/repos/" + REPOSITORY
     run = _get(api, root + "/actions/runs/" + str(selected["run"]), "producer")
     require(isinstance(run, dict) and run.get("id") == selected["run"]

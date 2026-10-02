@@ -198,8 +198,9 @@ class WorkflowTests(unittest.TestCase):
             root=Path(name).resolve();checkout=root/'checkout';scratch=root/'runner-temp'
             checkout.mkdir();scratch.mkdir();(checkout/'ci').mkdir();(checkout/'secure_release').mkdir()
             (checkout/'secure_release/__init__.py').write_text('')
-            shutil.copyfile(ROOT/'secure_release/cef_checkpoint_availability.py',
-                            checkout/'secure_release/cef_checkpoint_availability.py')
+            for module in ('cef_checkpoint_availability.py', 'cef_checkpoint_backup.py',
+                           'crypto.py', 'protocol.py', 'cef_contract.py'):
+                shutil.copyfile(ROOT/'secure_release'/module, checkout/'secure_release'/module)
             (checkout/'ci/cef-strict-combined-lock.json').write_text(json.dumps({'checkpoint':SELECTOR}))
             output=root/'github-output'
             metadata=responses()
@@ -258,6 +259,13 @@ class WorkflowTests(unittest.TestCase):
             source=(ROOT/f'.github/workflows/cef-strict-{name if name=="combined" else "engine-iteration"}.yml').read_text()
             self.assertIn('actions: read',source)
             self.assertNotIn('actions: write',source)
+
+
+def load_tests(loader, tests, pattern):
+    if pattern == 'test_cef_checkpoint_availability.py':
+        from test_cef_checkpoint_backup import MetadataTests
+        tests.addTests(loader.loadTestsFromTestCase(MetadataTests))
+    return tests
 
 
 if __name__=='__main__':
