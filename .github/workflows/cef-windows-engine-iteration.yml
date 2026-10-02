@@ -52,6 +52,10 @@ jobs:
       - name: Validate Windows iteration worker syntax
         run: |
           python -m py_compile secure_release/cef_windows_iteration.py
+      - name: Test bounded Windows diagnostics
+        run: python -m unittest discover -s tests -p test_cef_windows_diagnostics.py -v
+      - name: Test authenticated ciphertext-only diagnostic transport
+        run: python -m unittest discover -s tests -p test_encrypted_logs.py -v
       - name: Run exact Windows CEF compilation slice with bounded header identity
         id: iteration
         env:
@@ -59,6 +63,25 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           python -m secure_release.cef_windows_iteration
+      - name: Capture bounded Windows iteration diagnostics
+        if: ${{ !cancelled() && (steps.iteration.outcome == 'success' || steps.iteration.outcome == 'failure') }}
+        run: python -m secure_release.cef_windows_diagnostics
+      - name: Preserve encrypted Windows iteration diagnostics
+        if: ${{ !cancelled() && (steps.iteration.outcome == 'success' || steps.iteration.outcome == 'failure') }}
+        uses: ./.github/actions/encrypted-logs
+        with:
+          roots: |
+            ${{ runner.temp }}/cef-windows-iteration-diagnostics
+            ${{ runner.temp }}/cef-windows-engine-logs
+      - name: Upload bounded Windows diagnostic status
+        if: ${{ !cancelled() && (steps.iteration.outcome == 'success' || steps.iteration.outcome == 'failure') }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: cef-windows-engine-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/cef-windows-engine-diagnostics.json
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 0
       - name: Upload encrypted Windows CEF checkpoint
         if: ${{ !cancelled() && steps.iteration.outputs.checkpoint_ready == 'true' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
