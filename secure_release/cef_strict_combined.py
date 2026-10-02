@@ -1668,9 +1668,11 @@ PrivateKeyFile={private_key}
                             "signal-before-log", "signal-unclassified",
                             "early-exit-unclassified",
                         }:
-                            summary.update(capture_proxy_startup_backtrace(
+                            from . import cef_proxy_backtrace
+                            summary.update(cef_proxy_backtrace.capture(
                                 proxy_exe, proxy_exe.parent, build_env,
                                 root / "lfc-ui-freerdp-cef-gdb.log",
+                                config=proxy_config,
                             ))
                         raise RuntimeError(
                             "Final FreeRDP/CEF process exited before proxy listener startup"
