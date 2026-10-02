@@ -7,6 +7,8 @@ on:
     paths:
       - .github/workflows/cef-strict-engine-iteration.yml
       - secure_release/cef_strict_iteration.py
+      - secure_release/cef_checkpoint_availability.py
+      - tests/test_cef_checkpoint_availability.py
       - secure_release/cef_gtk_loader.py
       - secure_release/cef_nss_isolation.py
       - secure_release/cef_gtk_codecs.py
@@ -41,6 +43,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+      - name: Verify checkpoint availability guard
+        run: python -m unittest discover -s tests -p test_cef_checkpoint_availability.py -v
+      - name: Verify selected checkpoint availability before setup
+        timeout-minutes: 2
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python -m secure_release.cef_checkpoint_availability --lock ci/cef-strict-engine-lock.json
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: dobord/vcpkg
@@ -147,7 +156,7 @@ jobs:
           name: cef-strict-checkpoint-linux-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/cef-strict-checkpoint-encrypted/*.enc
           compression-level: 0
-          retention-days: 7
+          retention-days: 90
           if-no-files-found: ignore
       - name: Upload non-sensitive iteration summary
         if: always()
@@ -155,7 +164,7 @@ jobs:
         with:
           name: cef-strict-iteration-summary-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/cef-strict-iteration-summary.json
-          retention-days: 7
+          retention-days: 90
           if-no-files-found: ignore
       - name: Build encrypted diagnostic artifact
         if: always()
