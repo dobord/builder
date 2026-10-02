@@ -13,6 +13,7 @@ import sys
 import tempfile
 import time
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 
 from secure_release import cef_contract, cef_windows_iteration as worker
@@ -185,6 +186,50 @@ class RepairTests(unittest.TestCase):
         (self.work / repair.MARKER).write_text("{}")
         with self.assertRaises(ValueError):
             self.apply()
+
+    def test_path_and_handle_ctime_are_not_cross_api_identity(self):
+        # Emulate CPython Windows path=CreationTime, handle=ChangeTime.
+        real_fstat = os.fstat
+        def by_handle(fd):
+            info = real_fstat(fd)
+            values = {name: getattr(info, name) for name in (
+                "st_dev", "st_ino", "st_mode", "st_nlink", "st_size", "st_mtime_ns", "st_ctime_ns")}
+            values["st_birthtime_ns"] = getattr(info, "st_birthtime_ns", info.st_ctime_ns)
+            values["st_ctime_ns"] += 1_000_000
+            return SimpleNamespace(**values)
+        with mock.patch.object(repair.os, "fstat", side_effect=by_handle):
+            _, raw, _ = repair._read(self.work, repair.HEADER)
+        self.assertEqual(raw, FIXTURE.read_bytes())
+
+    def test_handle_ctime_change_during_read_is_still_rejected(self):
+        real_fstat = os.fstat
+        calls = 0
+        def changed_handle(fd):
+            nonlocal calls
+            calls += 1
+            info = real_fstat(fd)
+            values = {name: getattr(info, name) for name in (
+                "st_dev", "st_ino", "st_mode", "st_nlink", "st_size", "st_mtime_ns", "st_ctime_ns")}
+            values["st_birthtime_ns"] = getattr(info, "st_birthtime_ns", info.st_ctime_ns)
+            if calls == 2:
+                values["st_ctime_ns"] += 1_000_000
+            return SimpleNamespace(**values)
+        with mock.patch.object(repair.os, "fstat", side_effect=changed_handle):
+            with self.assertRaises(ValueError):
+                repair._read(self.work, repair.HEADER)
+
+    def test_opened_file_identity_mismatch_is_rejected(self):
+        real_fstat = os.fstat
+        def replaced_handle(fd):
+            info = real_fstat(fd)
+            values = {name: getattr(info, name) for name in (
+                "st_dev", "st_ino", "st_mode", "st_nlink", "st_size", "st_mtime_ns", "st_ctime_ns")}
+            values["st_birthtime_ns"] = getattr(info, "st_birthtime_ns", info.st_ctime_ns)
+            values["st_ino"] += 1
+            return SimpleNamespace(**values)
+        with mock.patch.object(repair.os, "fstat", side_effect=replaced_handle):
+            with self.assertRaises(ValueError):
+                repair._read(self.work, repair.HEADER)
 
     def test_changed_input_is_not_overwritten(self):
         original = repair._path

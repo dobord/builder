@@ -20,6 +20,6 @@
     "path": "net/websockets/websocket_handshake_challenge.h",
     "before_sha256": "e9c2a8404032abb4080a5f6855ca396a5ecee841f017e932d49b9bbc2574e184",
     "after_sha256": "38eb8b609bea01c37e3799feaba074c79f189568ff9b7df8c6943707433ef713",
-    "implementation_sha256": "3559f90ee09b9ecf1d9eac7327670fd45bf57a34090af4b01ba6ef580d694581"
+    "implementation_sha256": "b6e5e5b1746def36d5e65c75ede104063578ec93b36558783a4fa5546d650c4b"
   }
 }

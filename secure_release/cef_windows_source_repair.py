@@ -99,6 +99,15 @@ def transform(raw: bytes) -> bytes:
     return changed.replace(b"\n", newline)
 
 
+def _object_snapshot(info) -> tuple:
+    # CPython 3.12 win32_xstat copies birthtime to ctime; fstat retains
+    # ChangeTime. Compare the same birthtime field ACROSS the APIs instead.
+    # Keep ctime in the full snapshots checked WITHIN each API below.
+    return (info.st_dev, info.st_ino, info.st_mode, info.st_nlink,
+            info.st_size, info.st_mtime_ns,
+            getattr(info, "st_birthtime_ns", info.st_ctime_ns))
+
+
 def _snapshot(info) -> tuple:
     return (info.st_dev, info.st_ino, info.st_mode, info.st_nlink,
             info.st_size, info.st_mtime_ns, info.st_ctime_ns)
@@ -124,11 +133,12 @@ def _read(work: Path, relative: str, limit: int = 65536) -> tuple[Path, bytes, o
             or not 0 < before.st_size <= limit):
         raise ValueError("Invalid Windows source repair input")
     with path.open("rb") as stream:
-        if _snapshot(os.fstat(stream.fileno())) != _snapshot(before):
+        opened = os.fstat(stream.fileno())
+        if _object_snapshot(opened) != _object_snapshot(before):
             raise ValueError("Windows source repair input changed before read")
         data = stream.read(limit + 1)
         after = os.fstat(stream.fileno())
-    if (len(data) != before.st_size or _snapshot(after) != _snapshot(before)
+    if (len(data) != before.st_size or _snapshot(after) != _snapshot(opened)
             or _snapshot(path.lstat()) != _snapshot(before)):
         raise ValueError("Windows source repair input changed during read")
     return path, data, before
