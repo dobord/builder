@@ -1,9 +1,9 @@
-"""Five reviewed Windows source corrections, bound to a new build contract.
+"""Six reviewed Windows source corrections, bound to a new build contract.
 
 The baseline CEF checkout and native checkpoint codec stay unchanged. Only the
 exact legacy producer below may cross into this profile, after authenticated
 restore under its OLD contract. New checkpoints carry the NEW contract and a
-verified source marker covering all five files. Neither receipts nor fixtures
+verified source marker covering all six files. Neither receipts nor fixtures
 constitute runtime proof.
 """
 from __future__ import annotations
@@ -35,6 +35,9 @@ ATOMIC_AFTER = "554274d3e6d39eb924fa276f1a747e26f54453a00c1e644dde9a1b7cc8cb5b42
 HEAP_HEADER = "download/chromium/src/v8/src/heap/cppgc-internal/heap-object-header.h"
 HEAP_BEFORE = "397f2555d0498e92eb5d40872e8066b1a08a9cba993a4457256b8fb0375251ee"
 HEAP_AFTER = "901a8ce9d296f6d3b701d348fc09478f31465e659e9925696dd358871757d94d"
+TORQUE_SOURCE = "download/chromium/src/v8/src/torque/implementation-visitor.cc"
+TORQUE_BEFORE = "bb857f343d860a65c111e9e178df67d3f9cf251f92eaa017202265a533c63abe"
+TORQUE_AFTER = "e1bba1f74d36cbbb9bcdd8810f6f2e91ea9197fd6ab6e3a98d07f2787b035359"
 # Ordered, closed set of corrections; no caller-selected paths or patches.
 CORRECTIONS = (
     (HEADER, BEFORE, AFTER, (
@@ -64,6 +67,9 @@ CORRECTIONS = (
         (b'std::atomic_ref(const_cast<uint16_t&>(half)).load(memory_order)',
          b'std::atomic_ref<uint16_t>(const_cast<uint16_t&>(half)).load(memory_order)'),
     )),
+    (TORQUE_SOURCE, TORQUE_BEFORE, TORQUE_AFTER, ((b'    if (type->IsLayoutDefinedInCpp()) {\n      return "sizeof(" + parent_name + ")";\n    }\n',
+         b'    if (type->IsLayoutDefinedInCpp()) {\n      // A packed subclass may reuse its parent\'s tail padding on the MS ABI.\n      // Use Torque\'s fixed logical size, as TypeVisitor does, rather than the\n      // standalone C++ sizeof. Keep the layout assertions independent of C++.\n      if (parent && parent->IsLayoutDefinedInCpp() && parent->HasStaticSize()) {\n        return std::to_string(*parent->size().SingleValue());\n      }\n      return "sizeof(" + parent_name + ")";\n    }\n'),)),
+
 )
 BASE_KEY = "60a369f6b051ba651cb301af299e7dadcc99608d0db6894bccab87b953817602"
 LEGACY = {
@@ -79,7 +85,7 @@ LEGACY = {
 
 def profile() -> dict:
     return {
-        "schema": 2, "id": "windows-v8-atomic-ref-v5",
+        "schema": 2, "id": "windows-torque-packed-parent-v6",
         "chromium_commit": CHROMIUM,
         "v8_commit": V8,
         "corrections": [
@@ -211,7 +217,7 @@ def apply(work: Path, contract: str, origin: str) -> str:
     # file must not cause a seemingly valid partial source transition.
     inputs = []
     for relative, _, _, _ in CORRECTIONS:
-        path, original, before = _read(work, relative)
+        path, original, before = _read(work, relative, 262144 if relative == TORQUE_SOURCE else 65536)
         inputs.append((relative, path, original, before, transform(original, relative)))
     if origin == "resume":
         _, data, _ = _read(work, MARKER, 8192)
@@ -242,7 +248,7 @@ def apply(work: Path, contract: str, origin: str) -> str:
     # Publish the marker only after ALL corrections verify. An interrupted
     # transition fails closed; it cannot produce a qualified checkpoint.
     for relative, _, _, before, changed in inputs:
-        _, result, after = _read(work, relative)
+        _, result, after = _read(work, relative, 262144 if relative == TORQUE_SOURCE else 65536)
         if result != changed or after.st_mtime_ns <= before.st_mtime_ns:
             raise ValueError("Windows header correction or input clock verification failed")
     with marker.open("xb") as stream:

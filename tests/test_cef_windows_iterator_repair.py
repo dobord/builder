@@ -22,6 +22,7 @@ import unittest
 from unittest import mock
 
 from secure_release import cef_windows_source_repair as repair
+from tests.cef_windows_layout_inputs import fixture_bytes
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / 'tests/fixtures/cef-windows'
@@ -38,7 +39,7 @@ def populate(work):
     for relative, _, _, _ in repair.CORRECTIONS:
         target = work / relative
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes((FIXTURES / target.name).read_bytes())
+        target.write_bytes(fixture_bytes(target.name))
 
 
 def probe_source(atomic: bytes) -> str:
@@ -229,7 +230,7 @@ class IteratorRepairTests(unittest.TestCase):
             'base/compiler_specific.h': '#pragma once\n#define UNSAFE_BUFFERS(...) __VA_ARGS__\n',
             'base/containers/span.h': '#pragma once\n#include <span>\nnamespace base { template<class T> using span=std::span<T>; }\n',
             'base/memory/stack_allocated.h': '#pragma once\n#define STACK_ALLOCATED() static_assert(true)\n',
-            'base/numerics/safe_conversions.h': '#pragma once\nnamespace base { template<class D,class S> constexpr D checked_cast(S v){return static_cast<D>(v);} }\n',
+            'base/numerics/safe_conversions.h': '#pragma once\nnamespace base { template<class D,class S> constexpr D checked_cast(S v){return static_cast<D>(v);}\n',
             'base/types/to_address.h': '#pragma once\n#include <memory>\nnamespace base { using std::to_address; }\n',
             'third_party/blink/renderer/platform/wtf/forward.h': '#pragma once\n#include <cstdint>\nnamespace blink { using UChar=char16_t; using UChar32=int32_t; using wtf_size_t=uint32_t; }\n',
         }

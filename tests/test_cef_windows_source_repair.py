@@ -18,6 +18,7 @@ from unittest import mock
 
 from secure_release import cef_contract, cef_windows_iteration as worker
 from secure_release import cef_windows_source_repair as repair
+from tests.cef_windows_layout_inputs import fixture_bytes
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = ROOT / "tests/fixtures/cef-windows/websocket_handshake_challenge.h"
@@ -31,10 +32,11 @@ def populate(work):
     for relative, fixture in ((repair.HEADER, FIXTURE), (repair.PAINT_HEADER, PAINT_FIXTURE),
                               (repair.AUTOFILL_SOURCE, AUTOFILL_FIXTURE),
                               (repair.ATOMIC_SOURCE, ATOMIC_FIXTURE),
-                              (repair.HEAP_HEADER, HEAP_FIXTURE)):
+                              (repair.HEAP_HEADER, HEAP_FIXTURE),
+                              (repair.TORQUE_SOURCE, Path("implementation-visitor.cc"))):
         path = work / relative
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(fixture.read_bytes())
+        path.write_bytes(fixture_bytes(fixture.name))
 
 
 class RepairTests(unittest.TestCase):
@@ -489,10 +491,10 @@ class PaintHeaderTests(unittest.TestCase):
             repair.transform(old, repair.HEADER)
 
     def test_profile_binds_both_headers_and_each_digest(self):
-        expected_paths = [repair.HEADER, repair.PAINT_HEADER, repair.AUTOFILL_SOURCE, repair.ATOMIC_SOURCE, repair.HEAP_HEADER]
+        expected_paths = [repair.HEADER, repair.PAINT_HEADER, repair.AUTOFILL_SOURCE, repair.ATOMIC_SOURCE, repair.HEAP_HEADER, repair.TORQUE_SOURCE]
         profile = repair.profile()
         self.assertEqual(profile["schema"], 2)
-        self.assertEqual(profile["id"], "windows-v8-atomic-ref-v5")
+        self.assertEqual(profile["id"], "windows-torque-packed-parent-v6")
         self.assertEqual([c["path"] for c in profile["corrections"]],
                          [p.removeprefix("download/chromium/src/") for p in expected_paths])
         for index in (0, 1, 2, 3, 4):
@@ -530,10 +532,11 @@ class PaintHeaderTests(unittest.TestCase):
         for relative, fixture in ((repair.HEADER, FIXTURE), (repair.PAINT_HEADER, PAINT_FIXTURE),
                               (repair.AUTOFILL_SOURCE, AUTOFILL_FIXTURE),
                               (repair.ATOMIC_SOURCE, ATOMIC_FIXTURE),
-                              (repair.HEAP_HEADER, HEAP_FIXTURE)):
+                              (repair.HEAP_HEADER, HEAP_FIXTURE),
+                              (repair.TORQUE_SOURCE, Path("implementation-visitor.cc"))):
             path = self.work / relative
             fixed = path.read_bytes()
-            path.write_bytes(fixture.read_bytes())
+            path.write_bytes(fixture_bytes(fixture.name))
             with self.assertRaises(ValueError):
                 self.apply("resume")
             path.write_bytes(fixed)
@@ -665,6 +668,8 @@ def load_tests(loader, standard_tests, pattern):
     standard_tests.addTests(loader.loadTestsFromModule(test_cef_windows_iterator_repair))
     from tests import test_cef_windows_atomic_ref_repair
     standard_tests.addTests(loader.loadTestsFromModule(test_cef_windows_atomic_ref_repair))
+    from tests import test_cef_windows_layout_repair
+    standard_tests.addTests(loader.loadTestsFromModule(test_cef_windows_layout_repair))
     return standard_tests
 
 
