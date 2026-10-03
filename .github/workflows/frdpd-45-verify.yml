@@ -9,8 +9,8 @@ concurrency:
   group: frdpd-45-${{ github.sha }}
   cancel-in-progress: false
 env:
-  SOURCE_SHA: '2959f9426f4b945460100d91f42027d0df3b9fd7'
-  SOURCE_TREE: '1ccaf082326eb0e84ef17f329d9991e18d1c188b'
+  SOURCE_SHA: '018b8f0676fbc831c4e460cd5a86df3aaebe1bcc'
+  SOURCE_TREE: '781ec4b9cadc588438b8b75de780df0a3f57c4dd'
   ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
 jobs:
   regression:
@@ -68,7 +68,7 @@ jobs:
                   return status
               def verified(name, script, timeout=900):
                   script = script.replace('-DWITH_FRDPD_STRICT_WARNINGS=ON', '-DWITH_FRDPD_STRICT_WARNINGS=ON -DWITH_VERBOSE_WINPR_ASSERT=OFF')
-                  script = script.replace('GfxPolicy|ZGfxHistory', 'GfxPolicy|GfxSender|WindowCodec|WindowPixelOracle|CursorAdapter|FrameScheduler|FramePipeline|WindowExchange|PipelineStages|ZGfxHistory')
+                  script = script.replace('GfxPolicy|ZGfxHistory', 'GfxPolicy|GfxSender|WindowCodec|WindowPixelOracle|SceneSubscribe|CursorAdapter|FrameScheduler|FramePipeline|WindowExchange|PipelineStages|ZGfxHistory')
                   script = script.replace('X11WindowTracker|RemoteAppContract', 'X11WindowTracker|X11WindowCapture|X11WindowCompositor|SceneV2.*|WindowLease|X11ImageConvert|GraphicsControl|DamageState|SharedBuffer|NativePath|SurfaceManager|WindowRegistry|SurfaceIntegration|RemoteAppContract')
                   if name == 'focused':
                       script = "grep -q '^#define WITH_GFX_H264' /opt/freerdp-build/include/freerdp/config.h && " + script
@@ -79,7 +79,7 @@ jobs:
                   script = script.replace('--output-on-failure --timeout', '--output-on-failure --verbose --timeout')
                   status = original(name, script, timeout)
                   if name == 'focused' and status == 0:
-                      original('oracle-repeat', 'ctest --test-dir /opt/freerdp-build --no-tests=error --output-on-failure --verbose --timeout 120 --repeat until-fail:10 -R "^TestFreeRDPFrdp(WindowPixelOracle|WindowCodec|GfxSender|FramePipeline|WindowExchange|PipelineStages|FrameScheduler|SurfaceManager|WindowRegistry)$"', 300)
+                      original('oracle-repeat', 'ctest --test-dir /opt/freerdp-build --no-tests=error --output-on-failure --verbose --timeout 120 --repeat until-fail:10 -R "^TestFreeRDPFrdp(WindowPixelOracle|SceneSubscribe|WindowCodec|GfxSender|FramePipeline|WindowExchange|PipelineStages|FrameScheduler|SurfaceManager|WindowRegistry)$"', 300)
                       original('agent-stop-repeat', 'ctest --test-dir /opt/freerdp-build --no-tests=error --output-on-failure --verbose --timeout 120 --repeat until-fail:30 -R "^TestFreeRDPFrdpAgentStop$"', 600)
                   return status
               api['main'].__globals__['docker'] = verified
