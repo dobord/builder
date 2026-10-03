@@ -1,0 +1,44 @@
+name: Windows CEF atomic reference verification
+on:
+  push:
+    branches: [repair/windows-cef-39-atomic-ref]
+permissions:
+  contents: read
+jobs:
+  public-inputs:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Snapshot tracked public inputs only
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir public-inputs
+          git archive --format=tar HEAD > public-inputs/builder-source.tar
+          git ls-tree -r HEAD > public-inputs/builder-tree.txt
+          git rev-parse HEAD > public-inputs/builder-commit.txt
+          python3 - <<'PY'
+          import hashlib, json, pathlib, urllib.request
+          root = pathlib.Path('public-inputs')
+          chromium = '79460ebecaa5625e57a5fb679a735659e73dc687'
+          v8 = '4323497a6a73839e6d5260f6acd7ec0212cb3321'
+          request = urllib.request.Request('https://api.github.com/repos/chromium/chromium/contents/v8?ref=' + chromium, headers={'User-Agent': 'builder-public-inputs'})
+          metadata = json.load(urllib.request.urlopen(request, timeout=60))
+          assert metadata['type'] == 'submodule' and metadata['sha'] == v8
+          (root / 'v8-submodule.json').write_text(json.dumps(metadata, sort_keys=True))
+          path = 'src/heap/cppgc-internal/heap-object-header.h'
+          data = urllib.request.urlopen('https://raw.githubusercontent.com/v8/v8/' + v8 + '/' + path, timeout=60).read()
+          (root / 'heap-object-header.h').write_bytes(data)
+          sums = [hashlib.sha256(p.read_bytes()).hexdigest() + '  ' + str(p.relative_to(root)) for p in sorted(root.rglob('*')) if p.is_file()]
+          (root / 'SHA256SUMS').write_text('\n'.join(sums) + '\n')
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: public-atomic-ref-inputs-${{ github.run_id }}
+          path: public-inputs
+          retention-days: 3
+          compression-level: 0
+          if-no-files-found: error
