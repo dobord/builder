@@ -1,0 +1,76 @@
+# Linux-only static SDK release
+
+Linux releases run through `dobord/builder` and publish directly to
+`dobord/vcpkg-bin`. They do not wait for or start a Windows build.
+
+## Pipeline
+
+1. `dobord/vcpkg/.github/workflows/release-request.yml` sends a signed version-2
+   request containing `platforms: ["linux"]` from an immutable `vX.Y.Z` tag.
+2. `builder/.github/workflows/build-linux-release.yml` authenticates the request,
+   fetches the pinned source revisions, and builds only
+   `x64-linux-static-release`. Its jobs are `prepare` and `linux`; there is no
+   platform matrix or Windows runner.
+3. For a CEF release, the strict source-built profile remains required. The SDK
+   retains reviewed native runtime isolation, source/header aliases and installed
+   FreeRDP objects. A relocated C API consumer and the actual canonical C++/RDP
+   consumer must both pass before `sdk_ready` can be set.
+4. The C++ lifecycle test connects a local RDP client, waits for a stable CEF
+   renderer, verifies OS-only imports and loaded modules, and requires clean
+   proxy/helper shutdown. Static FreeRDP keeps `WITH_FFMPEG=ON`.
+5. `request-publication.yml` independently verifies the successful Linux build
+   attempt, the signed platform selection, the SDK and runtime evidence. It
+   publishes exactly the Linux SDK and its two metadata assets to `vcpkg-bin`.
+
+Assets for tag `vX.Y.Z`:
+
+- `vcpkg-vX.Y.Z-linux-x64-static-release.zip`
+- `release-manifest.json`
+- `SHA256SUMS`
+
+There is no Windows asset requirement for this workflow. Legacy version-1
+requests still belong to the separate two-platform `build-release.yml` path;
+a request cannot silently change platform scope between build and publication.
+
+## Source revisions and execution
+
+The CEF client bridge and the lfc-ui subprocess/runtime fixes must be included
+in the revisions pinned by the source release plan and matching port `REF`s.
+The prepared source plan pins CEF recipe
+`5d427cb2d29cd14fbdb3d7fbccbf3822e3b03896` and lfc-ui
+`63b456abf22250932df41a55797ed912d1b5b662`; the lfc-ui port uses that same `REF`
+at `0.3.0#17`. The Linux canonical-example review binds both the fixed proxy
+and the updated port installation policy. An uncommitted working tree is not
+a CI input.
+
+The existing `BUILDER_COMMIT_SHA`, `RELEASE_ENABLED`, `PUBLISH_ENABLED`, tokens and
+transport keys remain the deployment configuration. `CEF_STATIC_LINUX_RUNNER_LABELS`
+selects the Linux runner with capacity for the complete source-built graph; the
+native capacity and host checks remain mandatory.
+
+The ordinary `ubuntu-24.04` runner first removes the unused Android, .NET and
+GHC installations, using the same capacity recovery as the incremental engine
+workflow. This step is limited to GitHub-hosted runners. The source worker still
+requires at least 80 GiB free after recovery; it never lowers that threshold.
+
+The Linux source worker applies the reviewed native-link, static GTK/NSS and
+Dawn-header profile before compiling. Accepted continuation checkpoints retain
+the exact original or native-link recipe fingerprint. Before vcpkg install, the
+qualified exporter patch and frozen-dependency replay are ABI-tracked inputs;
+installed dependency ownership and isolated platform bytes are rechecked before
+packaging. These are the same contracts used by the native engine qualification.
+
+The final Linux consumers use GCC 14 and the independently checked LLD 18.
+Native Chromium objects may contain CREL relocations, which LLD 18 does not
+apply. Keep the reviewed CREL-to-RELA conversion in the installed CEF isolation
+step before export: a successful link alone does not prove startup constructors
+or runtime correctness. The converter compares every logical relocation and
+object payload before accepting the derivative; the original engine checkpoint
+is not modified.
+
+Trigger a new immutable source tag or dispatch the source request workflow using
+that exact tag. A clean unfinished engine slice uploads its accepted checkpoint
+and completed package cache for continuation, but fails SDK readiness and does
+not cause publication. Checkpoints and package-cache artifacts have 90-day
+retention in the Linux workflow. A failed or incomplete run never publishes an
+SDK. The combined qualification lock is not opened by this workflow setup.

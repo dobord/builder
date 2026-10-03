@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "required_profile": "static-third-party",
+  "admitted_contracts": {
+    "linux": [],
+    "windows": [
+      "3dbe67fc128a861af4daf42e12f10a6a6d05e718d931df30152a519e24c3c530"
+    ]
+  }
+}

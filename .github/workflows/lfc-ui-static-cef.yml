@@ -1,0 +1,83 @@
+name: CEF strict release-import rejection
+on:
+  push:
+    branches:
+      - feature/cef-static-integration
+    paths:
+      - .github/workflows/lfc-ui-static-cef.yml
+permissions:
+  contents: read
+concurrency:
+  group: cef-strict-release-import-rejection-1873bb62
+  cancel-in-progress: true
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: dobord/vcpkg
+          ref: 39dccd415da14d8051559d66069019475d95787c
+          path: private-vcpkg
+          token: ${{ secrets.SOURCE_READ_TOKEN }}
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: microsoft/vcpkg
+          ref: 9e593bb18ea69cc5095e012465dcd675a822ed0d
+          path: private-vcpkg/.strict-reject-upstream
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: dobord/cef
+          ref: 03abd124ebe3b8a57fb78470a75b5aa3ce064e31
+          path: private-cef
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.12'
+      - name: Materialize an intentionally invalid strict release-import contract
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          @'
+          import json
+          from pathlib import Path
+          lock = json.loads(Path("private-cef/vcpkg/integration/release.lock.json").read_text())
+          contract = {
+              "schema": 1,
+              "recipe_commit": "03abd124ebe3b8a57fb78470a75b5aa3ce064e31",
+              "profile": "static-third-party",
+              "mode": "release-import",
+              "triplet": "x64-windows-static-release",
+              "platform_sha256": None,
+              "release_lock": lock,
+          }
+          path = Path("private-vcpkg/ports/cef-static/cef-build.json")
+          path.write_text(json.dumps(contract, sort_keys=True, separators=(",", ":")) + "\n")
+          '@ | python -
+      - name: Verify strict release-import is rejected before package promotion
+        shell: pwsh
+        env:
+          VCPKG_DISABLE_METRICS: '1'
+          VCPKG_BINARY_SOURCES: clear
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $upstream = Join-Path $env:GITHUB_WORKSPACE 'private-vcpkg/.strict-reject-upstream'
+          & cmd.exe /d /c (Join-Path $upstream 'bootstrap-vcpkg.bat') -disableMetrics *> (Join-Path $env:RUNNER_TEMP 'cef-reject-bootstrap.log')
+          if ($LASTEXITCODE -ne 0) { throw 'CEF_STRICT_REJECT_BOOTSTRAP_FAILED' }
+          $log = Join-Path $env:RUNNER_TEMP 'cef-strict-release-reject.log'
+          $vcpkg = Join-Path $upstream 'vcpkg.exe'
+          & $vcpkg install 'cef-static[strict-platform]' '--triplet=x64-windows-static-release' '--host-triplet=x64-windows-static-release' "--overlay-ports=$env:GITHUB_WORKSPACE/private-vcpkg/ports" "--overlay-triplets=$env:GITHUB_WORKSPACE/private-vcpkg/triplets" '--binarysource=clear' *> $log
+          $rc = $LASTEXITCODE
+          if ($rc -eq 0) { throw 'CEF_STRICT_RELEASE_IMPORT_UNEXPECTEDLY_SUCCEEDED' }
+          $text = [IO.File]::ReadAllText($log)
+          if (-not $text.Contains('static-third-party requires a source-built CEF engine')) {
+            throw 'CEF_STRICT_RELEASE_IMPORT_REJECTION_UNEXPECTED'
+          }
+          Write-Host 'CEF_STRICT_RELEASE_IMPORT_REJECTED'
+          exit 0

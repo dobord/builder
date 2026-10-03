@@ -5,46 +5,59 @@ import os
 from pathlib import Path
 import shutil
 import urllib.error
-from . import crypto, safeio
+from . import crypto, safeio, cef_build, cef_contract
 from .github import Client
 from .protocol import *
 from .tasks import event, work
 
 
-def notify():
+def _trusted_builder_result() -> tuple[Client, int, int, str, str]:
+    """Revalidate the exact successful Build static SDK attempt from builder."""
     guard(BUILDER, event="workflow_run")
     run = event()["workflow_run"]
+    workflow_name = build_workflow(run.get("path", ""))
     approved = sha(env("BUILDER_COMMIT_SHA"))
-    check_run(run, BUILDER, "build-release.yml", approved, number(run["run_attempt"]), "workflow_dispatch", success=True)
-    api = Client(env("BUILDER_TOKEN"))
-    workflow = api.get(f"/repos/{BUILDER}/actions/workflows/build-release.yml")
+    attempt = number(run["run_attempt"])
+    check_run(
+        run, BUILDER, workflow_name, approved, attempt,
+        "workflow_dispatch", success=True,
+    )
+    api = Client(env("BUILDER_READ_TOKEN"))
+    workflow = api.get(f"/repos/{BUILDER}/actions/workflows/{workflow_name}")
     if run["workflow_id"] != workflow["id"]:
         raise ValueError("wrong workflow identifier")
-    api_run = api.get(f"/repos/{BUILDER}/actions/runs/{run['id']}/attempts/{run['run_attempt']}")
-    check_run(api_run, BUILDER, "build-release.yml", approved, number(run["run_attempt"]), "workflow_dispatch", success=True)
-    Client(env("BIN_DISPATCH_TOKEN")).dispatch(BIN, "publish.yml", {"build_run_id": str(run["id"]), "build_run_attempt": str(run["run_attempt"])})
+    exact = api.get(
+        f"/repos/{BUILDER}/actions/runs/{run['id']}/attempts/{attempt}"
+    )
+    check_run(
+        exact, BUILDER, workflow_name, approved, attempt,
+        "workflow_dispatch", success=True,
+    )
+    if exact.get("id") != run["id"] or exact.get("workflow_id") != workflow["id"]:
+        raise ValueError("builder attempt identity differs from workflow_run event")
+    current = api.get(f"/repos/{BUILDER}/actions/runs/{run['id']}")
+    if (current.get("run_attempt") != attempt
+            or current.get("status") != "completed"
+            or current.get("conclusion") != "success"
+            or current.get("head_sha") != approved
+            or current.get("workflow_id") != workflow["id"]):
+        raise ValueError("builder run changed after workflow_run event")
+    return api, number(run["id"]), attempt, approved, workflow_name
 
 
 def verify_result():
-    guard(BIN, event="workflow_dispatch")
-    inputs = event()["inputs"]
-    run_id, attempt = number(inputs["build_run_id"]), number(inputs["build_run_attempt"])
-    approved = sha(env("BUILDER_COMMIT_SHA"))
-    api = Client(env("BUILDER_READ_TOKEN"))
-    run = api.get(f"/repos/{BUILDER}/actions/runs/{run_id}/attempts/{attempt}")
-    check_run(run, BUILDER, "build-release.yml", approved, attempt, "workflow_dispatch", success=True)
-    current = api.get(f"/repos/{BUILDER}/actions/runs/{run_id}")
-    if current["run_attempt"] != attempt or current["status"] != "completed":
-        raise ValueError("a different build attempt is active")
-    if run["workflow_id"] != api.get(f"/repos/{BUILDER}/actions/workflows/build-release.yml")["id"]:
-        raise ValueError("wrong builder workflow")
+    api, run_id, attempt, approved, workflow_name = _trusted_builder_result()
+    platforms = BUILD_WORKFLOWS[workflow_name]
     artifacts = api.artifacts(BUILDER, run_id)
     root = work()
     staging = Path(env("STAGING_DIR"))
     staging.mkdir(parents=True, exist_ok=False)
     common_request = None
     files, manifests, provenance = {}, {}, {}
-    for platform in ("linux", "windows"):
+    unexpected = {f"sdk-{p}-{run_id}-{attempt}" for p in ("linux", "windows") if p not in platforms}
+    if any(a["name"] in unexpected for a in artifacts):
+        raise ValueError("unrequested platform artifact")
+    for platform in platforms:
         name = f"sdk-{platform}-{run_id}-{attempt}"
         matches = [a for a in artifacts if a["name"] == name and not a["expired"]]
         if len(matches) != 1:
@@ -75,6 +88,8 @@ def verify_result():
             raise ValueError("unexpected decrypted bundle members")
         signed = crypto.parse((bundle / "request.json").read_bytes())
         payload = verified(signed, env("REQUEST_VERIFY_PUBLIC_KEY"))
+        if release_platforms(payload) != platforms:
+            raise ValueError("signed platforms differ from the successful builder workflow")
         signed_bytes = crypto.canonical(signed)
         if common_request is not None and signed_bytes != common_request:
             raise ValueError("platforms use different requests")
@@ -97,10 +112,40 @@ def verify_result():
         names = {e.filename for e in entries}
         if "scripts/buildsystems/vcpkg.cmake" not in names or not any(n.startswith(f"installed/{triplet}/lib/") and n.endswith((".a", ".lib")) for n in names):
             raise ValueError("SDK layout invalid")
+        reviewed_sources = set()
+        if workflow_name == "build-linux-release.yml" and payload["plan"].get("cef") is not None:
+            from . import linux_sdk
+            reviewed_sources = linux_sdk.validate_archive_sources(sdk, manifest.get("cef", {}).get("sdk_sources"))
         for n in names:
             low = n.lower()
-            if any(p in {"downloads", "buildtrees", ".git", "debug"} for p in low.split("/")) or low.endswith((".pdb", ".cpp", ".cxx", ".cc", ".log", ".dmp")):
+            if (safeio.forbidden_sdk_tree(n) or low.endswith((".pdb", ".log", ".dmp"))
+                    or Path(n).suffix.casefold() in safeio.SOURCE_SUFFIXES and n not in reviewed_sources):
                 raise ValueError("forbidden SDK file")
+        cfg = payload["plan"].get("cef")
+        if cfg is not None:
+            evidence = manifest.get("cef", {})
+            if workflow_name == "build-linux-release.yml":
+                from . import linux_sdk
+                if cfg.get("profile") != "static-third-party":
+                    raise ValueError("Linux CEF publication requires the strict profile")
+                linux_sdk.validate_cpp_proof(evidence.get("cpp_consumer"))
+            consumer = evidence.get("consumer", {})
+            cef_build.validate_platform_preflight(
+                evidence.get("platform_preflight"), consumer, cfg, platform)
+            expected_key, expected_contract = cef_build.qualified_contract(
+                consumer, cfg, platform)
+            if (evidence.get("build_contract_sha256") != expected_key
+                    or evidence.get("profile") != cfg["profile"]):
+                raise ValueError("CEF evidence is not bound to the signed acquisition contract")
+            import zipfile
+            with zipfile.ZipFile(sdk) as archive:
+                path = f"installed/{triplet}/share/cef-static/build-contract.json"
+                if path not in names or archive.getinfo(path).file_size > 32768:
+                    raise ValueError("CEF package lacks its ABI-tracked build contract")
+                if crypto.parse(archive.read(path)) != expected_contract:
+                    raise ValueError("Installed CEF package differs from the signed build plan")
+        elif "cef" in manifest or any(n.startswith(f"installed/{triplet}/share/cef-static/") for n in names):
+            raise ValueError("Unrequested CEF package or evidence")
         filename = f"vcpkg-{payload['source_tag']}-{platform}-x64-static-release.zip"
         shutil.copyfile(sdk, staging / filename)
         files[filename] = manifest["sdk_sha256"]
@@ -108,7 +153,8 @@ def verify_result():
         provenance[platform] = {"artifact_id": artifact["id"], "artifact_digest": artifact["digest"]}
     release = {"version": 1, "release_id": payload["release_id"], "source_tag": payload["source_tag"], "source_sha": payload["source_sha"],
                "builder_sha": approved, "build_run": run_id, "build_attempt": attempt,
-               "request_sha256": hashlib.sha256(common_request).hexdigest(), "platforms": manifests, "artifacts": provenance, "files": files}
+               "request_sha256": hashlib.sha256(common_request).hexdigest(), "platforms": manifests, "artifacts": provenance, "files": files,
+               "release_platforms": list(platforms), "build_workflow": workflow_name}
     (staging / "release-manifest.json").write_bytes(crypto.canonical(release))
     files["release-manifest.json"] = crypto.digest(staging / "release-manifest.json")
     (staging / "SHA256SUMS").write_text("".join(f"{h}  {n}\n" for n, h in sorted(files.items())), encoding="ascii")
@@ -116,7 +162,10 @@ def verify_result():
 
 
 def publish_release():
-    guard(BIN, event="workflow_dispatch")
+    if env("PUBLISH_ENABLED") != "true":
+        raise ValueError("publication disabled")
+    _, run_id, attempt, approved, workflow_name = _trusted_builder_result()
+    platforms = BUILD_WORKFLOWS[workflow_name]
     root = Path(env("STAGING_DIR"))
     sums = root / "SHA256SUMS"
     if crypto.digest(sums) != env("STAGING_DIGEST"):
@@ -130,22 +179,33 @@ def publish_release():
     files["SHA256SUMS"] = crypto.digest(sums)
     manifest = crypto.parse((root / "release-manifest.json").read_bytes())
     tag = manifest["source_tag"]
-    if not TAG.fullmatch(tag) or set(manifest["platforms"]) != {"linux", "windows"} or manifest["builder_sha"] != env("BUILDER_COMMIT_SHA"):
+    if (not TAG.fullmatch(tag)
+            or set(manifest["platforms"]) != set(platforms)
+            or manifest.get("release_platforms", ["linux", "windows"]) != list(platforms)
+            or manifest.get("build_workflow", "build-release.yml") != workflow_name
+            or manifest["builder_sha"] != approved
+            or manifest.get("build_run") != run_id
+            or manifest.get("build_attempt") != attempt):
         raise ValueError("invalid publication manifest")
-    expected_names = {"release-manifest.json", "SHA256SUMS", f"vcpkg-{tag}-linux-x64-static-release.zip", f"vcpkg-{tag}-windows-x64-static-release.zip"}
+    expected_names = {"release-manifest.json", "SHA256SUMS"} | {
+        f"vcpkg-{tag}-{platform}-x64-static-release.zip" for platform in platforms}
     if set(files) != expected_names or set(p.name for p in root.iterdir()) != expected_names:
         raise ValueError("unexpected publication assets")
     api = Client(env("PUBLISH_TOKEN"))
     repo = api.get(f"/repos/{BIN}")
-    if repo["id"] != IDS[BIN] or not repo["private"]:
-        raise ValueError("destination must be canonical and private")
+    if (repo["id"] != IDS[BIN] or not repo["private"]
+            or repo.get("default_branch") != "main"):
+        raise ValueError("destination must be canonical, private and main-based")
+    main_ref = api.get(f"/repos/{BIN}/git/ref/heads/main")
+    if main_ref.get("object", {}).get("type") != "commit":
+        raise ValueError("destination main ref is not a commit")
+    bin_main = sha(main_ref["object"]["sha"])
     marker = "Encrypted pipeline manifest SHA256: " + files["release-manifest.json"]
     try:
         release = api.get(f"/repos/{BIN}/releases/tags/{tag}")
     except urllib.error.HTTPError as error:
         if error.code != 404:
             raise
-        # The tag endpoint may omit drafts. Resume the exact matching draft.
         matches = []
         for page in range(1, 21):
             listed = api.get(f"/repos/{BIN}/releases?per_page=100&page={page}")
@@ -157,7 +217,7 @@ def publish_release():
         if len(matches) > 1:
             raise ValueError("ambiguous existing release")
         release = matches[0] if matches else api.json("POST", f"/repos/{BIN}/releases", {
-            "tag_name": tag, "target_commitish": sha(env("GITHUB_SHA")),
+            "tag_name": tag, "target_commitish": bin_main,
             "name": tag, "body": marker, "draft": True, "prerelease": False})
     if release["body"] != marker:
         raise ValueError("conflicting release; never overwrite")

@@ -117,11 +117,18 @@ install(FILES archive-fixture-config.cmake DESTINATION lib/cmake/archive-fixture
         try:
             safeio.sdk_zip(legacy_sdk, root/'rejected.zip')
         except ValueError as error:
-            if str(error) != 'workspace or debug tree in SDK':
+            # The legacy native-host export is invalid in two independent ways:
+            # it carries a Debug subtree and, on Windows, the default dynamic
+            # host triplet can also export DLLs. Either fail-closed guard may be
+            # reached first because packaging walks paths deterministically.
+            if str(error) not in {
+                'workspace or debug tree in SDK',
+                'shared target payload in static SDK',
+            }:
                 raise
         else:
-            raise AssertionError('SDK guard no longer rejects a Debug tree')
-        print('PUBLIC_HOST_DEBUG_REPRODUCED: unmodified SDK guard rejected real host Debug files.')
+            raise AssertionError('SDK guard no longer rejects the legacy dynamic/Debug host export')
+        print('PUBLIC_HOST_DEBUG_REPRODUCED: SDK guard rejected the real legacy dynamic/Debug host export.')
         # A clean installed root: never hide stale Debug products by deleting them.
         options = build_support.native_release_options([*common, '--x-install-root='+str(root/'installed')])
         run(build_support.install_command(executable,['archive-fixture'],options), 'install')

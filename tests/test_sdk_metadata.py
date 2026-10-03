@@ -38,6 +38,34 @@ class SdkMetadataTests(unittest.TestCase):
             safeio.extract_zip(root / 'a.zip', root / 'out')
             self.assertEqual(stat.S_IMODE((root / 'out/tool').stat().st_mode), 0o755)
 
+    def test_shared_target_payload_is_rejected_but_host_tools_are_not(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            sdk = root / 'sdk'
+            target_bin = sdk / 'installed/x64-windows-static-release/bin'
+            target_bin.mkdir(parents=True)
+            (target_bin / 'forbidden.dll').write_bytes(b'MZsynthetic')
+            with self.assertRaisesRegex(ValueError, 'shared target payload'):
+                safeio.sdk_zip(sdk, root / 'bad.zip')
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            sdk = root / 'sdk'
+            tools = sdk / 'installed/x64-windows-static-release/tools/example'
+            tools.mkdir(parents=True)
+            (tools / 'host-helper.dll').write_bytes(b'MZsynthetic')
+            safeio.sdk_zip(sdk, root / 'ok.zip')
+
+    def test_versioned_linux_shared_target_payload_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            sdk = root / 'sdk'
+            lib = sdk / 'installed/x64-linux-static-release/lib'
+            lib.mkdir(parents=True)
+            (lib / 'libforbidden.so.1').write_bytes(b'ELFsynthetic')
+            with self.assertRaisesRegex(ValueError, 'shared target payload'):
+                safeio.sdk_zip(sdk, root / 'bad.zip')
+
     def test_implementation_source_still_rejected(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp); sdk = root / 'sdk'; sdk.mkdir()

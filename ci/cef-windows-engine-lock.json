@@ -1,0 +1,50 @@
+{
+  "schema": 2,
+  "platform": "windows",
+  "vcpkg_commit": "39dccd415da14d8051559d66069019475d95787c",
+  "cef_recipe_commit": "03abd124ebe3b8a57fb78470a75b5aa3ce064e31",
+  "checkpoint": {
+    "run": 37007852614,
+    "attempt": 1,
+    "producer_sha": "312f6ca48ab6a26982a4bb21ec0e1514af38e859",
+    "artifact_id": 11237383883,
+    "artifact_sha256": "3a3788d8b2c6ed29daeba5ac357f751aa374a6b05ba9aab94591001165ea402f",
+    "summary_artifact_id": 11237488572,
+    "summary_artifact_sha256": "343ce6fe1876f7cf5bf295ad626c2f88a52973667dc6d92797421d004af518e3",
+    "build_key": "60a369f6b051ba651cb301af299e7dadcc99608d0db6894bccab87b953817602"
+  },
+  "source_repair": {
+    "schema": 2,
+    "id": "windows-v8-atomic-ref-v5",
+    "chromium_commit": "79460ebecaa5625e57a5fb679a735659e73dc687",
+    "v8_commit": "4323497a6a73839e6d5260f6acd7ec0212cb3321",
+    "corrections": [
+      {
+        "path": "net/websockets/websocket_handshake_challenge.h",
+        "before_sha256": "e9c2a8404032abb4080a5f6855ca396a5ecee841f017e932d49b9bbc2574e184",
+        "after_sha256": "38eb8b609bea01c37e3799feaba074c79f189568ff9b7df8c6943707433ef713"
+      },
+      {
+        "path": "ui/gfx/paint_vector_icon.h",
+        "before_sha256": "8e9d9819abc21afcd225345eb0ae679731b909e6f23fc4c2dc04ce1f66c6a58d",
+        "after_sha256": "89e65e86fa4d5de9a72567de96c41659b6610e02cb50a063942e458e0fda70cd"
+      },
+      {
+        "path": "components/autofill/core/common/form_field_data.cc",
+        "before_sha256": "0edba08fcad529c1980260493296da86db429684b98fdaf7765ae8c083397e32",
+        "after_sha256": "fd5dcc844aa6250b7b5bb702965e7abeba4cb57f655aec2ff43f078be471b490"
+      },
+      {
+        "path": "third_party/blink/renderer/platform/wtf/text/atomic_string.cc",
+        "before_sha256": "a4c0cc1f34fd6b692337331b8192096e77ada0a13a3b6c6598770bbb8711a871",
+        "after_sha256": "554274d3e6d39eb924fa276f1a747e26f54453a00c1e644dde9a1b7cc8cb5b42"
+      },
+      {
+        "path": "v8/src/heap/cppgc-internal/heap-object-header.h",
+        "before_sha256": "397f2555d0498e92eb5d40872e8066b1a08a9cba993a4457256b8fb0375251ee",
+        "after_sha256": "901a8ce9d296f6d3b701d348fc09478f31465e659e9925696dd358871757d94d"
+      }
+    ],
+    "implementation_sha256": "65919555d64211c29a5b47e6e638f8fcc3edc76f37073a827d804fe8726ed061"
+  }
+}

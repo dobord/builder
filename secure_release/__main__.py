@@ -7,7 +7,7 @@ from . import tasks, publish, process
 
 COMMANDS = {"request": tasks.request, "prepare": tasks.prepare, "build": tasks.build,
             "diagnostics": tasks.diagnostics, "cleanup": tasks.cleanup,
-            "notify": publish.notify, "verify": publish.verify_result, "publish": publish.publish_release}
+            "verify": publish.verify_result, "publish": publish.publish_release}
 
 
 def main():

@@ -1,0 +1,207 @@
+{
+  "archive_sha512": {
+    "ffmpeg": "c72f4062aecc16d8b2b1e8678d5efe3af4cfaa0cc7c0997052248f9e499e60c2463acf07877cf3b78b246ce3e8078cb043e8d97e90a6b50d06af32ff7369a788",
+    "xtrans": "c7037cb6d2fb641486a43c9203949edec2038735ba758f8556add63598dbb3205166a2ec272700639884b1952642c171806e3dab566722cadd4c71ca98c0a1bf"
+  },
+  "origins": {
+    "ports/ffmpeg/portfile.cmake": "fa73a16e0fe273395026ad65c15f9525e2253e8e",
+    "ports/ffmpeg/vcpkg.json": "c880e290922dc2584f42add0cf9625f14f119ce3",
+    "ports/xtrans/portfile.cmake": "ad27088aa3d7077c90c9990f0f8b6aaadd661ceb",
+    "ports/xtrans/symbols.patch": "2afcf5e84e64cafc846adade74bd4a3af77f5fcb",
+    "ports/xtrans/vcpkg.json": "961b2b3cc2c345e8f7c432532f09c152269905ae",
+    "ports/xtrans/win32.patch": "dee4c79d7329da8edacbe910dd78b944a66d39af"
+  },
+  "packages": {
+    "ffmpeg": {
+      "directory": "share/ffmpeg/examples",
+      "files": {
+        "Makefile": {
+          "blob": "dee9ebf2f0b004186e5e060d26cf501b3e6a58b4",
+          "sha256": "e2a4f8f5829caaf9c0f1cf93d28d944d5c8c79e760d4ce64d2eaf89df9f1bf2d",
+          "size": 2103
+        },
+        "README": {
+          "blob": "6cb4b6e17a2c65cab098e60573d4dddb5c21efbc",
+          "sha256": "62449d3a232b8cd634f6293afdac97330ce0b7a67130e1a126df8670c5ff87b4",
+          "size": 921
+        },
+        "avio_http_serve_files.c": {
+          "blob": "2aae3870c2d44a084a708cf3145a3b021b362f9f",
+          "sha256": "1a8e90bb702d32074bab2d5a72e7de1f077fdc7006d29db70e6e7e0984b2f929",
+          "size": 5250
+        },
+        "avio_list_dir.c": {
+          "blob": "bb19debad31b18897782811cbe35f4073be49d9a",
+          "sha256": "a9281301000b5ab55783ef134a5aa07fe187aee97d7891a721235a558f907d03",
+          "size": 4218
+        },
+        "avio_read_callback.c": {
+          "blob": "0a299b4c73919c9818db1596c8c53b3063d39c61",
+          "sha256": "6ac07cdbed4d7487208b701df024e0af4146f4f355382b8185f2d2faa63f893f",
+          "size": 4099
+        },
+        "decode_audio.c": {
+          "blob": "26ce07a552417ba47d2e33db8f18f04dbe32b3db",
+          "sha256": "5d9a16e09501b0d4767ab2733375f2ba4791f792caf2d92a28d36e505e6f1384",
+          "size": 7423
+        },
+        "decode_filter_audio.c": {
+          "blob": "67c8a14aab831c672c5e953b5b8f1ed16c227402",
+          "sha256": "95e4c398719f2016b2c4360457f30857649043cc73ebd14f994e520f7bc5bfe0",
+          "size": 11062
+        },
+        "decode_filter_video.c": {
+          "blob": "62ada4bca7e2bcab9b8a6e80de06616ebaec6679",
+          "sha256": "de4920497284507099c9108a89b8ccd5666c1f64214e66472194f439680bb9d7",
+          "size": 10385
+        },
+        "decode_video.c": {
+          "blob": "b0b3a6ae9288704577c95e91ffbc84c85a2b6363",
+          "sha256": "8e8a79d2e12e4318bee800093c3f9c9c31b348fbe0528b81f271ae0f6e3ffb2a",
+          "size": 5557
+        },
+        "demux_decode.c": {
+          "blob": "64f5547bc43685f296876a0bcf32c7c49bf3e200",
+          "sha256": "4720ebaa59c5756d336f51512d40c6a97ff702bcc05115c0bb3ba838a2b24c06",
+          "size": 13536
+        },
+        "encode_audio.c": {
+          "blob": "bb16683d946b055f371e66840e75c71f03c7d782",
+          "sha256": "a1018290570c728de2e933ab78f52e1ec88e2fc096a087ad8f036b1d5f8363b6",
+          "size": 6747
+        },
+        "encode_video.c": {
+          "blob": "4fae146f2e9fe3503902e23c48519a2a4de8182f",
+          "sha256": "c9b1c21af4f6af47c40d36391d03b4e1d920e9199c6aae98064fb648b620beb5",
+          "size": 6633
+        },
+        "extract_mvs.c": {
+          "blob": "b5ed2c55496f21a0c2c5aa5415ed69af9a74f9ca",
+          "sha256": "7b4ba185272866ee134d4594bd5a75903eeb85ab81a80e24a2c8b6944610b034",
+          "size": 6262
+        },
+        "filter_audio.c": {
+          "blob": "ad77bf1f897981e19aaac785a43629e32b347389",
+          "sha256": "5ce4d08d9eb229ff69bdf66e961fb24af83e28255758afdd6afc7ef36c7a27ad",
+          "size": 11899
+        },
+        "hw_decode.c": {
+          "blob": "ce1881476047400ccea26997cad4b9edd8124abf",
+          "sha256": "8aef9fe3ee5f053a3e0b0c367e8d495eca39b7b4f2144038962241519c3f3d88",
+          "size": 8130
+        },
+        "mux.c": {
+          "blob": "9b22c8dd1d215ad63a6526e99b8023845827e61b",
+          "sha256": "004253615fc144060706de954022d5a54514a84cb741f06ad0f38efbff4047fd",
+          "size": 20872
+        },
+        "qsv_decode.c": {
+          "blob": "ec911094808352f6eb995af6a7950aa21ec785db",
+          "sha256": "7611cb11d78973861f745c06494f6ef25b5824a65425e4350db2a93e8967cf6e",
+          "size": 7042
+        },
+        "qsv_transcode.c": {
+          "blob": "c3f507e8e643e95d998d38060b4f45db9149e285",
+          "sha256": "fa4dfa94139993b40162ccd148a2b562b6bcb23a630a660a3d363cc72c25ed48",
+          "size": 15250
+        },
+        "remux.c": {
+          "blob": "1f002987c571249f745f5ca91b656f90f562af22",
+          "sha256": "6a660dc43945bbddbb7a95c94362221a907e961f2682a9cd59f4fd67fd28d92d",
+          "size": 6563
+        },
+        "resample_audio.c": {
+          "blob": "db9b4e5e087e33f028ce0d938337934155b4e26b",
+          "sha256": "cb2eaba58e7d21e57367d0e925f254f06ea6b8368af0d17168417d1e8487f4b5",
+          "size": 8222
+        },
+        "scale_video.c": {
+          "blob": "cb4da4a5767dd3f7a685f16f08d91c479be792cf",
+          "sha256": "c56a52fc425bd0e47d5ee06e14f5127b614d9e75560eff02d345083df297ca0f",
+          "size": 5105
+        },
+        "show_metadata.c": {
+          "blob": "abe3cc0cae383ebc9312e93bc9863b49f0eafde7",
+          "sha256": "fe5315ac3fe6b82632fc0f51bbe5c63fee4fee9734d4b9221ed0c0c3787661ac",
+          "size": 2092
+        },
+        "transcode.c": {
+          "blob": "1dc1b50502e80c4e63d076fba3178cc13f7465e4",
+          "sha256": "e7af8e679304af34c8cd166f7f1e8fc1cf3a8f3de86b4e1cd98342fec6d84447",
+          "size": 24648
+        },
+        "transcode_aac.c": {
+          "blob": "20de08d93bf879ee4ed0d1d90fadd00beb1b24e8",
+          "sha256": "e95a94ffc5f8ded9c70edb5dba6ad0d9c5c4b34699f27d7f0973f09ded15a63f",
+          "size": 34225
+        },
+        "vaapi_encode.c": {
+          "blob": "330a6524ef8501e41391852b41680a26f124a300",
+          "sha256": "fc328f8273899bdba9a9be3ed7ee4f23c3fcc057b4fd01c251a32f6b6e9c6229",
+          "size": 7122
+        },
+        "vaapi_transcode.c": {
+          "blob": "e1b7a438836408cb0f1b8489188c36afa57c66f4",
+          "sha256": "4f2d1eed691d53d754c5c8beb3153ad549aebb4545627a55ceb50edbf5032b92",
+          "size": 9979
+        }
+      },
+      "version": "8.1.2"
+    },
+    "xtrans": {
+      "directory": "share/xtrans/include/X11/Xtrans",
+      "files": {
+        "Xtrans.c": {
+          "blob": "617084165cb1cb770a3074a1671704445beba7f6",
+          "sha256": "e62be534254bed75b56585264833db96b56dd525750e5c1bc3c2f9cd8fc0c963",
+          "size": 29698
+        },
+        "Xtrans.h": {
+          "blob": "5eb8694ebc080663bd9bbce16aea44996f57e1fd",
+          "sha256": "7a56f2d875d4e7bbfe1e2160975f2896da1c03be25314e307cdb3ddd2552fc3b",
+          "size": 9067
+        },
+        "Xtransint.h": {
+          "blob": "9cf67f585b6db01aab794b48b79c2d6e1d2f9ae3",
+          "sha256": "af05ce9763e34691f17e9c38a882995090748d5dc55f3102117817fdf54c8e1f",
+          "size": 10361
+        },
+        "Xtranslcl.c": {
+          "blob": "ba33bce38853569ddcb20611c785850e7096587a",
+          "sha256": "5894d9c6773e2fdb83df40a9fce504e3e3cf2f9bab7bb2a72ea0f63b611fd622",
+          "size": 32546
+        },
+        "Xtranssock.c": {
+          "blob": "b45eee4cec24f5cca171492d55338886083abfa5",
+          "sha256": "a177e239d24fdf04f60605056bbbb6df591dbd70050bf77f32dcacc04b792c1d",
+          "size": 63071
+        },
+        "Xtransutil.c": {
+          "blob": "2a13c7fdb9b35787473f42962b467532ce8b7092",
+          "sha256": "805e651a4770ec47f4086b5c8da894958f06a67668515008ae500a0635d3fdab",
+          "size": 14997
+        },
+        "transport.c": {
+          "blob": "b62fc7b64160bb591245f779266d3d5c0cdf8947",
+          "sha256": "e03dc3d37fd961a077de35dcca7c3fca0072870017bc45e78aa5920a23f95dcb",
+          "size": 2876
+        }
+      },
+      "version": "1.6.0"
+    }
+  },
+  "schema": 1,
+  "source_inputs": {
+    "ffmpeg_makefile": "4efed6b11d8ec62689f8a64e6ab8da5807cf4314",
+    "xtrans_makefile": "3a719f89217008633df265837e7ae95fbb5cc8a4",
+    "xtrans_unpatched": {
+      "Xtrans.c": "617084165cb1cb770a3074a1671704445beba7f6",
+      "Xtrans.h": "8cf0dafc0f85d58497fe609adef90ff8ca2a9325",
+      "Xtransint.h": "82c8755c861285461a5290b1125be5f8489ff824",
+      "Xtranslcl.c": "ba33bce38853569ddcb20611c785850e7096587a",
+      "Xtranssock.c": "4c7f80becc3e96023c6cc5c1444ae368dc1f0c9c",
+      "Xtransutil.c": "2aa4686255a841317eec09798aef9a62a79b0c76",
+      "transport.c": "b62fc7b64160bb591245f779266d3d5c0cdf8947"
+    }
+  }
+}

@@ -1,0 +1,414 @@
+name: lfc-ui FreeRDP regression qualification
+# Narrow packaging/link regression gate for the FreeRDP feature only.
+# Final product integration is qualified by Strict CEF combined SDK qualification,
+# whose release plan installs lfc-ui[cef,freerdp,lockfreecoro].
+on:
+  push:
+    branches:
+      - feature/cef-static-integration
+    paths:
+      - .github/workflows/lfc-ui-static-freerdp.yml
+permissions:
+  contents: read
+concurrency:
+  group: lfc-ui-static-freerdp-linux-1873bb62
+  cancel-in-progress: true
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: dobord/vcpkg
+          ref: 936bbb0e7cb7d6d10f8f5ef5874521466278c799
+          path: private-vcpkg
+          token: ${{ secrets.SOURCE_READ_TOKEN }}
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: microsoft/vcpkg
+          ref: 9e593bb18ea69cc5095e012465dcd675a822ed0d
+          path: private-vcpkg/.freerdp-upstream
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: dobord/lfc-ui
+          ref: 307afeab287b283514e036aa82ea1bd331dbac2a
+          path: private-lfc-ui
+          token: ${{ secrets.SOURCE_READ_TOKEN }}
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.12'
+      - name: Install hash-pinned CMake required by lfc-ui
+        run: |
+          python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r build-tools.lock
+          python - <<'PY'
+          import re, subprocess
+          out = subprocess.check_output(["cmake", "--version"], text=True)
+          match = re.search(r"cmake version ([0-9]+(?:\.[0-9]+){1,2})", out)
+          if not match or tuple(map(int, match.group(1).split("."))) < (3, 32):
+              raise SystemExit("LFC_UI_CMAKE_VERSION_TOO_OLD")
+          print("LFC_UI_CMAKE_TOOL_QUALIFIED version=" + match.group(1))
+          PY
+      - name: Install native static build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-14 g++-14 autoconf autoconf-archive automake libtool pkg-config ninja-build nasm yasm
+      - name: Prepare exact private lfc-ui source archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C private-vcpkg rev-parse HEAD)" = "936bbb0e7cb7d6d10f8f5ef5874521466278c799"
+          test "$(git -C private-vcpkg/.freerdp-upstream rev-parse HEAD)" = "9e593bb18ea69cc5095e012465dcd675a822ed0d"
+          test "$(git -C private-lfc-ui rev-parse HEAD)" = "307afeab287b283514e036aa82ea1bd331dbac2a"
+          mkdir -p private-vcpkg/.freerdp-upstream/downloads
+          git -C private-lfc-ui -c core.autocrlf=false archive --format=tar.gz             307afeab287b283514e036aa82ea1bd331dbac2a             -o "$GITHUB_WORKSPACE/private-vcpkg/.freerdp-upstream/downloads/lfc-ui-307afeab287b283514e036aa82ea1bd331dbac2a.tar.gz"
+      - name: Install and export lfc-ui freerdp feature
+        shell: bash
+        env:
+          CC: gcc-14
+          CXX: g++-14
+          VCPKG_DISABLE_METRICS: "1"
+          VCPKG_BINARY_SOURCES: clear
+        run: |
+          set -euo pipefail
+          upstream="$GITHUB_WORKSPACE/private-vcpkg/.freerdp-upstream"
+          export VCPKG_ROOT="$upstream"
+          export VCPKG_DOWNLOADS="$upstream/downloads"
+          bash "$upstream/bootstrap-vcpkg.sh" -disableMetrics >"$RUNNER_TEMP/lfc-ui-freerdp-bootstrap.log" 2>&1
+          installed="$RUNNER_TEMP/lfc-ui-freerdp-installed"
+          common=(
+            --triplet=x64-linux-static-release
+            --host-triplet=x64-linux-static-release
+            "--overlay-ports=$GITHUB_WORKSPACE/private-vcpkg/ports"
+            "--overlay-triplets=$GITHUB_WORKSPACE/private-vcpkg/triplets"
+            "--x-install-root=$installed"
+            --binarysource=clear
+          )
+          set +e
+          "$upstream/vcpkg" install 'lfc-ui[freerdp]' "${common[@]}" >"$RUNNER_TEMP/lfc-ui-freerdp-install.log" 2>&1
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ]; then
+            python - <<'PY'
+          import os, pathlib, re
+          runner = pathlib.Path(os.environ["RUNNER_TEMP"])
+          workspace = pathlib.Path(os.environ["GITHUB_WORKSPACE"])
+          install_text = (runner / "lfc-ui-freerdp-install.log").read_text(errors="replace")
+          buildtrees = workspace / "private-vcpkg/.freerdp-upstream/buildtrees"
+
+          package = "unknown"
+          for pattern in (
+              r"error: building ([a-z0-9][a-z0-9+_.-]*):x64-linux-static-release",
+              r"([a-z0-9][a-z0-9+_.-]*):x64-linux-static-release failed",
+              r"BUILD_FAILED[^\n]*?([a-z0-9][a-z0-9+_.-]+):x64-linux-static-release",
+          ):
+              match = re.search(pattern, install_text, re.I)
+              if match:
+                  package = match.group(1).lower()
+                  break
+          root = buildtrees / (package if package != "unknown" else "lfc-ui")
+
+          reported_names = []
+          for name in re.findall(r"([A-Za-z0-9_.+~-]+\.log)", install_text):
+              if name not in reported_names:
+                  reported_names.append(name)
+          terminal_files = []
+          if root.is_dir():
+              for name in reported_names[-12:]:
+                  matches = [
+                      p for p in root.rglob(name)
+                      if p.is_file() and not any(
+                          part in {"CMakeScratch", "CMakeTmp"}
+                          or part.startswith("TryCompile")
+                          for part in p.parts
+                      )
+                  ]
+                  if matches:
+                      terminal_files.append(max(matches, key=lambda p: p.stat().st_mtime))
+              if not terminal_files:
+                  terminal_files = sorted(
+                      [p for p in root.rglob("*.log")
+                       if p.is_file() and p.stat().st_size <= 16 * 1024**2
+                       and not any(
+                           part in {"CMakeScratch", "CMakeTmp"}
+                           or part.startswith("TryCompile")
+                           for part in p.parts
+                       )],
+                      key=lambda p: p.stat().st_mtime,
+                      reverse=True,
+                  )[:12]
+          terminal_text = "\n".join(
+              p.read_text(errors="replace")[-524288:] for p in terminal_files
+          )
+          diagnostic_text = terminal_text + "\n" + install_text[-1048576:]
+
+          category = "unknown"
+          details = []
+          cmake_version = re.search(
+              r"CMake\s+([0-9]+(?:\.[0-9]+){1,2})\s+or higher is required"
+              r"[\s\S]{0,240}?running version\s+([0-9]+(?:\.[0-9]+){1,2})",
+              diagnostic_text,
+              re.I,
+          )
+          target_missing = re.search(
+              r'(?:link interface of target|Target)\s+"([^"]+)"[\s\S]{0,320}?'
+              r'([A-Za-z0-9_.+-]+::[A-Za-z0-9_.+-]+)[\s\S]{0,220}?target was not found',
+              diagnostic_text, re.I,
+          )
+          pkgconfig_missing = re.search(
+              r"Package\s+['\"]?([A-Za-z0-9+_.-]+)['\"]?,\s+required by[^\n]*not found",
+              diagnostic_text, re.I,
+          )
+          cmake_package = re.search(
+              r'Could not find a package configuration file provided by\s+["\']?([A-Za-z0-9+_.-]+)',
+              diagnostic_text, re.I,
+          )
+          cmake_not_found = re.search(
+              r"Could NOT find\s+([A-Za-z0-9+_.-]+)(?:\s|$)",
+              diagnostic_text, re.I,
+          )
+          referenced_target = re.search(
+              r"(?:imported targets are referenced, but are missing:|links to:)\s*"
+              r"[\"']?([A-Za-z0-9_.:+-]+)",
+              diagnostic_text, re.I,
+          )
+          missing_path = re.search(
+              r'(?:includes non-existent path|references the file)\s*["\']([^"\'\r\n]+)',
+              diagnostic_text, re.I,
+          )
+          if cmake_version:
+              category = "cmake-version"
+              details.append("cmake_required=" + cmake_version.group(1))
+              details.append("cmake_running=" + cmake_version.group(2))
+          elif re.search(r"(patch failed|does not apply|corrupt patch)", install_text, re.I):
+              category = "patch"
+          elif target_missing:
+              category = "missing-target"
+              owner = target_missing.group(1)
+              target = target_missing.group(2)
+              if re.fullmatch(r"[A-Za-z0-9_.+-]{1,120}", owner):
+                  details.append("owner_target=" + owner)
+              if re.fullmatch(r"[A-Za-z0-9_.:+-]{1,160}", target):
+                  details.append("missing_target=" + target)
+          elif pkgconfig_missing:
+              category = "missing-pkgconfig"
+              token = pkgconfig_missing.group(1).lower()
+              if re.fullmatch(r"[a-z0-9+_.-]+", token):
+                  details.append("missing_pkgconfig=" + token)
+          elif cmake_package:
+              category = "missing-cmake-package"
+              token = cmake_package.group(1).lower()
+              if re.fullmatch(r"[a-z0-9+_.-]+", token):
+                  details.append("missing_package=" + token)
+          elif cmake_not_found:
+              category = "missing-cmake-package"
+              token = cmake_not_found.group(1).lower()
+              if re.fullmatch(r"[a-z0-9+_.-]+", token):
+                  details.append("missing_package=" + token)
+          elif referenced_target:
+              category = "missing-target"
+              target = referenced_target.group(1)
+              if re.fullmatch(r"[A-Za-z0-9_.:+-]{1,160}", target):
+                  details.append("missing_target=" + target)
+          elif missing_path:
+              category = "missing-path"
+              name = pathlib.PurePosixPath(
+                  missing_path.group(1).replace("\\", "/")
+              ).name
+              if re.fullmatch(r"[A-Za-z0-9_.+-]{1,160}", name):
+                  details.append("missing_path=" + name)
+          elif re.search(r"CMake Error", diagnostic_text):
+              category = "cmake-error"
+          elif re.search(r"(FAILED:|ninja: build stopped|undefined reference|collect2: error)", diagnostic_text, re.I):
+              category = "build-error"
+
+          cmake_error = re.search(
+              r"CMake Error at ([^:\r\n]+):(\d+)\s+\(([^)]+)\)",
+              diagnostic_text,
+          )
+          if cmake_error:
+              source = pathlib.PurePosixPath(
+                  cmake_error.group(1).replace("\\", "/")
+              ).name
+              command = cmake_error.group(3)
+              if re.fullmatch(r"[A-Za-z0-9_.+-]{1,120}", source):
+                  details.append("cmake_source=" + source)
+              if re.fullmatch(r"[A-Za-z0-9_.+-]{1,80}", command):
+                  details.append("cmake_command=" + command)
+          if reported_names:
+              details.append("reported_logs=" + ",".join(reported_names[-6:]))
+          if terminal_files:
+              name = terminal_files[0].name
+              if re.fullmatch(r"[A-Za-z0-9_.+~-]{1,120}", name):
+                  details.append("lfcui_terminal_log=" + name)
+
+          ffmpeg_root = buildtrees / "ffmpeg"
+          if ffmpeg_root.is_dir():
+              candidates = sorted(
+                  [p for p in ffmpeg_root.rglob("*.log") if p.is_file()],
+                  key=lambda p: p.stat().st_mtime,
+                  reverse=True,
+              )[:12]
+              merged = "\n".join(p.read_text(errors="replace")[-262144:] for p in candidates)
+              token = None
+              for pattern in (
+                  r"ERROR:\s*([A-Za-z0-9+_.-]+)\s+not found",
+                  r"ERROR:\s*([A-Za-z0-9+_.-]+)\s+requested",
+                  r"Package\s+([A-Za-z0-9+_.-]+)\s+was not found",
+                  r"Dependency\s+([A-Za-z0-9+_.-]+)\s+not found",
+              ):
+                  match = re.search(pattern, merged, re.I)
+                  if match and re.fullmatch(r"[A-Za-z0-9+_.-]+", match.group(1)):
+                      token = match.group(1).lower()
+                      break
+              if token:
+                  details.append("ffmpeg_dependency=" + token)
+          if not re.fullmatch(r"[a-z0-9][a-z0-9+_.-]*|unknown", package):
+              package = "unknown"
+          print(
+              f"LFC_UI_FREERDP_INSTALL_FAILURE package={package} category={category}"
+              + (" " + " ".join(details) if details else "")
+          )
+          PY
+            exit "$rc"
+          fi
+          status_file="$installed/vcpkg/status"
+          if [ ! -f "$status_file" ]; then
+            echo "LFC_UI_FREERDP_STATUS_MISSING" >&2
+            exit 1
+          fi
+          if ! grep -Eq '^Package: ffmpeg$' "$status_file"; then
+            echo "LFC_UI_FREERDP_FFMPEG_PACKAGE_MISSING" >&2
+            exit 1
+          fi
+          if grep -Eq '^Package: libdvdcss$' "$status_file"; then
+            echo "LFC_UI_FREERDP_UNEXPECTED_DVD_GRAPH" >&2
+            exit 1
+          fi
+          freerdp_cache="$(find "$GITHUB_WORKSPACE/private-vcpkg/.freerdp-upstream/buildtrees/freerdp" -type f -name 'config-*-CMakeCache.txt.log' -print -quit)"
+          if [ -z "$freerdp_cache" ] || ! grep -Eq '^WITH_FFMPEG:BOOL=ON$' "$freerdp_cache"; then
+            echo "LFC_UI_FREERDP_FFMPEG_OPTION_DISABLED" >&2
+            exit 1
+          fi
+          export_root="$RUNNER_TEMP/lfc-ui-freerdp-export"
+          mkdir -p "$export_root"
+          set +e
+          "$upstream/vcpkg" export lfc-ui freerdp ffmpeg "${common[@]}"             --raw --output=sdk "--output-dir=$export_root" >"$RUNNER_TEMP/lfc-ui-freerdp-export.log" 2>&1
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ]; then
+            echo "LFC_UI_FREERDP_EXPORT_FAILURE" >&2
+            exit "$rc"
+          fi
+          sdk="$export_root/sdk"
+          mkdir -p "$sdk/triplets"
+          cp "$GITHUB_WORKSPACE/private-vcpkg/triplets/x64-linux-static-release.cmake" "$sdk/triplets/"
+          prefix="$sdk/installed/x64-linux-static-release"
+          if find "$prefix" -type f \( -name '*.so' -o -name '*.so.*' -o -name '*.dll' -o -name '*.dylib' \) -print -quit | grep -q .; then
+            echo "LFC_UI_FREERDP_SHARED_TARGET_PAYLOAD" >&2
+            exit 1
+          fi
+          python - "$sdk" "$installed" "$upstream/buildtrees" "$upstream/packages" <<'PY'
+          import pathlib, sys
+          sdk = pathlib.Path(sys.argv[1]).resolve()
+          needles = [str(pathlib.Path(value).resolve()) for value in sys.argv[2:]]
+          hits = []
+          for path in sdk.rglob("*"):
+              if (not path.is_file() or path.is_symlink()
+                      or path.suffix.lower() not in {".cmake", ".pc", ".la"}
+                      or path.stat().st_size > 16 * 1024**2):
+                  continue
+              text = path.read_text(encoding="utf-8", errors="replace")
+              if any(needle in text for needle in needles):
+                  hits.append(path.relative_to(sdk).as_posix())
+          if hits:
+              names = ",".join(pathlib.PurePosixPath(item).name for item in hits[:12])
+              raise SystemExit(
+                  f"LFC_UI_FREERDP_NONRELOCATABLE_METADATA count={len(hits)} files={names}"
+              )
+          PY
+          rm -rf "$installed"
+          if [ -e "$installed" ]; then
+            echo "LFC_UI_FREERDP_PRODUCER_INSTALL_ROOT_PRESENT" >&2
+            exit 1
+          fi
+          echo "LFC_UI_FREERDP_SDK=$sdk" >> "$GITHUB_ENV"
+      - name: Link relocated FreeRDP proxy and server probe
+        shell: bash
+        env:
+          CC: gcc-14
+          CXX: g++-14
+        run: |
+          set -euo pipefail
+          src="$RUNNER_TEMP/lfc-ui-freerdp-probe"
+          build="$RUNNER_TEMP/lfc-ui-freerdp-probe-build"
+          mkdir -p "$src"
+          cat >"$src/main.cpp" <<'CPP'
+          #include <lfc/ui/platform/freerdp_proxy/freerdp_proxy_platform.hpp>
+          #include <lfc/ui/platform/freerdp_server/freerdp_server_platform.hpp>
+          #include <freerdp/server/proxy/proxy_server.h>
+          #include <freerdp/server/shadow.h>
+          int main() {
+            lfc::ui::FreeRdpProxyConfig proxy{};
+            lfc::ui::FreeRdpServerConfig server{};
+            return (proxy.desktopWidth > 0 && server.desktopWidth > 0) ? 0 : 1;
+          }
+          CPP
+          cat >"$src/CMakeLists.txt" <<'CMAKE'
+          cmake_minimum_required(VERSION 3.31)
+          project(lfc_ui_freerdp_probe LANGUAGES C CXX)
+          set(CMAKE_CXX_STANDARD 23)
+          find_package(lfc-ui CONFIG REQUIRED)
+          foreach(t IN ITEMS freerdp freerdp-client freerdp-server freerdp-server-proxy freerdp-shadow lfc::ui)
+            if(NOT TARGET ${t})
+              message(FATAL_ERROR "missing target ${t}")
+            endif()
+          endforeach()
+          if(TARGET PkgConfig::LFC_UI_HARFBUZZ)
+            foreach(_property IN ITEMS INTERFACE_LINK_LIBRARIES INTERFACE_LINK_OPTIONS)
+              get_target_property(_items PkgConfig::LFC_UI_HARFBUZZ ${_property})
+              if(_items AND "${_items}" MATCHES "(^|;)(stdc\\+\\+|-lstdc\\+\\+|[^;]*libstdc\\+\\+\\.(a|so([^;]*)))(;|$)")
+                message(FATAL_ERROR "LFC_UI_FREERDP_HARFBUZZ_CXX_RUNTIME_LEAK property=${_property}")
+              endif()
+            endforeach()
+          endif()
+          add_executable(lfc_ui_freerdp_probe main.cpp)
+          target_link_libraries(lfc_ui_freerdp_probe PRIVATE lfc::ui)
+          target_link_options(lfc_ui_freerdp_probe PRIVATE -static-libstdc++ -static-libgcc)
+          CMAKE
+          cmake -S "$src" -B "$build" -G Ninja             "-DCMAKE_TOOLCHAIN_FILE=$LFC_UI_FREERDP_SDK/scripts/buildsystems/vcpkg.cmake"             -DVCPKG_TARGET_TRIPLET=x64-linux-static-release             -DVCPKG_HOST_TRIPLET=x64-linux-static-release             -DVCPKG_MANIFEST_MODE=OFF
+          cmake --build "$build" --parallel 2 --verbose 2>&1 | tee "$RUNNER_TEMP/lfc-ui-freerdp-probe-build.log"
+          "$build/lfc_ui_freerdp_probe"
+          readelf_log="$RUNNER_TEMP/lfc-ui-freerdp-readelf.log"
+          readelf -d "$build/lfc_ui_freerdp_probe" >"$readelf_log"
+          python - "$readelf_log" <<'PY'
+          import pathlib, re, sys
+          text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace")
+          needed = re.findall(r"\(NEEDED\).*?Shared library:\s*\[([^\]]+)\]", text)
+          forbidden = re.compile(
+              r"^(?:libfreerdp|libwinpr|libavcodec|libavformat|libavutil|libavfilter|"
+              r"libswscale|libswresample|libstdc\+\+|libgcc_s)",
+              re.I,
+          )
+          hits = sorted({name for name in needed if forbidden.search(name)})
+          if hits:
+              raise SystemExit(
+                  "LFC_UI_FREERDP_SHARED_RUNTIME_DEPENDENCY names=" + ",".join(hits)
+              )
+          print("LFC_UI_FREERDP_DT_NEEDED names=" + ",".join(needed))
+          PY
+          echo "LFC_UI_STATIC_FREERDP_QUALIFIED"
+      - name: Build encrypted diagnostic artifact
+        if: always()
+        uses: ./.github/actions/encrypted-logs
+        with:
+          public_key_b64: ${{ secrets.BUILDER_ENCRYPTED_LOGS_PUBLIC_KEY_B64 }}
+          roots: |
+            ${{ runner.temp }}
+            ${{ github.workspace }}/private-vcpkg/.freerdp-upstream/buildtrees

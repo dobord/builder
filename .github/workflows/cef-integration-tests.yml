@@ -1,0 +1,72 @@
+name: CEF integration contracts
+on:
+  push:
+    branches: [feature/cef-static-integration]
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  contracts:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.12'
+      - name: Install hash-pinned test dependencies
+        run: |
+          python -m pip install --require-hashes --only-binary=:all: -r requirements.lock
+          python -m pip install --require-hashes --only-binary=:all: -r build-tools.lock
+      - name: Compile Python modules before running expensive tests
+        run: python -m compileall -q secure_release tests
+      - name: Activate native x64 MSVC for archive-format regression
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $vs) { throw 'Native MSVC installation is required' }
+          cmd /d /c "`"$vs\Common7\Tools\VsDevCmd.bat`" -arch=x64 -host_arch=x64 >nul && set" | ForEach-Object {
+            if ($_ -match '^(Path|INCLUDE|LIB|LIBPATH|VSINSTALLDIR|VCINSTALLDIR|VCToolsInstallDir|WindowsSdkDir|WindowsSDKVersion|UniversalCRTSdkDir|UCRTVersion|VSCMD_[^=]+)=(.*)$') {
+              "$($matches[1])=$($matches[2])" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            }
+          }
+          if ($LASTEXITCODE -ne 0) { throw 'MSVC environment activation failed' }
+      - name: Test builder contracts with real disposable Tink keys and native archives
+        env:
+          REQUIRE_TINK_TESTS: '1'
+          REQUIRE_NATIVE_ARCHIVE_AUDIT: '1'
+        run: python -m secure_release.logged_run --output "${{ runner.temp }}/builder-contract-tests.log" -- python -m unittest discover -s tests -v
+      - name: Fetch exact public CEF integration recipe
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: dobord/cef
+          ref: 6a36621ea5493a94d7e79dc388746bbb8829b1d2
+          path: cef-recipe
+          persist-credentials: false
+      - name: Test pinned CEF contracts
+        working-directory: cef-recipe
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python -m secure_release.logged_run --output "${{ runner.temp }}/cef-integration-tests.log" -- python -m unittest discover -s vcpkg/integration/tests -v
+      - name: Test pinned CEF static platform contracts
+        if: runner.os == 'Linux'
+        working-directory: cef-recipe
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python -m secure_release.logged_run --output "${{ runner.temp }}/cef-static-platform-tests.log" -- python -m unittest discover -s vcpkg/static/tests -p "test_platform_*.py" -v
+      - name: Build encrypted diagnostic artifact
+        if: always()
+        uses: ./.github/actions/encrypted-logs
+        with:
+          public_key_b64: ${{ secrets.BUILDER_ENCRYPTED_LOGS_PUBLIC_KEY_B64 }}
+          roots: |
+            ${{ runner.temp }}
+            ${{ github.workspace }}/cef-recipe
