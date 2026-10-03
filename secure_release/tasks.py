@@ -44,7 +44,10 @@ def _artifact_selector(client: Client, platform: str, run: int, attempt: int,
     if platform not in cef_contract.TRIPLETS or kind not in {"cef-checkpoint", "vcpkg-binaries"}:
         raise ValueError("invalid CEF continuation selector")
     producer = client.get(f"/repos/{BUILDER}/actions/runs/{run}/attempts/{attempt}")
-    check_run(producer, BUILDER, "build-release.yml", builder_sha, attempt,
+    workflow = build_workflow(producer.get("path", ""))
+    if platform not in BUILD_WORKFLOWS[workflow]:
+        raise ValueError("continuation platform differs from producer workflow")
+    check_run(producer, BUILDER, workflow, builder_sha, attempt,
               "workflow_dispatch", success=False)
     if producer.get("status") != "completed":
         raise ValueError("CEF continuation producer is still running")
@@ -71,7 +74,8 @@ def _artifact_selector(client: Client, platform: str, run: int, attempt: int,
     return matches[0] if matches else None
 
 
-def _apply_continuation(plan: dict, inputs: dict, builder_sha: str, client: Client) -> dict:
+def _apply_continuation(plan: dict, inputs: dict, builder_sha: str, client: Client,
+                        platforms: tuple[str, ...] = ("linux", "windows")) -> dict:
     """Turn explicit run/attempt inputs into authenticated source-resume selectors."""
     if plan.get("version") != 2 or plan.get("cef", {}).get("profile") != "static-third-party":
         raise ValueError("CEF continuation requires the signed strict source profile")
@@ -80,6 +84,8 @@ def _apply_continuation(plan: dict, inputs: dict, builder_sha: str, client: Clie
     for platform in cef_contract.TRIPLETS:
         run_text = str(inputs.get(platform + "_builder_run", "")).strip()
         attempt_text = str(inputs.get(platform + "_builder_attempt", "")).strip()
+        if platform not in platforms and (run_text or attempt_text):
+            raise ValueError("unrequested continuation platform")
         if bool(run_text) != bool(attempt_text):
             raise ValueError("CEF continuation run and attempt must be supplied together")
         if not run_text:
@@ -127,19 +133,29 @@ def request():
     plan = crypto.parse(crypto.unb64(record["content"].replace("\n", "")))
     validate_plan(plan)
     builder = Client(env("BUILDER_DISPATCH_TOKEN"))
-    if continuation_inputs is not None:
+    scope = os.environ.get("SDK_RELEASE_PLATFORMS", "all")
+    if scope not in {"all", "linux"}:
+        raise ValueError("unsupported requested release scope")
+    workflow = "build-linux-release.yml" if scope == "linux" else "build-release.yml"
+    platforms = BUILD_WORKFLOWS[workflow]
+    if continuation_inputs is not None and any(
+        str(continuation_inputs.get(p + suffix, "")).strip()
+        for p in cef_contract.TRIPLETS for suffix in ("_builder_run", "_builder_attempt")
+    ):
         cache_reader = Client(env("BUILDER_CACHE_READ_TOKEN"))
-        plan = _apply_continuation(plan, continuation_inputs, builder_sha, cache_reader)
+        plan = _apply_continuation(plan, continuation_inputs, builder_sha, cache_reader, platforms)
     created = int(time.time())
     rid, salt = str(uuid.uuid4()), crypto.b64(os.urandom(32))
     payload = {"version": 1, "release_id": rid, "salt": salt, "source_sha": source_sha, "source_tag": tag,
                "request_run": number(env("GITHUB_RUN_ID")), "request_attempt": number(env("GITHUB_RUN_ATTEMPT")),
                "builder_sha": builder_sha, "output_key": crypto.fingerprint(env("ARTIFACT_ENCRYPTION_PUBLIC_KEY")),
                "input_key": crypto.fingerprint(env("BUILDER_INPUT_PUBLIC_KEY")), "created": created, "expires": created + 172800,
-               "source_id": IDS[SOURCE], "builder_id": IDS[BUILDER], "bin_id": IDS[BIN], "plan": plan}
+                "source_id": IDS[SOURCE], "builder_id": IDS[BUILDER], "bin_id": IDS[BIN], "plan": plan}
+    if scope == "linux":
+        payload.update(version=2, platforms=["linux"])
     document = crypto.sign(payload, env("REQUEST_SIGNING_PRIVATE_KEY"))
     encrypted = crypto.seal_message(crypto.canonical(document), env("BUILDER_INPUT_PUBLIC_KEY"), message_context(rid, salt))
-    answer = builder.dispatch(BUILDER, "build-release.yml", {"release_id": rid, "salt": salt, "request": encrypted})
+    answer = builder.dispatch(BUILDER, workflow, {"release_id": rid, "salt": salt, "request": encrypted})
     with open(env("GITHUB_STEP_SUMMARY"), "a", encoding="utf-8") as summary:
         summary.write(f"Accepted release request `{rid}`. Builder run: {answer['workflow_run_id']}\n")
 
@@ -154,6 +170,9 @@ def _open_request() -> tuple[dict, dict]:
             or payload["input_key"] != crypto.fingerprint(crypto.public_text(env("BUILDER_INPUT_PRIVATE_KEY")))
             or payload["output_key"] != crypto.fingerprint(env("ARTIFACT_ENCRYPTION_PUBLIC_KEY"))):
         raise ValueError("request does not match local policy")
+    workflow = os.environ.get("SDK_BUILD_WORKFLOW", "build-release.yml")
+    if workflow not in BUILD_WORKFLOWS or release_platforms(payload) != BUILD_WORKFLOWS[workflow]:
+        raise ValueError("signed platform selection differs from builder workflow")
     return document, payload
 
 
@@ -278,6 +297,10 @@ def build():
             or payload["builder_sha"] != env("GITHUB_SHA") or payload["builder_sha"] != env("BUILDER_COMMIT_SHA")
             or payload["output_key"] != crypto.fingerprint(env("ARTIFACT_ENCRYPTION_PUBLIC_KEY"))):
         raise ValueError("input bundle mismatch")
+    workflow = os.environ.get("SDK_BUILD_WORKFLOW", "build-release.yml")
+    if (workflow not in BUILD_WORKFLOWS or release_platforms(payload) != BUILD_WORKFLOWS[workflow]
+            or platform not in release_platforms(payload)):
+        raise ValueError("build platform is not authorized by the signed request")
     cfg = payload["plan"].get("cef")
     if cfg is not None:
         cef_build.require_source_capacity(root, cfg, platform)
@@ -298,7 +321,12 @@ def build():
         recipe_archive = downloads / f"cef-static-{revision}.tar.gz"
         safeio.extract_tar(recipe_archive, root / "cef-recipe")
         source_ports.append({"name": "cef-static", "sha": revision})
-    build_support.protect_source_archives(root / "workspace", downloads, source_ports)
+    linux_sources = None
+    if workflow == "build-linux-release.yml" and cfg is not None:
+        from . import linux_sdk
+        linux_sources = linux_sdk.capture_sources(root, payload["plan"])
+    guarded_ports = [p for p in source_ports if linux_sources is None or p["name"] != "cef-static"]
+    build_support.protect_source_archives(root / "workspace", downloads, guarded_ports)
     environment = build_support.build_environment(clean_env(), downloads, upstream)
     def execute(args, *, stage, timeout, cwd=upstream):
         run(args, log, cwd=cwd, environment=environment, stage=stage, timeout=timeout, public_progress=True)
@@ -318,6 +346,7 @@ def build():
     packages = payload["plan"]["platforms"][platform]["packages"]
     binary_cache = None
     cache_key = None
+    linux_native = None
     if cfg is not None:
         binary_cache = root / "binary-cache"
         cache_key = cef_build.binary_key(payload["plan"]["upstream_sha"], platform, env("GITHUB_SHA"),
@@ -332,16 +361,28 @@ def build():
         platform_probe = cef_build.capture_platform_dependencies(
             root, cfg, platform, execute, executable, args, binary_cache)
         platform_sha256 = platform_probe["sha256"] if platform_probe is not None else None
+        profile_args = {"linux_sdk_profile": True} if linux_sources is not None else {}
         if not cef_build.run_engine(root, cfg, platform, execute, environment, input_private,
-                                    env("GITHUB_SHA"), platform_probe):
+                                    env("GITHUB_SHA"), platform_probe, **profile_args):
             _persist_binary_cache(binary_cache, cache_key, platform, input_private)
             return  # Persisted checkpoint + completed packages; never an installed/published SDK.
+        if linux_sources is not None:
+            linux_native = linux_sdk.prepare_install(root, cfg, platform_probe, upstream, triplets)
+            args = ["--overlay-triplets=" + str(linux_native["triplets"])
+                    if a.startswith("--overlay-triplets=") else a for a in args]
+            build_support.protect_source_archives(root / "workspace", downloads,
+                                                  [{"name": "cef-static", "sha": cfg["recipe_commit"]}])
     # Preserve downloads through the entire graph. Remove them at final job cleanup.
     try:
         execute(build_support.install_command(executable, packages, args, binary_cache=binary_cache), stage="install", timeout=14400)
     finally:
         _persist_binary_cache(binary_cache, cache_key, platform, input_private)
     input_private = None
+    linux_review = None
+    linux_publication = workflow == "build-linux-release.yml" and cfg is not None
+    if linux_publication:
+        from . import linux_sdk
+        linux_review = linux_sdk.prepare(root, installed, upstream, linux_sources, linux_native, platform_probe)
     export = root / "export"
     export.mkdir()
     export_packages = sorted({p.split("[", 1)[0] for p in packages})
@@ -349,19 +390,27 @@ def build():
     sdk = export / "sdk"
     build_support.copy_export_triplet(sdk, triplets, triplet)
     package = root / "sdk.zip"
-    safeio.sdk_zip(sdk, package)
+    source_review = None
+    if linux_review is not None:
+        source_review = linux_sdk.package(root, sdk, package, linux_review, platform_probe)
+    else:
+        safeio.sdk_zip(sdk, package)
     safeio.extract_zip(package, root / "consumer-sdk")
     source = root / "workspace" / payload["plan"]["smoke_path"]
     out = root / "smoke-build"
     configure = build_support.consumer_configure_command(source, out, root / "consumer-sdk", triplet)
     if cfg is not None:
         configure.append("-DCEF_STATIC_SMOKE_SOURCE=" + str(root / "cef-recipe/vcpkg/ports/cef-static/smoke.c"))
+        if platform == "linux":
+            from . import cef_consumer_linker
+            configure.append(cef_consumer_linker.cmake_flag())
     execute(configure, stage="consumer-configure", timeout=600)
     execute(["cmake", "--build", str(out), "--config", "Release", "--parallel", "2"], stage="consumer-build", timeout=1800)
     execute(["ctest", "--test-dir", str(out), "-C", "Release", "--output-on-failure", "--timeout", "60"], stage="consumer-test", timeout=180)
     cef_proof = cef_build.verify_consumer(
         root, cfg, platform, execute, platform_sha256, platform_probe
     ) if cfg is not None else None
+    cpp_proof = linux_sdk.verify_cpp(root, root / "consumer-sdk", linux_review, execute) if linux_review is not None else None
     platform_preflight = None
     if cfg is not None and cfg["profile"] == "static-third-party" and platform == "linux":
         if platform_probe is None:
@@ -382,6 +431,9 @@ def build():
                            "profile": cfg["profile"], "consumer": cef_proof}
         if platform_preflight is not None:
             manifest["cef"]["platform_preflight"] = platform_preflight
+        if cpp_proof is not None:
+            manifest["cef"]["cpp_consumer"] = cpp_proof
+            manifest["cef"]["sdk_sources"] = source_review
     (bundle / "manifest.json").write_bytes(crypto.canonical(manifest))
     safeio.pack_tar(bundle, root / "result.tgz")
     context = file_context(payload["release_id"], payload["salt"], int(env("GITHUB_RUN_ID")), int(env("GITHUB_RUN_ATTEMPT")), env("GITHUB_SHA"), "sdk", platform)

@@ -17,6 +17,7 @@ import subprocess
 import tempfile
 
 CEF_RECIPE = "2aff22e09daaa5c28780c5766a70ee13e61c93b6"
+CPP_RECIPE = "5075d283e95aeee33cbd4dca755ce08e6e82c57e"
 CHROMIUM = "79460ebecaa5625e57a5fb679a735659e73dc687"
 RECIPE_BLOB = "b23ac3604fb2021f2fd5f91f311f5b233605185d"
 EXPAT_BLOB = "9ad36d41f159d817fa932e632f23205709265e37"
@@ -152,7 +153,16 @@ def _stage(path: Path, data: bytes) -> Path:
 
 
 
-def prepare_restore(recipe_file: Path, package: Path) -> dict:
+def _check_recipe(repository: Path, authenticated_revision: str | None) -> None:
+    if authenticated_revision is None:
+        if _head(repository) != CEF_RECIPE:
+            raise ValueError("Native-link source revision changed")
+    elif authenticated_revision != CPP_RECIPE:
+        raise ValueError("Unreviewed authenticated native-link recipe")
+
+
+def prepare_restore(recipe_file: Path, package: Path, *,
+                    authenticated_revision: str | None = None) -> dict:
     """Recreate one of two reviewed recipe states, never rewrite an identity.
 
     Call only AFTER the existing transport has authenticated the checkpoint.
@@ -164,8 +174,10 @@ def prepare_restore(recipe_file: Path, package: Path) -> dict:
     """
     recipe_file = recipe_file.absolute()
     repo = recipe_file.parents[3].resolve(strict=True)
-    if _head(repo) != CEF_RECIPE:
-        raise ValueError("Restore recipe revision changed")
+    # Source-release archives have no .git. Their revision is authenticated by
+    # the signed request and encrypted source bundle; complete recipe hashes
+    # below still bind the checkpoint to the exact original/patched bytes.
+    _check_recipe(repo, authenticated_revision)
     recipe_file = _regular(recipe_file, repo)
     raw = recipe_file.read_bytes()
     patched = reviewed_output(raw, RECIPE_BLOB, patch_recipe, unpatch_recipe, "CEF recipe")
@@ -233,14 +245,16 @@ def prepare_restore(recipe_file: Path, package: Path) -> dict:
             "recorded_recipe_matched": True, "runtime_verified": False}
 
 
-def install(recipe_file: Path, source: Path) -> dict:
+def install(recipe_file: Path, source: Path, *,
+            authenticated_revision: str | None = None) -> dict:
     """Validate both complete inputs before atomically replacing either one."""
     recipe_file = recipe_file.absolute()
     source = source.resolve(strict=True)
     recipe_repo = recipe_file.parents[3].resolve(strict=True)
     if recipe_repo.is_symlink() or source.is_symlink():
         raise ValueError("Redirected native-link repository")
-    if _head(recipe_repo) != CEF_RECIPE or _head(source) != CHROMIUM:
+    _check_recipe(recipe_repo, authenticated_revision)
+    if _head(source) != CHROMIUM:
         raise ValueError("Native-link source revision changed")
 
     recipe_file = _regular(recipe_file, recipe_repo)

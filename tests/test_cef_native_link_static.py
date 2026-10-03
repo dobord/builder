@@ -126,6 +126,34 @@ class NativeLinkTransformTests(unittest.TestCase):
 
 
 class NativeLinkInstallTests(unittest.TestCase):
+    def test_authenticated_cpp_archive_still_requires_exact_sources(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            recipe = root / 'cef/vcpkg/ports/cef-static/source_build.py'
+            source = root / 'chromium'
+            expat = source / 'third_party/expat/BUILD.gn'
+            recipe.parent.mkdir(parents=True)
+            expat.parent.mkdir(parents=True)
+            recipe_bytes = ('prefix\n' + native._RECIPE_OLD + 'suffix\n').encode()
+            expat_bytes = (native._EXPAT_IMPORT_OLD + native._EXPAT_OLD).encode()
+            recipe.write_bytes(recipe_bytes)
+            expat.write_bytes(expat_bytes)
+            with (mock.patch.object(native, 'RECIPE_BLOB', native.git_blob(recipe_bytes)),
+                  mock.patch.object(native, 'EXPAT_BLOB', native.git_blob(expat_bytes)),
+                  mock.patch.object(native, '_head', return_value=native.CHROMIUM) as head):
+                with self.assertRaises(ValueError):
+                    native.install(recipe, source, authenticated_revision='0'*40)
+                self.assertEqual(recipe.read_bytes(), recipe_bytes)
+                result = native.install(recipe, source, authenticated_revision=native.CPP_RECIPE)
+                self.assertEqual(result['changed_files'], 2)
+                head.assert_called_once_with(source)
+                recipe.write_bytes(recipe.read_bytes() + b'tampered\n')
+                with self.assertRaises(ValueError):
+                    native.install(recipe, source, authenticated_revision=native.CPP_RECIPE)
+                head.return_value = '0'*40
+                with self.assertRaisesRegex(ValueError, 'source revision changed'):
+                    native.install(recipe, source, authenticated_revision=native.CPP_RECIPE)
+
     def test_install_validates_both_files_before_writing_and_is_idempotent(self):
         with tempfile.TemporaryDirectory() as directory:
             # Windows TEMP can use an 8.3 alias; install() resolves repository roots.
@@ -318,6 +346,20 @@ class CheckpointRecipeTests(unittest.TestCase):
         self.assertFalse(native.prepare_restore(self.recipe, self.package)["changed"])
         self.assertEqual(self.recipe.stat().st_mtime_ns, stamp)
         self.assertFalse(report["runtime_verified"])
+
+    def test_authenticated_cpp_archive_keeps_complete_checkpoint_fingerprint(self):
+        with mock.patch.object(native, '_head', side_effect=AssertionError('Archive has no Git metadata')):
+            recorded = self.record.read_bytes()
+            report = native.prepare_restore(self.recipe, self.package,
+                                            authenticated_revision=native.CPP_RECIPE)
+            self.assertEqual(report['profile'], 'native-link-v1')
+            self.assertEqual(self.reference_fingerprint(self.repo), self.new_hash)
+            self.assertEqual(self.record.read_bytes(), recorded)
+            support = self.recipe.parent / 'cpp_support/config.cmake'
+            support.write_bytes(support.read_bytes() + b'tampered\n')
+            with self.assertRaisesRegex(ValueError, 'unreviewed recipe state'):
+                native.prepare_restore(self.recipe, self.package,
+                                       authenticated_revision=native.CPP_RECIPE)
 
     def test_old_checkpoint_remains_usable_without_identity_rewrite(self):
         import json

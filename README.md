@@ -43,6 +43,7 @@ Public artifact sizes, timing and opaque release/run IDs are observable.
 - `fetch_sdk_local.py`: LOCAL-only download, verification and decryption of completed SDK artifacts.
 - `.github/workflows/ci.yml`: PUBLIC synthetic tests only; disposable PUBLIC test keys protect no private data.
 - `.github/workflows/build-release.yml`: real encrypted release build, disabled until configured.
+- `.github/workflows/build-linux-release.yml`: Linux-only static SDK build, with no Windows job or matrix; see [Linux release stages](docs/linux-static-release.md).
 - `.github/workflows/request-publication.yml`: verify/decrypt in one builder job and publish directly to `vcpkg-bin`; no destination Actions.
 
 All actions are pinned by full SHA; crypto dependencies and CMake are wheel-only

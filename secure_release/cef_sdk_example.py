@@ -64,13 +64,16 @@ def record(data: bytes) -> dict:
     return {"size": len(data), "sha256": hashlib.sha256(data).hexdigest()}
 
 
-def capture(lfc_ui: Path, registry: Path) -> dict:
+def capture(lfc_ui: Path, registry: Path, *, proxy_blob: str | None = None,
+            port_blob: str | None = None) -> dict:
     """Run before source guards modify portfiles; no artifact drives this review."""
-    require(blob(read(registry / "ports/lfc-ui/portfile.cmake")) == PORT_BLOB,
+    require(blob(read(registry / "ports/lfc-ui/portfile.cmake")) == (port_blob or PORT_BLOB),
             "Pinned lfc-ui example installation policy changed")
     roots = {"lfc_ui": lfc_ui, "registry": registry}
     review = {}
     for name, (owner, source, expected) in ORIGINS.items():
+        if name == "freerdp_proxy_web_engine_view_cef.cpp" and proxy_blob is not None:
+            expected = proxy_blob
         data = read(roots[owner] / source)
         require(blob(data) == expected, "Pinned canonical SDK example source changed")
         review[name] = record(data)

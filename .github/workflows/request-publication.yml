@@ -1,7 +1,7 @@
 name: Verify and publish encrypted SDK
 on:
   workflow_run:
-    workflows: ['Build static SDK']
+    workflows: ['Build static SDK', 'Build static Linux SDK']
     branches: [main]
     types: [completed]
 permissions: {}
@@ -38,7 +38,7 @@ jobs:
       - name: Install hash-pinned cryptographic libraries
         run: |
           python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r requirements.lock
-      - name: Verify exact builder attempt and decrypt both SDKs without executing them
+      - name: Verify exact builder attempt and decrypt its signed platform selection without executing SDKs
         id: verify
         env:
           BUILDER_READ_TOKEN: ${{ github.token }}

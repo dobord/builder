@@ -22,6 +22,8 @@ PORT_BLOB = "e43bfd9210d3216aa082b67c08ffa5022230bdbb"
 EXPORT_BLOB = "4df4b0def55df1cccbc55b7a4693f2ef22aefd91"
 PLATFORM_EXPORT_BLOB = "fe02df393bf7c5eaf9abb7cda530131c555deda7"
 INSTALL_BLOB = "3709f72555d2837e553d93647653784dcc3b620b"
+CPP_EXPORT_BLOB = "76bf639fcbe5113e8bc8df860d7864ad759aceab"
+CPP_INSTALL_BLOB = "8681896b1ca1b78c168c3fe39c16d1f2c9a99f2e"
 PATCH_NAME = "qualified-native-profile.patch"
 OUT_NAME = "CEF_Static_Platform_Release_x64"
 SOURCE_BUILD = "vcpkg/ports/cef-static/source_build.py"
@@ -41,8 +43,9 @@ def one(text: str, before: str, after: str) -> str:
     return text.replace(before, after, 1)
 
 
-def patch_export(raw: bytes) -> bytes:
-    require(native.git_blob(raw) == EXPORT_BLOB, "Pinned CEF exporter changed")
+def patch_export(raw: bytes, *, cpp_client: bool = False) -> bytes:
+    require(native.git_blob(raw) == (CPP_EXPORT_BLOB if cpp_client else EXPORT_BLOB),
+            "Pinned CEF exporter changed")
     text = raw.decode("utf-8")
     text = one(text, '    from platform_export import prepare as prepare_platform\n',
                '    from qualified_platform_export import prepare as prepare_platform, OS_LIBRARIES\n')
@@ -57,7 +60,7 @@ def patch_export(raw: bytes) -> bytes:
     return text.encode("utf-8")
 
 
-def recipe_payload(recipe: Path, spec: dict) -> tuple[dict[str, bytes], dict[str, bytes]]:
+def recipe_payload(recipe: Path, spec: dict, *, cpp_client: bool = False) -> tuple[dict[str, bytes], dict[str, bytes]]:
     raw_source = codecs.regular(recipe, SOURCE_BUILD).read_bytes()
     patched_source = native.reviewed_output(raw_source, native.RECIPE_BLOB,
                                            native.patch_recipe, native.unpatch_recipe, "CEF recipe")
@@ -66,13 +69,13 @@ def recipe_payload(recipe: Path, spec: dict) -> tuple[dict[str, bytes], dict[str
     require(native.git_blob(codecs.regular(recipe, "vcpkg/static/platform_export.py").read_bytes())
             == PLATFORM_EXPORT_BLOB, "Pinned platform export policy changed")
     require(native.git_blob(codecs.regular(recipe, "vcpkg/integration/install.cmake").read_bytes())
-            == INSTALL_BLOB, "Pinned CEF installer changed")
+            == (CPP_INSTALL_BLOB if cpp_client else INSTALL_BLOB), "Pinned CEF installer changed")
     spec_bytes = codecs.canonical(spec)
     helper = Path(exporter.__file__).read_text(encoding="utf-8")
     helper = one(helper, 'SPEC_SHA256 = "GENERATED_QUALIFIED_BINDINGS_SHA256"',
                  'SPEC_SHA256 = "' + hashlib.sha256(spec_bytes).hexdigest() + '"')
     before = {SOURCE_BUILD: original_source, EXPORT: original_export, POLICY: b"", SPEC: b""}
-    after = {SOURCE_BUILD: patched_source, EXPORT: patch_export(original_export),
+    after = {SOURCE_BUILD: patched_source, EXPORT: patch_export(original_export, cpp_client=cpp_client),
              POLICY: helper.encode("utf-8"), SPEC: spec_bytes}
     for name in (SOURCE_BUILD, EXPORT, POLICY):
         compile(after[name], name, "exec")
@@ -159,14 +162,14 @@ def _stage(path: Path, data: bytes) -> Path:
 
 
 def materialize(port: Path, recipe: Path, source: Path, manifest: Path,
-                prefix: Path, expected: str) -> dict:
+                prefix: Path, expected: str, *, authenticated_revision: str | None = None) -> dict:
     """Write all semantic files BEFORE vcpkg computes ABI or executes a port."""
-    require(native._head(recipe) == native.CEF_RECIPE, "CEF recipe revision changed")
+    native._check_recipe(recipe, authenticated_revision)
     portfile = codecs.regular(port, "portfile.cmake")
     raw = portfile.read_bytes()
     require(native.git_blob(raw) == PORT_BLOB, "Unreviewed acquisition port before materialization")
     spec = collect_bindings(source, manifest, prefix, expected)
-    before, after = recipe_payload(recipe, spec)
+    before, after = recipe_payload(recipe, spec, cpp_client=authenticated_revision is not None)
     patch = make_patch(before, after)
     modified_port = patch_port(raw, after)
     target = port / PATCH_NAME

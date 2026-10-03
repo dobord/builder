@@ -17,6 +17,27 @@ SHA = re.compile(r"[0-9a-f]{40}")
 TAG = re.compile(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
 NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 PACKAGE = re.compile(r"[a-z0-9-]+(?:\[[a-z0-9,-]+\])?")
+BUILD_WORKFLOWS = {
+    "build-release.yml": ("linux", "windows"),
+    "build-linux-release.yml": ("linux",),
+}
+
+
+def release_platforms(payload: dict) -> tuple[str, ...]:
+    if type(payload.get("version")) is not int:
+        raise ValueError("invalid request version")
+    if payload["version"] == 1 and "platforms" not in payload:
+        return BUILD_WORKFLOWS["build-release.yml"]
+    if payload["version"] == 2 and payload.get("platforms") == ["linux"]:
+        return BUILD_WORKFLOWS["build-linux-release.yml"]
+    raise ValueError("invalid signed platform selection")
+
+
+def build_workflow(path: str) -> str:
+    for name in BUILD_WORKFLOWS:
+        if path.split("@", 1)[0] == ".github/workflows/" + name:
+            return name
+    raise ValueError("unsupported builder workflow")
 
 
 def env(name: str) -> str:
@@ -106,9 +127,12 @@ def validate_plan(plan: dict):
 def verified(document: dict, public: str, *, allow_expired: bool = False) -> dict:
     payload = crypto.verify(document, public)
     required = {"version", "release_id", "salt", "source_sha", "source_tag", "request_run", "request_attempt",
-                "builder_sha", "output_key", "input_key", "created", "expires", "source_id", "builder_id", "bin_id", "plan"}
-    if set(payload) != required or payload["version"] != 1:
+                 "builder_sha", "output_key", "input_key", "created", "expires", "source_id", "builder_id", "bin_id", "plan"}
+    if payload.get("version") == 2:
+        required.add("platforms")
+    if set(payload) != required:
         raise ValueError("invalid request schema")
+    release_platforms(payload)
     identifiers(payload["release_id"], payload["salt"])
     sha(payload["source_sha"]); sha(payload["builder_sha"])
     if not TAG.fullmatch(payload["source_tag"]) or (payload["source_id"], payload["builder_id"], payload["bin_id"]) != (IDS[SOURCE], IDS[BUILDER], IDS[BIN]):

@@ -112,11 +112,14 @@ def write_output(name: str, value: bool) -> None:
 
 
 def run_engine(root: Path, cfg: dict, platform: str, execute, environment: dict,
-               input_private: str, revision: str, platform_probe: dict | None = None) -> bool:
+                input_private: str, revision: str, platform_probe: dict | None = None,
+                *, linux_sdk_profile: bool = False) -> bool:
     """Return False only for a clean, persisted unfinished compilation slice."""
     cef_contract.validate(cfg)
     selected = cfg["platforms"][platform]
     strict = cfg["profile"] == "static-third-party"
+    if linux_sdk_profile and (not strict or platform != "linux"):
+        raise ValueError("Native Linux SDK profile requires strict Linux source compilation")
     if selected["mode"] == "release-import":
         if strict:
             raise ValueError("Strict CEF profiles require source-built engines")
@@ -156,7 +159,12 @@ def run_engine(root: Path, cfg: dict, platform: str, execute, environment: dict,
     if selected["mode"] == "source-resume":
         restored = root / "cef-restored-checkpoint"
         cef_cache.fetch(Client(os.environ["BUILD_CACHE_READ_TOKEN"]), selected["checkpoint"], restored,
-                        platform=platform, kind="cef-checkpoint", key=key, revision=revision, private=input_private)
+                         platform=platform, kind="cef-checkpoint", key=key, revision=revision, private=input_private)
+        if linux_sdk_profile:
+            from . import cef_native_link_static
+            cef_native_link_static.prepare_restore(
+                recipe / "vcpkg/ports/cef-static/source_build.py", restored,
+                authenticated_revision=cfg["recipe_commit"])
         if platform_probe is not None:
             shutil.rmtree(Path(platform_probe["prefix"]))
             Path(platform_probe["manifest"]).unlink()
@@ -176,7 +184,10 @@ def run_engine(root: Path, cfg: dict, platform: str, execute, environment: dict,
              "--work", str(work), "--logs", str(logs)], stage="preflight", timeout=10800, cwd=recipe)
     if platform == "linux":
         execute(["sudo", str(work / "download/chromium/src/build/install-build-deps.sh"),
-                 "--no-prompt", "--no-arm", "--no-chromeos-fonts"], stage="preflight", timeout=1800, cwd=recipe)
+                  "--no-prompt", "--no-arm", "--no-chromeos-fonts"], stage="preflight", timeout=1800, cwd=recipe)
+    if linux_sdk_profile:
+        from . import linux_sdk
+        linux_sdk.prepare_engine(root, cfg, environment)
     state = logs / "iteration.json"
     failure = None
     try:

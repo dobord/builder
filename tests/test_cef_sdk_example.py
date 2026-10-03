@@ -95,6 +95,20 @@ class ExampleTests(unittest.TestCase):
                     example.capture(self.lfc, self.registry)
                 path.write_bytes(data)
 
+    def test_linux_proxy_review_preserves_legacy_identity_and_port_guard(self):
+        proxy = self.lfc / 'examples/freerdp_proxy_web_engine_view_cef.cpp'
+        fixed = b'// Reviewed stack-canary fix\n' + proxy.read_bytes()
+        proxy.write_bytes(fixed)
+        with self.assertRaisesRegex(ValueError, 'Pinned canonical'):
+            example.capture(self.lfc, self.registry)
+        reviewed_blob = example.blob(fixed)
+        review = example.capture(self.lfc, self.registry, proxy_blob=reviewed_blob)
+        self.assertEqual(review[proxy.name], example.record(fixed))
+        port = self.registry / 'ports/lfc-ui/portfile.cmake'
+        port.write_bytes(b'# RELEASE_ARCHIVE_GUARD\n' + port.read_bytes())
+        with self.assertRaisesRegex(ValueError, 'installation policy changed'):
+            example.capture(self.lfc, self.registry, proxy_blob=reviewed_blob)
+
     def test_installed_and_relocated_sidecars_cannot_change(self):
         for name in FIXTURES:
             path = self.dest / name; data = path.read_bytes()
