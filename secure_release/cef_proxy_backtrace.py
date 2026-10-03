@@ -26,6 +26,8 @@ KILL_GRACE_SECONDS = 5
 _PREFIX = "lfc_ui_freerdp_cef_backtrace_"
 _BEGIN = "BUILDER_PROXY_GDB_BEGIN"
 _END = "BUILDER_PROXY_GDB_END"
+_STATE_BEGIN = "BUILDER_PROXY_MACHINE_STATE_BEGIN"
+_STATE_END = "BUILDER_PROXY_MACHINE_STATE_END"
 _DOMAINS = (
     ("logger", ("lfc::ui::detail::logImpl", "__vfprintf_internal", "vfprintf", "fprintf")),
     ("cef", ("CefExecuteProcess", "CefInitialize", "cef_execute_process", "cef_initialize")),
@@ -93,6 +95,19 @@ def command(executable: Path, config: Path, env: dict[str, str]) -> list[str]:
         "-ex", "run",
         "-ex", 'printf "BUILDER_GDB_PC_ZERO=%d\\n", $pc == 0',
         "-ex", "thread apply all bt 32",
+        # A stack alone cannot distinguish an ABI mismatch from another fault
+        # inside the same CEF entry point. Keep fixed read-only machine-state
+        # commands in the same bounded, encrypted diagnostic stream. Never
+        # call inferior functions or interpolate paths into debugger commands.
+        "-ex", f"echo {_STATE_BEGIN}\\n",
+        "-ex", "frame 0",
+        "-ex", "info registers rip rdi rsi rdx rcx r8 r9 rsp rbp",
+        "-ex", "x/16i $pc",
+        "-ex", "disassemble /r",
+        "-ex", "frame 1",
+        "-ex", "disassemble /r",
+        "-ex", "frame 0",
+        "-ex", f"echo {_STATE_END}\\n",
         "-ex", "kill",
         "-ex", f"echo {_END}\\n",
         "--args", str(executable), str(config),
@@ -193,7 +208,20 @@ def capture(executable: Path, cwd: Path, env: dict[str, str], log: Path,
                     if any(marker in frames_text for marker in markers):
                         category = domain
                         break
+    # Report only presence/counts. Registers, instructions and addresses must
+    # never leave the encrypted diagnostic stream or become qualification gates.
+    machine = text.partition(_STATE_BEGIN + "\n")[2].partition(_STATE_END + "\n")[0]
+    instruction_count = len(re.findall(
+        r"^\s*(?:=>\s*)?0x[0-9a-fA-F]+\s+(?:<[^>\r\n]+>)?:\s+", machine, re.M
+    ))
+    machine_complete = bool(
+        complete and segv and _STATE_BEGIN + "\n" in text and _STATE_END + "\n" in text
+        and re.search(r"^rip\s+0x[0-9a-fA-F]+\b", machine, re.M)
+        and instruction_count > 0
+    )
     result = {
+        "machine_state_complete": machine_complete,
+        "machine_state_instruction_count": instruction_count,
         "gdb_returncode": code, "class": category, "capture_status": status,
         "invocation_profile": "proxy-config-xvfb", "inferior_argument_count": 1,
         "config_sha256": config_before[1], "executable_sha256": executable_before[1],
