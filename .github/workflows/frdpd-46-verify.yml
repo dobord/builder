@@ -1,5 +1,5 @@
 name: FRDPD issue 46 encrypted package qualification
-# Requalify with correct disposable-copy ownership; keep Git checks enabled.
+# Strict fortified build and direct production string-boundary regressions.
 on:
   push:
     branches: [test/frdpd-46-installed-window-20261003]
@@ -10,8 +10,8 @@ concurrency:
   group: frdpd-46-${{ github.sha }}
   cancel-in-progress: false
 env:
-  SOURCE_SHA: '36a095e5a8e7687a4b97d8efdd889b485bac034c'
-  SOURCE_TREE: '8d5690403bc62e4dea42322ce5af6840be742364'
+  SOURCE_SHA: '7e9e1492f4930d930873ef4ae3bbe88defa9f984'
+  SOURCE_TREE: '4bc55fe6a65d6091b363f4db14d587899b4c15da'
   ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
 jobs:
   qualification:
@@ -60,7 +60,7 @@ jobs:
                   original = api['docker']
                   def verified(name, script, timeout=900):
                       script = script.replace('-DWITH_FRDPD_STRICT_WARNINGS=ON', '-DWITH_FRDPD_STRICT_WARNINGS=ON -DWITH_VERBOSE_WINPR_ASSERT=OFF')
-                      script = script.replace('GfxPolicy|ZGfxHistory', 'GfxPolicy|GfxSender|WindowCodec|WindowPixelOracle|SceneSubscribe|CursorAdapter|FrameScheduler|FramePipeline|WindowExchange|PipelineStages|ZGfxHistory')
+                      script = script.replace('GfxPolicy|ZGfxHistory', 'GfxPolicy|GfxSender|WindowCodec|WindowPixelOracle|SceneSubscribe|InstalledManifest|SesmandStringBounds|CursorAdapter|FrameScheduler|FramePipeline|WindowExchange|PipelineStages|ZGfxHistory')
                       script = script.replace('X11WindowTracker|RemoteAppContract', 'X11WindowTracker|X11WindowCapture|X11WindowCompositor|SceneV2.*|WindowLease|X11ImageConvert|GraphicsControl|DamageState|SharedBuffer|NativePath|SurfaceManager|WindowRegistry|SurfaceIntegration|RemoteAppContract')
                       if name == 'focused':
                           script = "grep -q '^#define WITH_GFX_H264' /opt/freerdp-build/include/freerdp/config.h && " + script
@@ -72,7 +72,7 @@ jobs:
                       status = original(name, script, timeout)
                       if name == 'focused' and status == 0:
                           original('manifest-unit', 'python3 /src/server/frdp/test/TestFreeRDPFrdpInstalledManifest.py -v', 60)
-                          original('component-repeat', 'ctest --test-dir /opt/freerdp-build --no-tests=error --output-on-failure --verbose --timeout 120 --repeat until-fail:10 -R "^TestFreeRDPFrdp(WindowPixelOracle|SceneSubscribe|WindowCodec|GfxSender|FramePipeline|WindowExchange|PipelineStages|FrameScheduler|SurfaceManager|WindowRegistry)$"', 300)
+                          original('component-repeat', 'ctest --test-dir /opt/freerdp-build --no-tests=error --output-on-failure --verbose --timeout 120 --repeat until-fail:10 -R "^TestFreeRDPFrdp(WindowPixelOracle|SceneSubscribe|WindowCodec|GfxSender|FramePipeline|WindowExchange|PipelineStages|FrameScheduler|SurfaceManager|WindowRegistry|InstalledManifest|SesmandStringBounds)$"', 300)
                           original('agent-stop-repeat', 'ctest --test-dir /opt/freerdp-build --no-tests=error --output-on-failure --verbose --timeout 120 --repeat until-fail:30 -R "^TestFreeRDPFrdpAgentStop$"', 600)
                       return status
                   api['main'].__globals__['docker'] = verified
