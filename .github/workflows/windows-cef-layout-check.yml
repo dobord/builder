@@ -28,8 +28,7 @@ jobs:
                    'src/objects/js-interceptor-map-inl.h', 'src/objects/map.h', 'src/objects/map.tq',
                    'src/objects/object-macros.h', 'src/objects/tagged-member.h',
                    'src/torque/implementation-visitor.cc', 'src/torque/types.cc',
-                   'src/torque/types.h', 'src/torque/type-oracle.cc', 'src/torque/declarable.h',
-                   'src/torque/field-offset-generator.cc', 'src/torque/field-offset-generator.h']
+                   'src/torque/types.h', 'src/torque/type-oracle.cc', 'src/torque/declarable.h']
           for path in paths:
               request = urllib.request.Request('https://raw.githubusercontent.com/v8/v8/' + commit + '/' + path, headers={'User-Agent':'builder-public-source-check'})
               data = urllib.request.urlopen(request, timeout=60).read()
