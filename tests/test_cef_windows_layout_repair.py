@@ -164,17 +164,19 @@ class TorqueLayoutRepairTests(unittest.TestCase):
     def apply(self, origin='legacy'):
         return repair.apply(self.work, self.key, origin)
 
-    def test_full_public_source_and_only_parent_start_changed(self):
+    def test_full_public_source_and_only_reviewed_generator_edits(self):
         raw = self.path.read_bytes()
         self.assertEqual(hashlib.sha1(b'blob '+str(len(raw)).encode()+b'\0'+raw).hexdigest(),
                          '08caa5038e4416c68df79e4a6283599da6fd8c4f')
         self.assertEqual(hashlib.sha256(raw).hexdigest(), repair.TORQUE_BEFORE)
         fixed = repair.transform(raw, repair.TORQUE_SOURCE)
-        old, new = repair.CORRECTIONS[-1][3][0]
-        self.assertEqual(fixed.replace(new,old,1),raw)
-        self.assertEqual(raw.count(b'static_assert('),fixed.count(b'static_assert('))
-        tail=b'void CppClassGenerator::GenerateCppObjectLayoutDefinitionAsserts()'
-        self.assertEqual(raw[raw.index(tail):],fixed[fixed.index(tail):])
+        restored = fixed
+        for old, new in reversed(repair.CORRECTIONS[-1][3]):
+            self.assertEqual(restored.count(new), 1)
+            restored = restored.replace(new, old, 1)
+        self.assertEqual(restored, raw)
+        self.assertEqual(fixed.count(b'static_assert('), raw.count(b'static_assert(') + 1)
+        new = repair.CORRECTIONS[-1][3][0][1]
         self.assertIn(b'parent && parent->IsLayoutDefinedInCpp() && parent->HasStaticSize()',fixed)
         self.assertNotIn(b'JSInterceptorMap',new)  # No class-specific magic offset.
 

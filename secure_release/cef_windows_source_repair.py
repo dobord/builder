@@ -37,7 +37,7 @@ HEAP_BEFORE = "397f2555d0498e92eb5d40872e8066b1a08a9cba993a4457256b8fb0375251ee"
 HEAP_AFTER = "901a8ce9d296f6d3b701d348fc09478f31465e659e9925696dd358871757d94d"
 TORQUE_SOURCE = "download/chromium/src/v8/src/torque/implementation-visitor.cc"
 TORQUE_BEFORE = "bb857f343d860a65c111e9e178df67d3f9cf251f92eaa017202265a533c63abe"
-TORQUE_AFTER = "e1bba1f74d36cbbb9bcdd8810f6f2e91ea9197fd6ab6e3a98d07f2787b035359"
+TORQUE_AFTER = "c53c5fda569a1d033cbdeb6213fb49474b714afa8fb1d750243e3193f1b951a3"
 # Ordered, closed set of corrections; no caller-selected paths or patches.
 CORRECTIONS = (
     (HEADER, BEFORE, AFTER, (
@@ -67,8 +67,15 @@ CORRECTIONS = (
         (b'std::atomic_ref(const_cast<uint16_t&>(half)).load(memory_order)',
          b'std::atomic_ref<uint16_t>(const_cast<uint16_t&>(half)).load(memory_order)'),
     )),
-    (TORQUE_SOURCE, TORQUE_BEFORE, TORQUE_AFTER, ((b'    if (type->IsLayoutDefinedInCpp()) {\n      return "sizeof(" + parent_name + ")";\n    }\n',
-         b'    if (type->IsLayoutDefinedInCpp()) {\n      // A packed subclass may reuse its parent\'s tail padding on the MS ABI.\n      // Use Torque\'s fixed logical size, as TypeVisitor does, rather than the\n      // standalone C++ sizeof. Keep the layout assertions independent of C++.\n      if (parent && parent->IsLayoutDefinedInCpp() && parent->HasStaticSize()) {\n        return std::to_string(*parent->size().SingleValue());\n      }\n      return "sizeof(" + parent_name + ")";\n    }\n'),)),
+    (TORQUE_SOURCE, TORQUE_BEFORE, TORQUE_AFTER, (
+        (b'    if (type->IsLayoutDefinedInCpp()) {\n      return "sizeof(" + parent_name + ")";\n    }\n',
+         b'    if (type->IsLayoutDefinedInCpp()) {\n      // A packed subclass may reuse its parent\'s tail padding on the MS ABI.\n      // Use Torque\'s fixed logical size, as TypeVisitor does, rather than the\n      // standalone C++ sizeof. Keep the layout assertions independent of C++.\n      if (parent && parent->IsLayoutDefinedInCpp() && parent->HasStaticSize()) {\n        return std::to_string(*parent->size().SingleValue());\n      }\n      return "sizeof(" + parent_name + ")";\n    }\n'),
+        (b'          << "::" << f.name_and_type.name << " in C++ do not match\\");\\n";\n',
+         b'          << "::" << f.name_and_type.name << " in C++ do not match\\");\\n";\n    if (!f.index.has_value()) {\n      // Check the data extent independently so tail-padding rounding cannot\n      // hide a wrong scalar field width, including the final base-class byte.\n      impl_ << "  static_assert(" << field_offset << "End + 1 == "\n            << cpp_field_offset << " + sizeof(" << name_ << "::"\n            << f.name_and_type.name << "_));\\n";\n    }\n'),
+        (b'    impl_ << "  static_assert(kSize == sizeof(" + name_ + "));\\n";\n',
+         b'    // Torque\'s kSize is the logical data end. A standalone C++ object also\n    // includes tail padding required by its alignment, unlike a base subobject.\n    // Keep an equality check for the entire object, including that padding.\n    impl_ << "  static_assert((kSize + alignof(" << name_\n          << ") - 1) / alignof(" << name_ << ") * alignof(" << name_\n          << ") == sizeof(" << name_ << "));\\n";\n'),
+    )),
+
 
 )
 BASE_KEY = "60a369f6b051ba651cb301af299e7dadcc99608d0db6894bccab87b953817602"
@@ -85,7 +92,7 @@ LEGACY = {
 
 def profile() -> dict:
     return {
-        "schema": 2, "id": "windows-torque-packed-parent-v6",
+        "schema": 2, "id": "windows-torque-tail-size-v7",
         "chromium_commit": CHROMIUM,
         "v8_commit": V8,
         "corrections": [
