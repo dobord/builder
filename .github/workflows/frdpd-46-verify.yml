@@ -1,4 +1,5 @@
 name: FRDPD issue 46 encrypted package qualification
+# Requalify with correct disposable-copy ownership; keep Git checks enabled.
 on:
   push:
     branches: [test/frdpd-46-installed-window-20261003]
