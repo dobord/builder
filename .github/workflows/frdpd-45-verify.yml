@@ -9,8 +9,8 @@ concurrency:
   group: frdpd-45-${{ github.sha }}
   cancel-in-progress: false
 env:
-  SOURCE_SHA: '0218c070cebd755bc2cfe6638f087804a8ffaa3f'
-  SOURCE_TREE: '409b0e0d84c702a00b6c53b71f330d9cb84f72ba'
+  SOURCE_SHA: 'c1df99b5faad2912883c3433d8f35beb32ca16e2'
+  SOURCE_TREE: 'de580a26a39ca50d240d2c8241dff42a461e781f'
   ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
 jobs:
   regression:
@@ -56,11 +56,15 @@ jobs:
               original_run = api['run']
               def verified_run(name, args, *, env=None, timeout=900):
                   status = original_run(name, args, env=env, timeout=timeout)
-                  if status == 0 and name in ('e2e-xorg-dummy', 'e2e-xorg-native'):
+                  if name in ('e2e-xorg-dummy', 'e2e-xorg-native'):
+                      if status:
+                          raise RuntimeError('Layered pixel qualification failed; inspect encrypted diagnostics')
                       repeat_env = dict(env)
                       repeat_env['FRDP_E2E_ARTIFACTS'] = str(root / (name + '-repeat'))
                       repeat_env['COMPOSE_PROJECT_NAME'] += '-repeat'
-                      original_run(name + '-repeat', args, env=repeat_env, timeout=timeout)
+                      repeated = original_run(name + '-repeat', args, env=repeat_env, timeout=timeout)
+                      if repeated:
+                          raise RuntimeError('Repeated layered pixel qualification failed; inspect encrypted diagnostics')
                   return status
               def verified(name, script, timeout=900):
                   script = script.replace('-DWITH_FRDPD_STRICT_WARNINGS=ON', '-DWITH_FRDPD_STRICT_WARNINGS=ON -DWITH_VERBOSE_WINPR_ASSERT=OFF')
@@ -89,6 +93,12 @@ jobs:
               (root / 'verification.json').write_text(json.dumps(proof, indent=2))
           sys.exit(rc)
           PY
+      - name: Transfer protected Docker diagnostics to collector ownership
+        if: always()
+        run: |
+          if test -d "$RUNNER_TEMP/review-validation"; then
+            sudo chown -R --no-dereference "$(id -u):$(id -g)" "$RUNNER_TEMP/review-validation"
+          fi
       - name: Encrypt diagnostics with existing Tink envelope code
         if: always()
         run: |
