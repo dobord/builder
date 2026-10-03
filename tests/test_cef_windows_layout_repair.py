@@ -268,16 +268,14 @@ class TorqueLayoutRepairTests(unittest.TestCase):
             batch=source.parent/'compile.cmd'
             # offsetof on these intentional non-standard-layout V8 objects is an
             # accepted extension; all actual static assertions remain -Werror.
-            cmdline='"'+str(clang)+'" /nologo /std:c++20 /EHsc /W4 /WX -Werror -Wno-invalid offsetof'
-            cmdline=cmdline.replace('-Wno-invalid offsetof','-Wno-invalid-offset'+'of')
+            cmdline='"'+str(clang)+'" /nologo /std:c++20 /EHsc /W4 /WX -Werror -Wno-invalid-offsetof'
             cmdline+=' /DV8_CC_GNU=0 /DV8_CC_MSVC=1 /DTAGGED_SIZE_8_BYTES='+str(int(tagged==8))+' /DV8_ENABLE_WEBASSEMBLY=1'
             cmdline+=' /I"'+str(include)+'" "'+str(source)+'" /Fe:"'+str(output)+'"\n'
             batch.write_text('@echo off\ncall "'+vs+'/VC/Auxiliary/Build/vcvarsall.bat" x64 >nul\nif errorlevel 1 exit /b 90\n'+cmdline)
             command=['cmd.exe','/d','/c',str(batch)]
         else:
             clang=shutil.which('clang++');self.assertTrue(clang)
-            command=[clang,'-std=c++20','-Wall','-Wextra','-Werror','-Wno-invalid offsetof','-DV8_CC_GNU=1','-DV8_CC_MSVC=0',f'-DTAGGED_SIZE_8_BYTES={int(tagged==8)}','-DV8_ENABLE_WEBASSEMBLY=1','-I'+str(include),str(source),'-o',str(output),*extra]
-            command=[x.replace('-Wno-invalid offsetof','-Wno-invalid-offset'+'of') for x in command]
+            command=[clang,'-std=c++20','-Wall','-Wextra','-Werror','-Wno-invalid-offsetof','-DV8_CC_GNU=1','-DV8_CC_MSVC=0',f'-DTAGGED_SIZE_8_BYTES={int(tagged==8)}','-DV8_ENABLE_WEBASSEMBLY=1','-I'+str(include),str(source),'-o',str(output),*extra]
         return subprocess.run(command,cwd=source.parent,text=True,capture_output=True,errors='replace',timeout=75)
 
     def test_native_generator_layout_and_fail_closed_assertions(self):
@@ -326,8 +324,8 @@ class TorqueLayoutRepairTests(unittest.TestCase):
         (build/'build.ninja').write_text(
             f'rule generator\n  command = "{clang}" -std=c++20 $in -o $out\n'
             'rule generate\n  command = ./generator 4 > $out\n'
-            f'rule compile\n  command = "{clang}" -std=c++20 -Werror -Wno-invalid offsetof -DV8_CC_GNU=1 -DV8_CC_MSVC=0 -DTAGGED_SIZE_8_BYTES=0 -DV8_ENABLE_WEBASSEMBLY=1 -Iinclude -MMD -MF $out.d -c $in -o $out\n  depfile = $out.d\n  deps = gcc\n'.replace('-Wno-invalid offsetof','-Wno-invalid-offset'+'of')
-            + 'build generator: generator generator.cc\nbuild include/generated.h: generate generator\nbuild verify.o: compile verify.cc || include/generated.h\nbuild other.o: compile other.cc\n')
+            f'rule compile\n  command = "{clang}" -std=c++20 -Werror -Wno-invalid-offsetof -DV8_CC_GNU=1 -DV8_CC_MSVC=0 -DTAGGED_SIZE_8_BYTES=0 -DV8_ENABLE_WEBASSEMBLY=1 -Iinclude -MMD -MF $out.d -c $in -o $out\n  depfile = $out.d\n  deps = gcc\n'
+            'build generator: generator generator.cc\nbuild include/generated.h: generate generator\nbuild verify.o: compile verify.cc || include/generated.h\nbuild other.o: compile other.cc\n')
         subprocess.run([ninja],cwd=build,capture_output=True,check=True,timeout=75)
         names=('generator','include/generated.h','verify.o','other.o')
         before={n:((build/n).read_bytes(),(build/n).stat().st_mtime_ns) for n in names}

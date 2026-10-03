@@ -39,9 +39,14 @@ def public_input(path):
     return verify_public(path, data)
 
 
+# Orchestration tests clear the environment and emulate sys.platform. Acquire
+# the shared immutable input before that isolation; the worker never fetches it.
+_GENERATOR = public_input("src/torque/implementation-visitor.cc")
+
+
 def fixture_bytes(name):
     if name == "implementation-visitor.cc":
-        return public_input("src/torque/implementation-visitor.cc")
+        return _GENERATOR
     if name != Path(name).name or name not in {
         "websocket_handshake_challenge.h", "paint_vector_icon.h",
         "form_field_data.cc", "atomic_string.cc", "heap-object-header.h",
