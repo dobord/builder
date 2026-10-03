@@ -15,7 +15,7 @@
   },
   "source_repair": {
     "schema": 2,
-    "id": "windows-torque-packed-parent-v6",
+    "id": "windows-torque-tail-size-v7",
     "chromium_commit": "79460ebecaa5625e57a5fb679a735659e73dc687",
     "v8_commit": "4323497a6a73839e6d5260f6acd7ec0212cb3321",
     "corrections": [
@@ -47,9 +47,9 @@
       {
         "path": "v8/src/torque/implementation-visitor.cc",
         "before_sha256": "bb857f343d860a65c111e9e178df67d3f9cf251f92eaa017202265a533c63abe",
-        "after_sha256": "e1bba1f74d36cbbb9bcdd8810f6f2e91ea9197fd6ab6e3a98d07f2787b035359"
+        "after_sha256": "c53c5fda569a1d033cbdeb6213fb49474b714afa8fb1d750243e3193f1b951a3"
       }
     ],
-    "implementation_sha256": "0980ec0954c1c78503ff70604560ca3e81baea2883b3759b3a35d89011c36a6f"
+    "implementation_sha256": "c9e7fd26b01cfdb2aa1541dcc2df57944e1da0d38fc68f2c760a56efdf251305"
   }
 }

@@ -494,7 +494,7 @@ class PaintHeaderTests(unittest.TestCase):
         expected_paths = [repair.HEADER, repair.PAINT_HEADER, repair.AUTOFILL_SOURCE, repair.ATOMIC_SOURCE, repair.HEAP_HEADER, repair.TORQUE_SOURCE]
         profile = repair.profile()
         self.assertEqual(profile["schema"], 2)
-        self.assertEqual(profile["id"], "windows-torque-packed-parent-v6")
+        self.assertEqual(profile["id"], "windows-torque-tail-size-v7")
         self.assertEqual([c["path"] for c in profile["corrections"]],
                          [p.removeprefix("download/chromium/src/") for p in expected_paths])
         for index in (0, 1, 2, 3, 4):
@@ -670,6 +670,8 @@ def load_tests(loader, standard_tests, pattern):
     standard_tests.addTests(loader.loadTestsFromModule(test_cef_windows_atomic_ref_repair))
     from tests import test_cef_windows_layout_repair
     standard_tests.addTests(loader.loadTestsFromModule(test_cef_windows_layout_repair))
+    from tests import test_cef_windows_tail_size_repair
+    standard_tests.addTests(loader.loadTestsFromModule(test_cef_windows_tail_size_repair))
     return standard_tests
 
 
