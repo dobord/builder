@@ -1,0 +1,37 @@
+name: Windows CEF header v2 verification
+on:
+  push:
+    branches: [repair/windows-cef-36-string]
+permissions:
+  contents: read
+jobs:
+  public-inputs:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.13'
+      - name: Snapshot tracked public source and pinned header
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/public-header-v2"
+          mkdir -p "$out/wheels"
+          git archive --format=tar HEAD > "$out/builder-source.tar"
+          git rev-parse HEAD > "$out/builder-commit.txt"
+          git rev-parse 'HEAD^{tree}' > "$out/builder-tree.txt"
+          curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o "$out/paint_vector_icon.h" https://raw.githubusercontent.com/chromium/chromium/79460ebecaa5625e57a5fb679a735659e73dc687/ui/gfx/paint_vector_icon.h
+          python -m pip download --disable-pip-version-check --require-hashes --only-binary=:all: -r requirements.lock -d "$out/wheels"
+          cp requirements.lock "$out/requirements.lock"
+          (cd "$out" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: public-header-v2-${{ github.run_id }}
+          path: ${{ runner.temp }}/public-header-v2
+          retention-days: 3
+          compression-level: 0
+          if-no-files-found: error
