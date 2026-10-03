@@ -15,11 +15,43 @@ import tempfile
 import zipfile
 from . import crypto, safeio
 from .cef_contract import digest, positive, require, selector
-from .protocol import BUILDER, IDS, check_run
+from .protocol import BUILDER, IDS, check_run, build_workflow, BUILD_WORKFLOWS
 
 MAX_TOTAL = 256 * 1024**3
 MAX_ENTRIES = 200000
 KINDS = {"cef-checkpoint", "vcpkg-binaries"}
+# Run 37145188245 completed its compilation slice and uploaded an accepted
+# checkpoint. SDK readiness was intentionally false. Preserve this exact
+# producer's original context across the Linux workflow-reader correction.
+LINUX_CONTINUATION = {
+    "run": 37145188245, "attempt": 1,
+    "revision": "35596572fd466fdec9d463c28559a3196e9d4f74",
+    "source_sha": "40ec6aa95709336f5454921d90988f8da248a4d7",
+    "recipe_commit": "5d427cb2d29cd14fbdb3d7fbccbf3822e3b03896",
+    "artifacts": {
+        "cef-checkpoint": (11285694591, "370439d03ae794aeaca10dd7f11657228f98ec4f3010214d0d0ecbac2b8266ec"),
+        "vcpkg-binaries": (11285904084, "4a135b120ac264a2f30c19555738adaf203d6162e90b21b054c1dffae3dfd6f8"),
+    },
+}
+
+
+def producer_revision(platform: str, kind: str, run: int, attempt: int, revision: str) -> str:
+    if run == LINUX_CONTINUATION["run"]:
+        require(platform == "linux" and kind in KINDS and attempt == LINUX_CONTINUATION["attempt"],
+                "Reviewed Linux continuation scope changed")
+        return LINUX_CONTINUATION["revision"]
+    return revision
+
+
+def selected_revision(selected: dict | None, platform: str, kind: str, revision: str) -> str:
+    if selected is None:
+        return revision
+    selected_sha = producer_revision(platform, kind, selected["run"], selected["attempt"], revision)
+    if selected["run"] == LINUX_CONTINUATION["run"]:
+        artifact_id, expected = LINUX_CONTINUATION["artifacts"][kind]
+        require(selected["artifact_id"] == artifact_id and selected["artifact_sha256"] == expected,
+                "Reviewed Linux continuation artifact changed")
+    return selected_sha
 
 
 def context(kind: str, platform: str, key: str, run: int, attempt: int, revision: str, member: str) -> dict:
@@ -143,8 +175,13 @@ def fetch(api, selected: dict, directory: Path, *, platform: str, kind: str, key
     selector(selected)
     require(selected is not None and not directory.exists(), "Explicit cache selection and empty destination required")
     run, attempt = selected["run"], selected["attempt"]
+    revision = selected_revision(selected, platform, kind, revision)
     producer = api.get(f"/repos/{BUILDER}/actions/runs/{run}/attempts/{attempt}")
-    check_run(producer, BUILDER, "build-release.yml", revision, attempt, "workflow_dispatch", success=False)
+    workflow = build_workflow(producer.get("path", ""))
+    require(platform in BUILD_WORKFLOWS[workflow], "Cache platform differs from producer workflow")
+    if run == LINUX_CONTINUATION["run"]:
+        require(workflow == "build-linux-release.yml", "Reviewed Linux continuation workflow changed")
+    check_run(producer, BUILDER, workflow, revision, attempt, "workflow_dispatch", success=False)
     require(producer["status"] == "completed", "Cache producer is still running")
     current = api.get(f"/repos/{BUILDER}/actions/runs/{run}")
     require(current["run_attempt"] == attempt and current["status"] == "completed", "Cache producer was rerun")

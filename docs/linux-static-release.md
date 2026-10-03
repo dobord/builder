@@ -74,3 +74,13 @@ and completed package cache for continuation, but fails SDK readiness and does
 not cause publication. Checkpoints and package-cache artifacts have 90-day
 retention in the Linux workflow. A failed or incomplete run never publishes an
 SDK. The combined qualification lock is not opened by this workflow setup.
+
+The workflow-reader correction retains the exact accepted Linux continuation
+from run `37145188245`, attempt `1`, producer
+`35596572fd466fdec9d463c28559a3196e9d4f74`. Both artifact IDs and GitHub digests
+are closed review inputs in `cef_cache.LINUX_CONTINUATION`. This run completed
+its compilation slice and uploaded a checkpoint; SDK readiness alone stopped
+publication. Restoration authenticates its original producer context and the
+unchanged native recipe/platform contract. Newly persisted caches use the new
+producer's own identity and key. No ciphertext, checkpoint identity or context
+is rewritten, and this exception does not admit other old producers.
