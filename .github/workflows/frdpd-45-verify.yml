@@ -9,8 +9,8 @@ concurrency:
   group: frdpd-45-${{ github.sha }}
   cancel-in-progress: false
 env:
-  SOURCE_SHA: '2063bc76f1aa1b7e076da923e29d68792c62c6f6'
-  SOURCE_TREE: 'f20d781842d6ec3b5264253c4cf8937a4677d8fe'
+  SOURCE_SHA: '2959f9426f4b945460100d91f42027d0df3b9fd7'
+  SOURCE_TREE: '1ccaf082326eb0e84ef17f329d9991e18d1c188b'
   ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
 jobs:
   regression:
@@ -80,7 +80,7 @@ jobs:
                   status = original(name, script, timeout)
                   if name == 'focused' and status == 0:
                       original('oracle-repeat', 'ctest --test-dir /opt/freerdp-build --no-tests=error --output-on-failure --verbose --timeout 120 --repeat until-fail:10 -R "^TestFreeRDPFrdp(WindowPixelOracle|WindowCodec|GfxSender|FramePipeline|WindowExchange|PipelineStages|FrameScheduler|SurfaceManager|WindowRegistry)$"', 300)
-                      original('agent-stop-repeat', 'ctest --test-dir /opt/freerdp-build --no-tests=error --output-on-failure --verbose --timeout 120 --repeat until-fail:10 -R "^TestFreeRDPFrdpAgentStop$"', 400)
+                      original('agent-stop-repeat', 'ctest --test-dir /opt/freerdp-build --no-tests=error --output-on-failure --verbose --timeout 120 --repeat until-fail:30 -R "^TestFreeRDPFrdpAgentStop$"', 600)
                   return status
               api['main'].__globals__['docker'] = verified
               api['main'].__globals__['run'] = verified_run
