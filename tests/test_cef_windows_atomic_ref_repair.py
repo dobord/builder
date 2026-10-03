@@ -17,6 +17,7 @@ import unittest
 from unittest import mock
 
 from secure_release import cef_windows_source_repair as repair
+from tests.cef_windows_layout_inputs import fixture_bytes
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / 'tests/fixtures/cef-windows'
@@ -31,7 +32,7 @@ def populate(work):
     for relative, _, _, _ in repair.CORRECTIONS:
         target = work / relative
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes((FIXTURES / target.name).read_bytes())
+        target.write_bytes(fixture_bytes(target.name))
 
 
 def probe_source(raw: bytes) -> str:

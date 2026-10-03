@@ -15,7 +15,7 @@
   },
   "source_repair": {
     "schema": 2,
-    "id": "windows-v8-atomic-ref-v5",
+    "id": "windows-torque-packed-parent-v6",
     "chromium_commit": "79460ebecaa5625e57a5fb679a735659e73dc687",
     "v8_commit": "4323497a6a73839e6d5260f6acd7ec0212cb3321",
     "corrections": [
@@ -43,8 +43,13 @@
         "path": "v8/src/heap/cppgc-internal/heap-object-header.h",
         "before_sha256": "397f2555d0498e92eb5d40872e8066b1a08a9cba993a4457256b8fb0375251ee",
         "after_sha256": "901a8ce9d296f6d3b701d348fc09478f31465e659e9925696dd358871757d94d"
+      },
+      {
+        "path": "v8/src/torque/implementation-visitor.cc",
+        "before_sha256": "bb857f343d860a65c111e9e178df67d3f9cf251f92eaa017202265a533c63abe",
+        "after_sha256": "e1bba1f74d36cbbb9bcdd8810f6f2e91ea9197fd6ab6e3a98d07f2787b035359"
       }
     ],
-    "implementation_sha256": "65919555d64211c29a5b47e6e638f8fcc3edc76f37073a827d804fe8726ed061"
+    "implementation_sha256": "0980ec0954c1c78503ff70604560ca3e81baea2883b3759b3a35d89011c36a6f"
   }
 }
