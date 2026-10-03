@@ -37,7 +37,7 @@ a request cannot silently change platform scope between build and publication.
 The CEF client bridge and the lfc-ui subprocess/runtime fixes must be included
 in the revisions pinned by the source release plan and matching port `REF`s.
 The prepared source plan pins CEF recipe
-`5075d283e95aeee33cbd4dca755ce08e6e82c57e` and lfc-ui
+`5d427cb2d29cd14fbdb3d7fbccbf3822e3b03896` and lfc-ui
 `63b456abf22250932df41a55797ed912d1b5b662`; the lfc-ui port uses that same `REF`
 at `0.3.0#17`. The Linux canonical-example review binds both the fixed proxy
 and the updated port installation policy. An uncommitted working tree is not
