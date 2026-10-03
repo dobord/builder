@@ -9,8 +9,8 @@ concurrency:
   group: frdpd-45-${{ github.sha }}
   cancel-in-progress: false
 env:
-  SOURCE_SHA: '018b8f0676fbc831c4e460cd5a86df3aaebe1bcc'
-  SOURCE_TREE: '781ec4b9cadc588438b8b75de780df0a3f57c4dd'
+  SOURCE_SHA: 'e05afcd203a236939518facff633d2ae9bed3498'
+  SOURCE_TREE: 'ffe5bd510f06b4af95fa30ae9110316353394bad'
   ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
 jobs:
   regression:
