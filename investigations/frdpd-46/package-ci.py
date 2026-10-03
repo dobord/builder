@@ -64,7 +64,10 @@ apt-get update -qq
 apt-get install -y --no-install-recommends devscripts equivs lintian git python3
 mkdir -p /build/frdpd
 cp -a /input/. /build/frdpd/
+# Own only this disposable copy; do not weaken Git's ownership checks.
+chown -R --no-dereference "$(id -u):$(id -g)" /build/frdpd
 cd /build/frdpd
+export SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)
 python3 server/frdp/test/TestFreeRDPFrdpInstalledManifest.py -v
 mk-build-deps --install --remove --tool "apt-get -q -y --no-install-recommends" debian/control
 export DEB_BUILD_OPTIONS="nocheck parallel=2"
@@ -88,13 +91,21 @@ lintian --fail-on error --display-info --pedantic /build/frdpd_*.deb
     # Separate Ubuntu rootfs: do not copy build-tree binaries or configure the site.
     script = r'''set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
+# Keep packaged manuals, matching the existing clean-install gate.
+sed -i '\|^path-exclude=/usr/share/man/|d' /etc/dpkg/dpkg.cfg.d/excludes
 apt-get update -qq
 apt-get install -y --no-install-recommends python3 freerdp3-x11 /packages/frdpd_*.deb
-printf '%s\n' 'dpkg verification follows'
-dpkg -V frdpd
+verification=$(dpkg -V frdpd)
+printf '%s\n' "$verification" > /out/dpkg-verify.txt
+test -z "$verification"
 for unit in frdpd frdp-authd frdp-sesmand; do
     test -f /usr/lib/systemd/system/$unit.service
     test ! -e /etc/systemd/system/multi-user.target.wants/$unit.service
+done
+for process in /proc/[0-9]*/comm; do
+    case $(cat "$process" 2>/dev/null || true) in
+        frdpd|frdp-authd|frdp-sesmand) exit 1 ;;
+    esac
 done
 python3 /input/server/frdp/test/e2e/scripts/installed-window-manifest.py /out/installed-manifest.json
 dpkg-query -W > /out/installed-packages.txt
