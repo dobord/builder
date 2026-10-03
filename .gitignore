@@ -1,11 +1,14 @@
 __pycache__/
 .venv/
 .venv-log-decryptor/
+.offline-tink/
 *.pyc
 public-test-fixture/
 *.enc
 *.key
 *.private.b64
+*.keyset.json
+keys/
 *-private.json
 *-private_key.json
 decrypted-logs/
