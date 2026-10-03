@@ -5,9 +5,13 @@ on:
 permissions:
   contents: read
 jobs:
-  public-inputs:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
+  tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -18,41 +22,16 @@ jobs:
           ref: 03abd124ebe3b8a57fb78470a75b5aa3ce064e31
           path: private-cef
           persist-credentials: false
-      - name: Snapshot tracked public inputs only
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir public-inputs
-          git archive --format=tar HEAD > public-inputs/builder-source.tar
-          git ls-tree -r HEAD > public-inputs/builder-tree.txt
-          git rev-parse HEAD > public-inputs/builder-commit.txt
-          git -C private-cef archive --format=tar HEAD > public-inputs/cef-source.tar
-          python3 - <<'PY'
-          import hashlib, json, pathlib, urllib.request
-          root = pathlib.Path('public-inputs')
-          commit = '79460ebecaa5625e57a5fb679a735659e73dc687'
-          paths = ['third_party/blink/renderer/platform/wtf/text/atomic_string.cc',
-                   'third_party/blink/renderer/platform/wtf/text/code_point_iterator.h',
-                   'third_party/blink/renderer/platform/wtf/text/wtf_string.h',
-                   'third_party/blink/renderer/platform/wtf/text/string_view.h']
-          for path in paths:
-              data = urllib.request.urlopen('https://raw.githubusercontent.com/chromium/chromium/' + commit + '/' + path, timeout=60).read()
-              target = root / 'chromium' / path
-              target.parent.mkdir(parents=True, exist_ok=True)
-              target.write_bytes(data)
-          request = urllib.request.Request('https://api.github.com/repos/chromium/chromium/contents/third_party/perfetto?ref=' + commit, headers={'User-Agent': 'builder-public-inputs'})
-          metadata = json.load(urllib.request.urlopen(request, timeout=60))
-          (root / 'perfetto-submodule.json').write_text(json.dumps(metadata, sort_keys=True))
-          sha = metadata['sha']
-          data = urllib.request.urlopen('https://raw.githubusercontent.com/google/perfetto/' + sha + '/include/perfetto/tracing/traced_value.h', timeout=60).read()
-          (root / 'traced_value.h').write_bytes(data)
-          sums = [hashlib.sha256(p.read_bytes()).hexdigest() + '  ' + str(p.relative_to(root)) for p in sorted(root.rglob('*')) if p.is_file()]
-          (root / 'SHA256SUMS').write_text('\n'.join(sums) + '\n')
-          PY
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
         with:
-          name: public-iterator-inputs-${{ github.run_id }}
-          path: public-inputs
-          retention-days: 3
-          compression-level: 0
-          if-no-files-found: error
+          python-version: '3.12'
+      - name: Install hash-pinned test runtime
+        run: |
+          python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r requirements.lock
+      - name: Verify syntax
+        run: python -m compileall -q secure_release tests
+      - name: Verify iterator completeness and checkpoint contracts
+        env:
+          CEF_REPAIR_RECIPE_DIR: ${{ github.workspace }}/private-cef
+          REQUIRE_TINK_TESTS: '1'
+        run: python -m unittest tests.test_cef_windows_source_repair tests.test_cef_windows_diagnostics tests.test_cef_qualification_workflows tests.test_openssl_tink_logs tests.test_encrypted_logs -v

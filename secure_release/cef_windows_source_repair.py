@@ -1,9 +1,9 @@
-"""Three reviewed Windows source corrections, bound to a new build contract.
+"""Four reviewed Windows source corrections, bound to a new build contract.
 
 The baseline CEF checkout and native checkpoint codec stay unchanged. Only the
 exact legacy producer below may cross into this profile, after authenticated
 restore under its OLD contract. New checkpoints carry the NEW contract and a
-verified source marker covering all three files. Neither receipts nor fixtures
+verified source marker covering all four files. Neither receipts nor fixtures
 constitute runtime proof.
 """
 from __future__ import annotations
@@ -28,6 +28,9 @@ PAINT_AFTER = "89e65e86fa4d5de9a72567de96c41659b6610e02cb50a063942e458e0fda70cd"
 AUTOFILL_SOURCE = "download/chromium/src/components/autofill/core/common/form_field_data.cc"
 AUTOFILL_BEFORE = "0edba08fcad529c1980260493296da86db429684b98fdaf7765ae8c083397e32"
 AUTOFILL_AFTER = "fd5dcc844aa6250b7b5bb702965e7abeba4cb57f655aec2ff43f078be471b490"
+ATOMIC_SOURCE = "download/chromium/src/third_party/blink/renderer/platform/wtf/text/atomic_string.cc"
+ATOMIC_BEFORE = "a4c0cc1f34fd6b692337331b8192096e77ada0a13a3b6c6598770bbb8711a871"
+ATOMIC_AFTER = "554274d3e6d39eb924fa276f1a747e26f54453a00c1e644dde9a1b7cc8cb5b42"
 # Ordered, closed set of corrections; no caller-selected paths or patches.
 CORRECTIONS = (
     (HEADER, BEFORE, AFTER, (
@@ -48,6 +51,11 @@ CORRECTIONS = (
         (b'!e.contains(kNotRefillRelated) ? f.parsed_autocomplete_ : kNoParsingResult,',
          b'!e.contains(kNotRefillRelated) ? f.parsed_autocomplete_ : *kNoParsingResult,'),
     )),
+    (ATOMIC_SOURCE, ATOMIC_BEFORE, ATOMIC_AFTER, (
+        (b'#include "third_party/blink/renderer/platform/wtf/text/case_map.h"\n',
+         b'#include "third_party/blink/renderer/platform/wtf/text/case_map.h"\n'
+         b'#include "third_party/blink/renderer/platform/wtf/text/code_point_iterator.h"\n'),
+    )),
 )
 BASE_KEY = "60a369f6b051ba651cb301af299e7dadcc99608d0db6894bccab87b953817602"
 LEGACY = {
@@ -63,7 +71,7 @@ LEGACY = {
 
 def profile() -> dict:
     return {
-        "schema": 2, "id": "windows-autofill-lifetime-v3",
+        "schema": 2, "id": "windows-blink-iterator-v4",
         "chromium_commit": CHROMIUM,
         "corrections": [
             {"path": path.removeprefix("download/chromium/src/"),
@@ -202,7 +210,7 @@ def apply(work: Path, contract: str, origin: str) -> str:
                 or any(original != changed for _, _, original, _, changed in inputs)):
             raise ValueError("Repaired Windows checkpoint source/marker mismatch")
         return "already-applied"
-    # No v1 or v2 checkpoint was qualified. Only the exact legacy producer may
+    # No v1, v2 or v3 checkpoint was qualified. Only the exact legacy producer may
     # transition; reject old markers and partially applied source sets.
     if os.path.lexists(marker) or any(original == changed for _, _, original, _, changed in inputs):
         raise ValueError("Unexpected source correction in baseline checkpoint")
