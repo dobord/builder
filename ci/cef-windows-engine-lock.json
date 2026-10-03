@@ -15,8 +15,9 @@
   },
   "source_repair": {
     "schema": 2,
-    "id": "windows-blink-iterator-v4",
+    "id": "windows-v8-atomic-ref-v5",
     "chromium_commit": "79460ebecaa5625e57a5fb679a735659e73dc687",
+    "v8_commit": "4323497a6a73839e6d5260f6acd7ec0212cb3321",
     "corrections": [
       {
         "path": "net/websockets/websocket_handshake_challenge.h",
@@ -37,8 +38,13 @@
         "path": "third_party/blink/renderer/platform/wtf/text/atomic_string.cc",
         "before_sha256": "a4c0cc1f34fd6b692337331b8192096e77ada0a13a3b6c6598770bbb8711a871",
         "after_sha256": "554274d3e6d39eb924fa276f1a747e26f54453a00c1e644dde9a1b7cc8cb5b42"
+      },
+      {
+        "path": "v8/src/heap/cppgc-internal/heap-object-header.h",
+        "before_sha256": "397f2555d0498e92eb5d40872e8066b1a08a9cba993a4457256b8fb0375251ee",
+        "after_sha256": "901a8ce9d296f6d3b701d348fc09478f31465e659e9925696dd358871757d94d"
       }
     ],
-    "implementation_sha256": "92070ae7e4a9234618699d3644abca0e3584697890a18b6fab48a27a168d59d1"
+    "implementation_sha256": "65919555d64211c29a5b47e6e638f8fcc3edc76f37073a827d804fe8726ed061"
   }
 }

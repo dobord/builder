@@ -1,9 +1,9 @@
-"""Four reviewed Windows source corrections, bound to a new build contract.
+"""Five reviewed Windows source corrections, bound to a new build contract.
 
 The baseline CEF checkout and native checkpoint codec stay unchanged. Only the
 exact legacy producer below may cross into this profile, after authenticated
 restore under its OLD contract. New checkpoints carry the NEW contract and a
-verified source marker covering all four files. Neither receipts nor fixtures
+verified source marker covering all five files. Neither receipts nor fixtures
 constitute runtime proof.
 """
 from __future__ import annotations
@@ -18,6 +18,7 @@ import time
 from .crypto import canonical, parse
 
 CHROMIUM = "79460ebecaa5625e57a5fb679a735659e73dc687"
+V8 = "4323497a6a73839e6d5260f6acd7ec0212cb3321"
 HEADER = "download/chromium/src/net/websockets/websocket_handshake_challenge.h"
 MARKER = "cef-windows-source-repair.json"
 BEFORE = "e9c2a8404032abb4080a5f6855ca396a5ecee841f017e932d49b9bbc2574e184"
@@ -31,6 +32,9 @@ AUTOFILL_AFTER = "fd5dcc844aa6250b7b5bb702965e7abeba4cb57f655aec2ff43f078be471b4
 ATOMIC_SOURCE = "download/chromium/src/third_party/blink/renderer/platform/wtf/text/atomic_string.cc"
 ATOMIC_BEFORE = "a4c0cc1f34fd6b692337331b8192096e77ada0a13a3b6c6598770bbb8711a871"
 ATOMIC_AFTER = "554274d3e6d39eb924fa276f1a747e26f54453a00c1e644dde9a1b7cc8cb5b42"
+HEAP_HEADER = "download/chromium/src/v8/src/heap/cppgc-internal/heap-object-header.h"
+HEAP_BEFORE = "397f2555d0498e92eb5d40872e8066b1a08a9cba993a4457256b8fb0375251ee"
+HEAP_AFTER = "901a8ce9d296f6d3b701d348fc09478f31465e659e9925696dd358871757d94d"
 # Ordered, closed set of corrections; no caller-selected paths or patches.
 CORRECTIONS = (
     (HEADER, BEFORE, AFTER, (
@@ -56,6 +60,10 @@ CORRECTIONS = (
          b'#include "third_party/blink/renderer/platform/wtf/text/case_map.h"\n'
          b'#include "third_party/blink/renderer/platform/wtf/text/code_point_iterator.h"\n'),
     )),
+    (HEAP_HEADER, HEAP_BEFORE, HEAP_AFTER, (
+        (b'std::atomic_ref(const_cast<uint16_t&>(half)).load(memory_order)',
+         b'std::atomic_ref<uint16_t>(const_cast<uint16_t&>(half)).load(memory_order)'),
+    )),
 )
 BASE_KEY = "60a369f6b051ba651cb301af299e7dadcc99608d0db6894bccab87b953817602"
 LEGACY = {
@@ -71,8 +79,9 @@ LEGACY = {
 
 def profile() -> dict:
     return {
-        "schema": 2, "id": "windows-blink-iterator-v4",
+        "schema": 2, "id": "windows-v8-atomic-ref-v5",
         "chromium_commit": CHROMIUM,
+        "v8_commit": V8,
         "corrections": [
             {"path": path.removeprefix("download/chromium/src/"),
              "before_sha256": before, "after_sha256": after}
@@ -210,7 +219,7 @@ def apply(work: Path, contract: str, origin: str) -> str:
                 or any(original != changed for _, _, original, _, changed in inputs)):
             raise ValueError("Repaired Windows checkpoint source/marker mismatch")
         return "already-applied"
-    # No v1, v2 or v3 checkpoint was qualified. Only the exact legacy producer may
+    # No prior repaired checkpoint was qualified. Only the exact legacy producer may
     # transition; reject old markers and partially applied source sets.
     if os.path.lexists(marker) or any(original == changed for _, _, original, _, changed in inputs):
         raise ValueError("Unexpected source correction in baseline checkpoint")
