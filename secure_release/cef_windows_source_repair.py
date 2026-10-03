@@ -1,9 +1,10 @@
-"""One reviewed Windows source correction, bound to a new build contract.
+"""Two reviewed Windows header corrections, bound to a new build contract.
 
 The baseline CEF checkout and native checkpoint codec stay unchanged. Only the
 exact legacy producer below may cross into this profile, after authenticated
 restore under its OLD contract. New checkpoints carry the NEW contract and a
-verified source marker. Neither receipts nor fixtures constitute runtime proof.
+verified source marker covering BOTH headers. Neither receipts nor fixtures
+constitute runtime proof.
 """
 from __future__ import annotations
 
@@ -21,6 +22,16 @@ HEADER = "download/chromium/src/net/websockets/websocket_handshake_challenge.h"
 MARKER = "cef-windows-source-repair.json"
 BEFORE = "e9c2a8404032abb4080a5f6855ca396a5ecee841f017e932d49b9bbc2574e184"
 AFTER = "38eb8b609bea01c37e3799feaba074c79f189568ff9b7df8c6943707433ef713"
+PAINT_HEADER = "download/chromium/src/ui/gfx/paint_vector_icon.h"
+PAINT_BEFORE = "8e9d9819abc21afcd225345eb0ae679731b909e6f23fc4c2dc04ce1f66c6a58d"
+PAINT_AFTER = "89e65e86fa4d5de9a72567de96c41659b6610e02cb50a063942e458e0fda70cd"
+# Ordered, closed set of corrections; no caller-selected paths or patches.
+CORRECTIONS = (
+    (HEADER, BEFORE, AFTER, b"#include <string_view>\n",
+     b"#include <string>\n#include <string_view>\n"),
+    (PAINT_HEADER, PAINT_BEFORE, PAINT_AFTER, b'#include "base/component_export.h"\n',
+     b'#include <string>\n\n#include "base/component_export.h"\n'),
+)
 BASE_KEY = "60a369f6b051ba651cb301af299e7dadcc99608d0db6894bccab87b953817602"
 LEGACY = {
     "run": 37007852614, "attempt": 1,
@@ -35,10 +46,13 @@ LEGACY = {
 
 def profile() -> dict:
     return {
-        "schema": 1, "id": "websocket-string-include-v1",
+        "schema": 2, "id": "windows-string-includes-v2",
         "chromium_commit": CHROMIUM,
-        "path": HEADER.removeprefix("download/chromium/src/"),
-        "before_sha256": BEFORE, "after_sha256": AFTER,
+        "corrections": [
+            {"path": path.removeprefix("download/chromium/src/"),
+             "before_sha256": before, "after_sha256": after}
+            for path, before, after, _, _ in CORRECTIONS
+        ],
         "implementation_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
     }
 
@@ -85,16 +99,19 @@ def normalized(raw: bytes) -> tuple[bytes, bytes]:
     return text, newline
 
 
-def transform(raw: bytes) -> bytes:
+def transform(raw: bytes, relative: str = HEADER) -> bytes:
+    correction = next((item for item in CORRECTIONS if item[0] == relative), None)
+    if correction is None:
+        raise ValueError("Unreviewed Windows header correction path")
+    _, before, after, anchor, replacement = correction
     text, newline = normalized(raw)
     digest = hashlib.sha256(text).hexdigest()
-    if digest == AFTER:
+    if digest == after:
         return raw
-    if digest != BEFORE or text.count(b"#include <string_view>\n") != 1:
-        raise ValueError("Unreviewed WebSocket header; refusing source correction")
-    changed = text.replace(b"#include <string_view>\n",
-                           b"#include <string>\n#include <string_view>\n", 1)
-    if hashlib.sha256(changed).hexdigest() != AFTER:
+    if digest != before or text.count(anchor) != 1:
+        raise ValueError("Unreviewed Windows header; refusing source correction")
+    changed = text.replace(anchor, replacement, 1)
+    if hashlib.sha256(changed).hexdigest() != after:
         raise ValueError("Windows source correction digest mismatch")
     return changed.replace(b"\n", newline)
 
@@ -152,34 +169,44 @@ def apply(work: Path, contract: str, origin: str) -> str:
     expected = canonical({"schema": 1, "kind": "cef-windows-source-repair",
                           "build_key": contract, "source_repair": profile()})
     marker = work / MARKER
-    path, original, before = _read(work, HEADER)
-    changed = transform(original)
+    # Validate the complete set BEFORE writing either source. A bad second
+    # header must not cause a seemingly valid partial source transition.
+    inputs = []
+    for relative, _, _, _, _ in CORRECTIONS:
+        path, original, before = _read(work, relative)
+        inputs.append((relative, path, original, before, transform(original, relative)))
     if origin == "resume":
         _, data, _ = _read(work, MARKER, 8192)
-        if canonical(parse(data)) != expected or original != changed:
+        if (canonical(parse(data)) != expected
+                or any(original != changed for _, _, original, _, changed in inputs)):
             raise ValueError("Repaired Windows checkpoint source/marker mismatch")
         return "already-applied"
-    # A legacy checkpoint cannot masquerade as a newer partially patched one.
-    if os.path.lexists(marker) or original == changed:
+    # No v1 checkpoint was qualified. Only the exact legacy producer may
+    # transition; reject old markers and partially applied header sets.
+    if os.path.lexists(marker) or any(original == changed for _, _, original, _, changed in inputs):
         raise ValueError("Unexpected source correction in baseline checkpoint")
-    fd, name = tempfile.mkstemp(prefix=".cef-header-", dir=path.parent)
-    temporary = Path(name)
-    try:
-        with os.fdopen(fd, "wb") as stream:
-            stream.write(changed)
-        temporary.chmod(stat.S_IMODE(before.st_mode))
-        # Ensure Ninja sees a changed INPUT. Never retime any existing object,
-        # dependency database, other source, or already-corrected header.
-        new_time = max(time.time_ns(), before.st_mtime_ns + 1_000_000)
-        os.utime(temporary, ns=(new_time, new_time))
-        if _path(work, HEADER) != path or _snapshot(path.lstat()) != _snapshot(before):
-            raise ValueError("Windows source repair input changed before replacement")
-        os.replace(temporary, path)
-    finally:
-        temporary.unlink(missing_ok=True)
-    _, result, after = _read(work, HEADER)
-    if result != changed or after.st_mtime_ns <= before.st_mtime_ns:
-        raise ValueError("Windows header correction or input clock verification failed")
+    for relative, path, original, before, changed in inputs:
+        fd, name = tempfile.mkstemp(prefix=".cef-header-", dir=path.parent)
+        temporary = Path(name)
+        try:
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(changed)
+            temporary.chmod(stat.S_IMODE(before.st_mode))
+            # Retime only this changed INPUT, never existing objects/deps or
+            # already-corrected headers. Ninja invalidates its dependents.
+            new_time = max(time.time_ns(), before.st_mtime_ns + 1_000_000)
+            os.utime(temporary, ns=(new_time, new_time))
+            if _path(work, relative) != path or _snapshot(path.lstat()) != _snapshot(before):
+                raise ValueError("Windows source repair input changed before replacement")
+            os.replace(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)
+    # Publish the marker only after BOTH corrections verify. An interrupted
+    # transition fails closed; it cannot produce a qualified checkpoint.
+    for relative, _, _, before, changed in inputs:
+        _, result, after = _read(work, relative)
+        if result != changed or after.st_mtime_ns <= before.st_mtime_ns:
+            raise ValueError("Windows header correction or input clock verification failed")
     with marker.open("xb") as stream:
         stream.write(expected + b"\n")
     return "applied"

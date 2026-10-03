@@ -14,12 +14,21 @@
     "build_key": "60a369f6b051ba651cb301af299e7dadcc99608d0db6894bccab87b953817602"
   },
   "source_repair": {
-    "schema": 1,
-    "id": "websocket-string-include-v1",
+    "schema": 2,
+    "id": "windows-string-includes-v2",
     "chromium_commit": "79460ebecaa5625e57a5fb679a735659e73dc687",
-    "path": "net/websockets/websocket_handshake_challenge.h",
-    "before_sha256": "e9c2a8404032abb4080a5f6855ca396a5ecee841f017e932d49b9bbc2574e184",
-    "after_sha256": "38eb8b609bea01c37e3799feaba074c79f189568ff9b7df8c6943707433ef713",
-    "implementation_sha256": "b6e5e5b1746def36d5e65c75ede104063578ec93b36558783a4fa5546d650c4b"
+    "corrections": [
+      {
+        "path": "net/websockets/websocket_handshake_challenge.h",
+        "before_sha256": "e9c2a8404032abb4080a5f6855ca396a5ecee841f017e932d49b9bbc2574e184",
+        "after_sha256": "38eb8b609bea01c37e3799feaba074c79f189568ff9b7df8c6943707433ef713"
+      },
+      {
+        "path": "ui/gfx/paint_vector_icon.h",
+        "before_sha256": "8e9d9819abc21afcd225345eb0ae679731b909e6f23fc4c2dc04ce1f66c6a58d",
+        "after_sha256": "89e65e86fa4d5de9a72567de96c41659b6610e02cb50a063942e458e0fda70cd"
+      }
+    ],
+    "implementation_sha256": "04494258fee2ff2c0f2a76589c7ece8d979ac579a72149a9b8f4ee38f9a29b2f"
   }
 }

@@ -21,6 +21,14 @@ from secure_release import cef_windows_source_repair as repair
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = ROOT / "tests/fixtures/cef-windows/websocket_handshake_challenge.h"
+PAINT_FIXTURE = ROOT / "tests/fixtures/cef-windows/paint_vector_icon.h"
+
+
+def populate(work):
+    for relative, fixture in ((repair.HEADER, FIXTURE), (repair.PAINT_HEADER, PAINT_FIXTURE)):
+        path = work / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(fixture.read_bytes())
 
 
 class RepairTests(unittest.TestCase):
@@ -30,8 +38,7 @@ class RepairTests(unittest.TestCase):
         self.root = Path(self.folder.name).resolve()
         self.work = self.root / "work"
         self.path = self.work / repair.HEADER
-        self.path.parent.mkdir(parents=True)
-        self.path.write_bytes(FIXTURE.read_bytes())
+        populate(self.work)
         self.key = repair.build_key(repair.BASE_KEY)
 
     def apply(self, origin="legacy"):
@@ -106,7 +113,7 @@ class RepairTests(unittest.TestCase):
 
     def test_implementation_and_header_changes_invalidate_key(self):
         original = repair.profile
-        for field in ("implementation_sha256", "before_sha256", "after_sha256", "chromium_commit"):
+        for field in ("implementation_sha256", "chromium_commit"):
             value = dict(original(), **{field: "0" * len(original()[field])})
             with mock.patch.object(repair, "profile", return_value=value):
                 self.assertNotEqual(repair.build_key(repair.BASE_KEY), self.key)
@@ -381,7 +388,7 @@ class OrchestrationTests(unittest.TestCase):
                 args = list(map(str, command)); calls.append(args)
                 if "restore" in args:
                     self.assertEqual(args[args.index("--contract") + 1], input_key)
-                    path = work / repair.HEADER; path.parent.mkdir(parents=True); path.write_bytes(FIXTURE.read_bytes())
+                    populate(work)
                     if migrated:
                         repair.apply(work, key, "legacy")
                 elif "slice" in args:
@@ -413,6 +420,232 @@ class OrchestrationTests(unittest.TestCase):
             self.assertFalse(summary["runtime_verified"])
             self.assertIn(key, json.dumps(seal.call_args.args[-1]))
             self.assertEqual([a[2] for a in calls], ["restore", "prepare", "slice"])
+
+class PaintHeaderTests(unittest.TestCase):
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory(prefix="paint header test ")
+        self.addCleanup(folder.cleanup)
+        self.root = Path(folder.name).resolve()
+        self.work = self.root / "work"
+        populate(self.work)
+        self.path = self.work / repair.PAINT_HEADER
+        self.key = repair.build_key(repair.BASE_KEY)
+
+    def apply(self, origin="legacy"):
+        return repair.apply(self.work, self.key, origin)
+
+    def stubs(self):
+        # Only unrelated dependencies are stubbed. The header under test is
+        # the complete pinned public blob, not a copied declaration.
+        source = self.work / "download/chromium/src"
+        headers = {
+            "base/component_export.h": "#define COMPONENT_EXPORT(component)\n",
+            "base/memory/raw_ref.h": "template<class T> struct raw_ref { T* ptr; };\n",
+            "third_party/skia/include/core/SkColor.h": "using SkColor = unsigned int;\n",
+            "ui/gfx/color_palette.h": "namespace gfx { inline constexpr unsigned int kPlaceholderColor = 0; }\n",
+            "net/base/net_export.h": "#define NET_EXPORT\n",
+        }
+        for relative, text in headers.items():
+            path = source / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text)
+        return source
+
+    def probe(self, macro, prelude=""):
+        return (prelude + f'#define {macro} 1\n#include "ui/gfx/paint_vector_icon.h"\n'
+                '#include <type_traits>\n'
+                'static_assert(std::is_same_v<decltype(gfx::CreateVectorIconFromSource),\n'
+                '    gfx::ImageSkia(const std::string&, int, SkColor)>);\n')
+
+    def test_exact_pinned_paint_blob_and_one_include_only(self):
+        old = PAINT_FIXTURE.read_bytes()
+        self.assertEqual(hashlib.sha1(b"blob " + str(len(old)).encode() + b"\0" + old).hexdigest(),
+                         "8eb7ac9c2a7cc8c25fd963aaa128bca34b1568ee")
+        self.assertEqual(hashlib.sha256(old).hexdigest(), repair.PAINT_BEFORE)
+        changed = repair.transform(old, repair.PAINT_HEADER)
+        self.assertEqual(hashlib.sha256(changed).hexdigest(), repair.PAINT_AFTER)
+        self.assertEqual(changed.replace(b"#include <string>\n\n", b"", 1), old)
+        for newline in (b"\n", b"\r\n"):
+            raw = old.replace(b"\n", newline)
+            fixed = repair.transform(raw, repair.PAINT_HEADER)
+            self.assertEqual(repair.transform(fixed, repair.PAINT_HEADER), fixed)
+            self.assertEqual(fixed.count(b"\r\n"), fixed.count(b"\n") if newline == b"\r\n" else 0)
+
+    def test_paint_unreviewed_contents_and_newlines_rejected(self):
+        old = PAINT_FIXTURE.read_bytes()
+        for raw in (b"", old + b"// unreviewed", old.replace(b"std::string", b"std::wstring"),
+                    old.replace(b"\n", b"\r\n", 1), old.replace(b"\n", b"\r")):
+            with self.assertRaises(ValueError):
+                repair.transform(raw, repair.PAINT_HEADER)
+        with self.assertRaises(ValueError):
+            repair.transform(old, "download/chromium/src/other.h")
+        with self.assertRaises(ValueError):
+            repair.transform(old, repair.HEADER)
+
+    def test_profile_binds_both_headers_and_each_digest(self):
+        expected_paths = [repair.HEADER, repair.PAINT_HEADER]
+        profile = repair.profile()
+        self.assertEqual(profile["schema"], 2)
+        self.assertEqual(profile["id"], "windows-string-includes-v2")
+        self.assertEqual([c["path"] for c in profile["corrections"]],
+                         [p.removeprefix("download/chromium/src/") for p in expected_paths])
+        for index in (0, 1):
+            for field in ("path", "before_sha256", "after_sha256"):
+                altered = copy.deepcopy(profile)
+                altered["corrections"][index][field] = "0" * len(altered["corrections"][index][field])
+                with mock.patch.object(repair, "profile", return_value=altered):
+                    self.assertNotEqual(repair.build_key(repair.BASE_KEY), self.key)
+        for corrections in (profile["corrections"][:1], list(reversed(profile["corrections"]))):
+            with mock.patch.object(repair, "profile", return_value=dict(profile, corrections=corrections)):
+                self.assertNotEqual(repair.build_key(repair.BASE_KEY), self.key)
+
+    def test_bad_second_header_leaves_first_unmodified(self):
+        first = self.work / repair.HEADER
+        snapshot = (first.read_bytes(), first.stat().st_mtime_ns)
+        self.path.write_bytes(b"unreviewed paint header")
+        with self.assertRaises(ValueError):
+            self.apply()
+        self.assertEqual((first.read_bytes(), first.stat().st_mtime_ns), snapshot)
+        self.assertFalse((self.work / repair.MARKER).exists())
+
+    def test_partial_baseline_patch_cannot_cross_contract(self):
+        for relative in (repair.HEADER, repair.PAINT_HEADER):
+            populate(self.work)
+            path = self.work / relative
+            path.write_bytes(repair.transform(path.read_bytes(), relative))
+            snapshots = {p: p.read_bytes() for p in (self.work / repair.HEADER, self.path)}
+            with self.assertRaises(ValueError):
+                self.apply()
+            self.assertEqual({p: p.read_bytes() for p in snapshots}, snapshots)
+            self.assertFalse((self.work / repair.MARKER).exists())
+
+    def test_resume_verifies_both_headers_not_just_marker(self):
+        self.apply()
+        for relative, fixture in ((repair.HEADER, FIXTURE), (repair.PAINT_HEADER, PAINT_FIXTURE)):
+            path = self.work / relative
+            fixed = path.read_bytes()
+            path.write_bytes(fixture.read_bytes())
+            with self.assertRaises(ValueError):
+                self.apply("resume")
+            path.write_bytes(fixed)
+        self.assertEqual(self.apply("resume"), "already-applied")
+
+    def test_second_input_hardlink_rejected_before_any_write(self):
+        first = self.work / repair.HEADER
+        snapshot = (first.read_bytes(), first.stat().st_mtime_ns)
+        os.link(self.path, self.root / "paint-alias.h")
+        with self.assertRaises(ValueError):
+            self.apply()
+        self.assertEqual((first.read_bytes(), first.stat().st_mtime_ns), snapshot)
+
+    def test_second_input_race_never_publishes_marker(self):
+        original = repair._path
+        calls = 0
+        def raced(work, relative):
+            nonlocal calls
+            if relative == repair.PAINT_HEADER:
+                calls += 1
+                if calls == 2:
+                    self.path.write_bytes(b"concurrent paint edit")
+            return original(work, relative)
+        with mock.patch.object(repair, "_path", side_effect=raced):
+            with self.assertRaises(ValueError):
+                self.apply()
+        self.assertEqual(self.path.read_bytes(), b"concurrent paint edit")
+        self.assertFalse((self.work / repair.MARKER).exists())
+
+    def test_first_header_is_rechecked_after_second_replacement(self):
+        original = os.replace
+        def raced(source, target):
+            original(source, target)
+            if Path(target) == self.path:
+                (self.work / repair.HEADER).write_bytes(FIXTURE.read_bytes())
+        with mock.patch.object(repair.os, "replace", side_effect=raced):
+            with self.assertRaises(ValueError):
+                self.apply()
+        self.assertFalse((self.work / repair.MARKER).exists())
+
+    def test_old_v1_contract_and_failed_producers_are_not_migration_inputs(self):
+        v1_key = "8e498e97d133633398724e333b064f5a1df749aa5b6323f7d3cfc9ae184e4a6e"
+        self.assertNotEqual(self.key, v1_key)
+        for selector in ({"build_key": v1_key}, dict(repair.LEGACY, run=37079399043),
+                         dict(repair.LEGACY, build_key=v1_key)):
+            with self.assertRaises(ValueError):
+                repair.restore_contract(selector, repair.BASE_KEY)
+
+    @unittest.skipIf(os.name == "nt", "Native MSVC regression below covers Windows")
+    def test_real_compiler_old_paint_header_fails_both_guards_fixed_compiles(self):
+        cxx = shutil.which("g++")
+        if not cxx:
+            self.skipTest("Native GCC required")
+        source = self.stubs()
+        for macro in ("IS_GFX_IMPL", "GFX_VECTOR_ICONS_UNSAFE"):
+            (source / "probe.cpp").write_text(self.probe(macro))
+            result = subprocess.run([cxx, "-std=c++20", "-fsyntax-only", "-Wall", "-Wextra", "-Werror", "-I.", "probe.cpp"],
+                                    cwd=source, capture_output=True, text=True, timeout=60)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("paint_vector_icon.h", result.stderr)
+            self.assertIn("string", result.stderr)
+        self.apply()
+        for macro in ("IS_GFX_IMPL", "GFX_VECTOR_ICONS_UNSAFE"):
+            (source / "probe.cpp").write_text(self.probe(macro))
+            result = subprocess.run([cxx, "-std=c++20", "-fsyntax-only", "-Wall", "-Wextra", "-Werror", "-I.", "probe.cpp"],
+                                    cwd=source, capture_output=True, text=True, timeout=60)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    @unittest.skipIf(os.name == "nt", "Native Ninja/GCC dependency regression")
+    def test_real_ninja_invalidates_both_header_dependents_only(self):
+        cxx, ninja = shutil.which("g++"), shutil.which("ninja")
+        if not cxx or not ninja:
+            self.skipTest("Native GCC and Ninja required")
+        source = self.stubs()
+        (source / "paint.cc").write_text('#include <string>\n#define IS_GFX_IMPL 1\n#include "ui/gfx/paint_vector_icon.h"\nint paint(){return 1;}\n')
+        (source / "websocket.cc").write_text('#include <string>\n#include "net/websockets/websocket_handshake_challenge.h"\nint websocket(){return 2;}\n')
+        (source / "other.cc").write_text("int other(){return 3;}\n")
+        (source / "build.ninja").write_text(
+            f'rule cxx\n  command = "{cxx}" -std=c++20 -I. -MMD -MF $out.d -c $in -o $out\n'
+            '  depfile = $out.d\n  deps = gcc\n'
+            'build paint.o: cxx paint.cc\nbuild websocket.o: cxx websocket.cc\nbuild other.o: cxx other.cc\n')
+        def build():
+            return subprocess.run([ninja], cwd=source, capture_output=True, text=True, check=True, timeout=60)
+        build()
+        before = {name: ((source / name).read_bytes(), (source / name).stat().st_mtime_ns)
+                  for name in ("paint.o", "websocket.o", "other.o")}
+        time.sleep(0.02)
+        self.apply(); build()
+        for name in ("paint.o", "websocket.o"):
+            self.assertGreater((source / name).stat().st_mtime_ns, before[name][1])
+        self.assertEqual(((source / "other.o").read_bytes(), (source / "other.o").stat().st_mtime_ns), before["other.o"])
+        self.assertEqual(self.apply("resume"), "already-applied")
+        self.assertIn("no work to do", build().stdout)
+        print("CEF_BOTH_HEADERS_NINJA_INVALIDATION_VERIFIED")
+
+    @unittest.skipUnless(os.name == "nt", "Native MSVC paint header self-containment regression")
+    def test_real_msvc_paint_header_both_guards_and_signature(self):
+        vswhere = Path(os.environ["ProgramFiles(x86)"]) / "Microsoft Visual Studio/Installer/vswhere.exe"
+        vs = Path(subprocess.check_output([str(vswhere), "-latest", "-products", "*", "-requires",
+            "Microsoft.VisualStudio.Component.VC.Tools.x86.x64", "-property", "installationPath"], text=True).strip())
+        version = (vs / "VC/Auxiliary/Build/Microsoft.VCToolsVersion.default.txt").read_text().strip()
+        self.assertTrue(version.startswith("14.44."), version)
+        source = self.stubs()
+        batch = self.root / "compile.cmd"
+        batch.write_text(f'@echo off\ncall "{vs}/VC/Auxiliary/Build/vcvarsall.bat" x64 >nul\n'
+                         'if errorlevel 1 exit /b 90\ncl.exe /nologo /std:c++20 /Zs /W4 /WX /I. probe.cpp\n', encoding="utf-8")
+        def compile_header(macro):
+            (source / "probe.cpp").write_text(self.probe(macro, '#include <string_view>\n'))
+            return subprocess.run(["cmd.exe", "/d", "/c", str(batch)], cwd=source,
+                                  capture_output=True, text=True, errors="replace", timeout=60)
+        for macro in ("IS_GFX_IMPL", "GFX_VECTOR_ICONS_UNSAFE"):
+            before = compile_header(macro)
+            self.assertNotEqual(before.returncode, 0)
+            self.assertNotEqual(before.returncode, 90)
+            self.assertIn("paint_vector_icon.h", before.stdout + before.stderr)
+            self.assertIn("string", before.stdout + before.stderr)
+        self.apply()
+        for macro in ("IS_GFX_IMPL", "GFX_VECTOR_ICONS_UNSAFE"):
+            after = compile_header(macro)
+            self.assertEqual(after.returncode, 0, after.stdout + after.stderr)
+        print("CEF_PAINT_MSVC_HEADER_REPAIR_VERIFIED guards=2 toolset=" + version)
 
 
 if __name__ == "__main__":
