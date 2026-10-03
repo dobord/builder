@@ -5,46 +5,19 @@ on:
 permissions:
   contents: read
 jobs:
-  public-inputs:
-    runs-on: ubuntu-24.04
+  layout:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - name: Snapshot public tracked sources and pinned V8 inputs
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir public-inputs
-          git archive HEAD -- AGENTS.md secure_release scripts tests ci requirements.lock .github .gitattributes tools > public-inputs/builder-source.tar
-          git ls-tree -r HEAD > public-inputs/builder-tree.txt
-          git rev-parse HEAD > public-inputs/builder-commit.txt
-          python3 - <<'PY'
-          import hashlib, pathlib, urllib.request
-          root = pathlib.Path('public-inputs')
-          commit = '4323497a6a73839e6d5260f6acd7ec0212cb3321'
-          paths = ['src/objects/js-interceptor-map.h', 'src/objects/js-interceptor-map.tq',
-                   'src/objects/js-interceptor-map-inl.h', 'src/objects/map.h', 'src/objects/map.tq',
-                   'src/objects/object-macros.h', 'src/torque/implementation-visitor.cc',
-                   'src/torque/types.cc', 'src/torque/types.h', 'src/torque/type-oracle.cc',
-                   'src/torque/declarable.h']
-          for path in paths:
-              print('PINNED_PUBLIC_SOURCE=' + path, flush=True)
-              request = urllib.request.Request('https://raw.githubusercontent.com/v8/v8/' + commit + '/' + path, headers={'User-Agent':'builder-public-source-check'})
-              data = urllib.request.urlopen(request, timeout=60).read()
-              if len(data) > 2000000:
-                  raise ValueError('Public source exceeds bound')
-              target = root / 'v8' / path
-              target.parent.mkdir(parents=True, exist_ok=True)
-              target.write_bytes(data)
-          sums = [hashlib.sha256(p.read_bytes()).hexdigest() + '  ' + str(p.relative_to(root)) for p in sorted(root.rglob('*')) if p.is_file()]
-          (root / 'SHA256SUMS').write_text('\n'.join(sums) + '\n')
-          PY
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
         with:
-          name: public-layout-inputs-${{ github.run_id }}
-          path: public-inputs
-          retention-days: 3
-          compression-level: 0
-          if-no-files-found: error
+          python-version: '3.12'
+      - name: Measure public ABI control without engine or secrets
+        run: python ci/cef-windows-layout/native.py
