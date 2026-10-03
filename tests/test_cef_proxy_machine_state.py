@@ -30,7 +30,7 @@ class MachineStatePolicyTests(unittest.TestCase):
             "-ex", "x/16i $pc", "-ex", "disassemble /r", "-ex", "frame 1",
             "-ex", "disassemble /r", "-ex", "frame 0",
         ])
-        self.assertEqual(argv[-3:], ["--args", "/private/exe", "/private/config"])
+        self.assertEqual(argv[-3:], ["--args", str(Path("/private/exe")), str(Path("/private/config"))])
         self.assertEqual((probe.MAX_LOG_BYTES, probe.TIMEOUT_SECONDS), (4*1024**2, 60))
 
     @unittest.skipUnless(sys.platform == "linux", "Linux capture contract")
