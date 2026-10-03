@@ -140,6 +140,7 @@ def load_tests(loader, standard_tests, pattern):
         import test_cef_runtime_symbols as runtime_symbols
         import test_cef_constructor_map_scale as map_scale
         from tests import test_cef_proxy_backtrace
+        from tests import test_cef_proxy_machine_state
         standard_tests.addTests(loader.loadTestsFromModule(regression))
         standard_tests.addTests(loader.loadTestsFromModule(crel))
         standard_tests.addTests(loader.loadTestsFromModule(transport))
@@ -148,6 +149,7 @@ def load_tests(loader, standard_tests, pattern):
         standard_tests.addTests(loader.loadTestsFromModule(runtime_symbols))
         standard_tests.addTests(loader.loadTestsFromModule(map_scale))
         standard_tests.addTests(loader.loadTestsFromModule(test_cef_proxy_backtrace))
+        standard_tests.addTests(loader.loadTestsFromModule(test_cef_proxy_machine_state))
     return standard_tests
 
 

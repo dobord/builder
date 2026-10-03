@@ -1,9 +1,9 @@
-"""Two reviewed Windows header corrections, bound to a new build contract.
+"""Five reviewed Windows source corrections, bound to a new build contract.
 
 The baseline CEF checkout and native checkpoint codec stay unchanged. Only the
 exact legacy producer below may cross into this profile, after authenticated
 restore under its OLD contract. New checkpoints carry the NEW contract and a
-verified source marker covering BOTH headers. Neither receipts nor fixtures
+verified source marker covering all five files. Neither receipts nor fixtures
 constitute runtime proof.
 """
 from __future__ import annotations
@@ -18,6 +18,7 @@ import time
 from .crypto import canonical, parse
 
 CHROMIUM = "79460ebecaa5625e57a5fb679a735659e73dc687"
+V8 = "4323497a6a73839e6d5260f6acd7ec0212cb3321"
 HEADER = "download/chromium/src/net/websockets/websocket_handshake_challenge.h"
 MARKER = "cef-windows-source-repair.json"
 BEFORE = "e9c2a8404032abb4080a5f6855ca396a5ecee841f017e932d49b9bbc2574e184"
@@ -25,12 +26,44 @@ AFTER = "38eb8b609bea01c37e3799feaba074c79f189568ff9b7df8c6943707433ef713"
 PAINT_HEADER = "download/chromium/src/ui/gfx/paint_vector_icon.h"
 PAINT_BEFORE = "8e9d9819abc21afcd225345eb0ae679731b909e6f23fc4c2dc04ce1f66c6a58d"
 PAINT_AFTER = "89e65e86fa4d5de9a72567de96c41659b6610e02cb50a063942e458e0fda70cd"
+AUTOFILL_SOURCE = "download/chromium/src/components/autofill/core/common/form_field_data.cc"
+AUTOFILL_BEFORE = "0edba08fcad529c1980260493296da86db429684b98fdaf7765ae8c083397e32"
+AUTOFILL_AFTER = "fd5dcc844aa6250b7b5bb702965e7abeba4cb57f655aec2ff43f078be471b490"
+ATOMIC_SOURCE = "download/chromium/src/third_party/blink/renderer/platform/wtf/text/atomic_string.cc"
+ATOMIC_BEFORE = "a4c0cc1f34fd6b692337331b8192096e77ada0a13a3b6c6598770bbb8711a871"
+ATOMIC_AFTER = "554274d3e6d39eb924fa276f1a747e26f54453a00c1e644dde9a1b7cc8cb5b42"
+HEAP_HEADER = "download/chromium/src/v8/src/heap/cppgc-internal/heap-object-header.h"
+HEAP_BEFORE = "397f2555d0498e92eb5d40872e8066b1a08a9cba993a4457256b8fb0375251ee"
+HEAP_AFTER = "901a8ce9d296f6d3b701d348fc09478f31465e659e9925696dd358871757d94d"
 # Ordered, closed set of corrections; no caller-selected paths or patches.
 CORRECTIONS = (
-    (HEADER, BEFORE, AFTER, b"#include <string_view>\n",
-     b"#include <string>\n#include <string_view>\n"),
-    (PAINT_HEADER, PAINT_BEFORE, PAINT_AFTER, b'#include "base/component_export.h"\n',
-     b'#include <string>\n\n#include "base/component_export.h"\n'),
+    (HEADER, BEFORE, AFTER, (
+        (b"#include <string_view>\n",
+         b"#include <string>\n#include <string_view>\n"),
+    )),
+    (PAINT_HEADER, PAINT_BEFORE, PAINT_AFTER, (
+        (b'#include "base/component_export.h"\n',
+         b'#include <string>\n\n#include "base/component_export.h"\n'),
+    )),
+    (AUTOFILL_SOURCE, AUTOFILL_BEFORE, AUTOFILL_AFTER, (
+        (b'#include "base/notreached.h"\n',
+         b'#include "base/no_destructor.h"\n#include "base/notreached.h"\n'),
+        (b'    static const std::optional<AutocompleteParsingResult> kNoParsingResult =\n'
+         b'        std::nullopt;\n',
+         b'    static const base::NoDestructor<std::optional<AutocompleteParsingResult>>\n'
+         b'        kNoParsingResult(std::nullopt);\n'),
+        (b'!e.contains(kNotRefillRelated) ? f.parsed_autocomplete_ : kNoParsingResult,',
+         b'!e.contains(kNotRefillRelated) ? f.parsed_autocomplete_ : *kNoParsingResult,'),
+    )),
+    (ATOMIC_SOURCE, ATOMIC_BEFORE, ATOMIC_AFTER, (
+        (b'#include "third_party/blink/renderer/platform/wtf/text/case_map.h"\n',
+         b'#include "third_party/blink/renderer/platform/wtf/text/case_map.h"\n'
+         b'#include "third_party/blink/renderer/platform/wtf/text/code_point_iterator.h"\n'),
+    )),
+    (HEAP_HEADER, HEAP_BEFORE, HEAP_AFTER, (
+        (b'std::atomic_ref(const_cast<uint16_t&>(half)).load(memory_order)',
+         b'std::atomic_ref<uint16_t>(const_cast<uint16_t&>(half)).load(memory_order)'),
+    )),
 )
 BASE_KEY = "60a369f6b051ba651cb301af299e7dadcc99608d0db6894bccab87b953817602"
 LEGACY = {
@@ -46,12 +79,13 @@ LEGACY = {
 
 def profile() -> dict:
     return {
-        "schema": 2, "id": "windows-string-includes-v2",
+        "schema": 2, "id": "windows-v8-atomic-ref-v5",
         "chromium_commit": CHROMIUM,
+        "v8_commit": V8,
         "corrections": [
             {"path": path.removeprefix("download/chromium/src/"),
              "before_sha256": before, "after_sha256": after}
-            for path, before, after, _, _ in CORRECTIONS
+            for path, before, after, _ in CORRECTIONS
         ],
         "implementation_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
     }
@@ -103,14 +137,18 @@ def transform(raw: bytes, relative: str = HEADER) -> bytes:
     correction = next((item for item in CORRECTIONS if item[0] == relative), None)
     if correction is None:
         raise ValueError("Unreviewed Windows header correction path")
-    _, before, after, anchor, replacement = correction
+    _, before, after, edits = correction
     text, newline = normalized(raw)
     digest = hashlib.sha256(text).hexdigest()
     if digest == after:
         return raw
-    if digest != before or text.count(anchor) != 1:
+    if digest != before:
         raise ValueError("Unreviewed Windows header; refusing source correction")
-    changed = text.replace(anchor, replacement, 1)
+    changed = text
+    for anchor, replacement in edits:
+        if changed.count(anchor) != 1:
+            raise ValueError("Windows source correction anchor mismatch")
+        changed = changed.replace(anchor, replacement, 1)
     if hashlib.sha256(changed).hexdigest() != after:
         raise ValueError("Windows source correction digest mismatch")
     return changed.replace(b"\n", newline)
@@ -169,10 +207,10 @@ def apply(work: Path, contract: str, origin: str) -> str:
     expected = canonical({"schema": 1, "kind": "cef-windows-source-repair",
                           "build_key": contract, "source_repair": profile()})
     marker = work / MARKER
-    # Validate the complete set BEFORE writing either source. A bad second
-    # header must not cause a seemingly valid partial source transition.
+    # Validate the complete set BEFORE writing any source. A bad later
+    # file must not cause a seemingly valid partial source transition.
     inputs = []
-    for relative, _, _, _, _ in CORRECTIONS:
+    for relative, _, _, _ in CORRECTIONS:
         path, original, before = _read(work, relative)
         inputs.append((relative, path, original, before, transform(original, relative)))
     if origin == "resume":
@@ -181,8 +219,8 @@ def apply(work: Path, contract: str, origin: str) -> str:
                 or any(original != changed for _, _, original, _, changed in inputs)):
             raise ValueError("Repaired Windows checkpoint source/marker mismatch")
         return "already-applied"
-    # No v1 checkpoint was qualified. Only the exact legacy producer may
-    # transition; reject old markers and partially applied header sets.
+    # No prior repaired checkpoint was qualified. Only the exact legacy producer may
+    # transition; reject old markers and partially applied source sets.
     if os.path.lexists(marker) or any(original == changed for _, _, original, _, changed in inputs):
         raise ValueError("Unexpected source correction in baseline checkpoint")
     for relative, path, original, before, changed in inputs:
@@ -201,7 +239,7 @@ def apply(work: Path, contract: str, origin: str) -> str:
             os.replace(temporary, path)
         finally:
             temporary.unlink(missing_ok=True)
-    # Publish the marker only after BOTH corrections verify. An interrupted
+    # Publish the marker only after ALL corrections verify. An interrupted
     # transition fails closed; it cannot produce a qualified checkpoint.
     for relative, _, _, before, changed in inputs:
         _, result, after = _read(work, relative)

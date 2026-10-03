@@ -32,3 +32,6 @@ tests/fixtures/cef-qualified-export/portfile.cmake text eol=lf
 # Windows repair profile hashes implementation and public fixture bytes.
 /secure_release/cef_windows_source_repair.py text eol=lf
 /tests/fixtures/cef-windows/*.h text eol=lf
+/tests/fixtures/cef-windows/*.cc text eol=lf
+
+/tests/fixtures/cef-windows/*.inc text eol=lf
