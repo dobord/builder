@@ -15,7 +15,7 @@
   },
   "source_repair": {
     "schema": 2,
-    "id": "windows-autofill-lifetime-v3",
+    "id": "windows-blink-iterator-v4",
     "chromium_commit": "79460ebecaa5625e57a5fb679a735659e73dc687",
     "corrections": [
       {
@@ -32,8 +32,13 @@
         "path": "components/autofill/core/common/form_field_data.cc",
         "before_sha256": "0edba08fcad529c1980260493296da86db429684b98fdaf7765ae8c083397e32",
         "after_sha256": "fd5dcc844aa6250b7b5bb702965e7abeba4cb57f655aec2ff43f078be471b490"
+      },
+      {
+        "path": "third_party/blink/renderer/platform/wtf/text/atomic_string.cc",
+        "before_sha256": "a4c0cc1f34fd6b692337331b8192096e77ada0a13a3b6c6598770bbb8711a871",
+        "after_sha256": "554274d3e6d39eb924fa276f1a747e26f54453a00c1e644dde9a1b7cc8cb5b42"
       }
     ],
-    "implementation_sha256": "07aaaba463d4d259852d5d8180971644af0bc2c7c2e93d43ae889d283132d4de"
+    "implementation_sha256": "92070ae7e4a9234618699d3644abca0e3584697890a18b6fab48a27a168d59d1"
   }
 }
