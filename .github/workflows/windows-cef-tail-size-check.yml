@@ -13,26 +13,21 @@ jobs:
         with:
           ref: 4a13eb077cc4425acf398f35f59d3400496b2f6d
           persist-credentials: false
-      - name: Snapshot committed public builder source
+      - name: Snapshot only hash-pinned public V8 files
         run: |
-          mkdir -p "$RUNNER_TEMP/public-inputs"
-          git archive HEAD > "$RUNNER_TEMP/public-inputs/builder-source.tar"
-          git rev-parse HEAD > "$RUNNER_TEMP/public-inputs/builder-commit.txt"
-          git rev-parse HEAD^{tree} > "$RUNNER_TEMP/public-inputs/builder-tree.txt"
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          repository: dobord/cef
-          ref: 03abd124ebe3b8a57fb78470a75b5aa3ce064e31
-          path: public-cef
-          persist-credentials: false
-      - name: Snapshot pinned public recipe
-        run: |
-          git -C public-cef archive HEAD > "$RUNNER_TEMP/public-inputs/cef-source.tar"
-          cd "$RUNNER_TEMP/public-inputs"
-          sha256sum *.tar > SHA256SUMS
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from tests.cef_windows_layout_inputs import INPUTS, public_input
+          root = Path(os.environ['RUNNER_TEMP']) / 'public-v8'
+          for path in INPUTS:
+              out = root / path
+              out.parent.mkdir(parents=True, exist_ok=True)
+              out.write_bytes(public_input(path))
+          PY
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: public-tail-size-inputs-${{ github.run_id }}
-          path: ${{ runner.temp }}/public-inputs/*
+          name: public-v8-tail-size-inputs-${{ github.run_id }}
+          path: ${{ runner.temp }}/public-v8/
           if-no-files-found: error
           retention-days: 3
