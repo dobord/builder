@@ -7,12 +7,14 @@ import hashlib
 import json
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 
 CEF = "2aff22e09daaa5c28780c5766a70ee13e61c93b6"
 HEADERS = {
     "include/base/cef_scoped_refptr.h": "f726a16f54eb75e368b02b3e1eac71129adcdb24",
     "include/base/cef_compiler_specific.h": "4e297e92f5078a244c87765f6d34b616d5f6bb68",
+    "tools/make_config_header.py": "71b9705535d9babab04ded0f042a8762869ed364",
 }
 HEADER = r'''#pragma once
 #include "include/base/cef_scoped_refptr.h"
@@ -83,13 +85,24 @@ def main() -> None:
     observations = {}
     with tempfile.TemporaryDirectory(prefix="cef-public-refptr-abi-") as folder:
         root = Path(folder)
+        # cef_config.h is generated, not checked into CEF. Generate it using
+        # the exact public recipe, without editing either pinned header.
+        (root / "include").mkdir()
+        config = root / "args.gn"
+        config.write_text('target_cpu="x64"\nozone_platform_x11=true\n', encoding="utf-8")
+        generated = root / "include/cef_config.h"
+        run([sys.executable, str(cef / "tools/make_config_header.py"),
+             str(generated), str(config)], root)
+        if not generated.is_file() or generated.is_symlink():
+            raise ValueError("Pinned CEF configuration generator produced no header")
         for name, data in (("fixture.h", HEADER), ("callee.cc", CALLEE), ("caller.cc", CALLER)):
             (root / name).write_text(data, encoding="utf-8")
         tools = {"gcc": args.gxx, "clang": args.clangxx}
         for label, compiler in tools.items():
             for unit in ("callee", "caller"):
                 run([compiler, "-std=c++20", "-O2", "-DNDEBUG", "-fno-lto",
-                     "-I", str(cef), "-c", unit + ".cc", "-o", label + "-" + unit + ".o"], root)
+                     "-I", str(root), "-I", str(cef), "-c", unit + ".cc",
+                     "-o", label + "-" + unit + ".o"], root)
         for caller, callee in (("gcc", "gcc"), ("clang", "clang"), ("gcc", "clang")):
             name = caller + "-to-" + callee
             executable = root / name
