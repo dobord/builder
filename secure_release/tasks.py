@@ -44,9 +44,12 @@ def _artifact_selector(client: Client, platform: str, run: int, attempt: int,
     if platform not in cef_contract.TRIPLETS or kind not in {"cef-checkpoint", "vcpkg-binaries"}:
         raise ValueError("invalid CEF continuation selector")
     producer = client.get(f"/repos/{BUILDER}/actions/runs/{run}/attempts/{attempt}")
+    builder_sha = cef_cache.producer_revision(platform, kind, run, attempt, builder_sha)
     workflow = build_workflow(producer.get("path", ""))
     if platform not in BUILD_WORKFLOWS[workflow]:
         raise ValueError("continuation platform differs from producer workflow")
+    if run == cef_cache.LINUX_CONTINUATION["run"] and workflow != "build-linux-release.yml":
+        raise ValueError("reviewed Linux continuation workflow changed")
     check_run(producer, BUILDER, workflow, builder_sha, attempt,
               "workflow_dispatch", success=False)
     if producer.get("status") != "completed":
@@ -71,7 +74,10 @@ def _artifact_selector(client: Client, platform: str, run: int, attempt: int,
                         "artifact_sha256": cef_contract.digest(value[7:])})
     if len(matches) > 1 or (required and len(matches) != 1):
         raise ValueError("missing or ambiguous CEF continuation artifact")
-    return matches[0] if matches else None
+    selected = matches[0] if matches else None
+    if selected is not None:
+        cef_cache.selected_revision(selected, platform, kind, builder_sha)
+    return selected
 
 
 def _apply_continuation(plan: dict, inputs: dict, builder_sha: str, client: Client,
@@ -94,6 +100,9 @@ def _apply_continuation(plan: dict, inputs: dict, builder_sha: str, client: Clie
         if selected != {"mode": "source-fresh", "checkpoint": None, "binary_cache": None}:
             raise ValueError("CEF continuation only starts from a fresh signed plan")
         run, attempt = number(run_text), number(attempt_text)
+        if run == cef_cache.LINUX_CONTINUATION["run"]:
+            if (platform != "linux" or result["cef"]["recipe_commit"] != cef_cache.LINUX_CONTINUATION["recipe_commit"]):
+                raise ValueError("Reviewed Linux continuation recipe changed")
         checkpoint = _artifact_selector(client, platform, run, attempt, builder_sha,
                                         "cef-checkpoint", required=True)
         binary = _artifact_selector(client, platform, run, attempt, builder_sha,
@@ -142,6 +151,9 @@ def request():
         str(continuation_inputs.get(p + suffix, "")).strip()
         for p in cef_contract.TRIPLETS for suffix in ("_builder_run", "_builder_attempt")
     ):
+        if (str(continuation_inputs.get("linux_builder_run", "")).strip() == str(cef_cache.LINUX_CONTINUATION["run"])
+                and source_sha != cef_cache.LINUX_CONTINUATION["source_sha"]):
+            raise ValueError("reviewed Linux continuation source revision changed")
         cache_reader = Client(env("BUILDER_CACHE_READ_TOKEN"))
         plan = _apply_continuation(plan, continuation_inputs, builder_sha, cache_reader, platforms)
     created = int(time.time())
@@ -349,12 +361,15 @@ def build():
     linux_native = None
     if cfg is not None:
         binary_cache = root / "binary-cache"
+        selected = cfg["platforms"][platform]["binary_cache"]
+        cache_revision = cef_cache.selected_revision(selected, platform, "vcpkg-binaries", env("GITHUB_SHA"))
         cache_key = cef_build.binary_key(payload["plan"]["upstream_sha"], platform, env("GITHUB_SHA"),
                                          triplets / (triplet + ".cmake"))
-        selected = cfg["platforms"][platform]["binary_cache"]
         if selected is not None:
+            restore_cache_key = cef_build.binary_key(payload["plan"]["upstream_sha"], platform, cache_revision,
+                                                     triplets / (triplet + ".cmake"))
             cef_cache.fetch(Client(env("BUILD_CACHE_READ_TOKEN")), selected, binary_cache,
-                            platform=platform, kind="vcpkg-binaries", key=cache_key,
+                            platform=platform, kind="vcpkg-binaries", key=restore_cache_key,
                             revision=env("GITHUB_SHA"), private=input_private)
         else:
             binary_cache.mkdir()
