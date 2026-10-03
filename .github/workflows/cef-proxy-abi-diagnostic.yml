@@ -1,0 +1,47 @@
+name: CEF proxy C++ ABI diagnostic
+on:
+  push:
+    branches: [feature/cef-static-integration]
+    paths:
+      - .github/workflows/cef-proxy-abi-diagnostic.yml
+      - ci/cef-proxy-abi/**
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: cef-public-proxy-abi-diagnostic
+  cancel-in-progress: false
+jobs:
+  native-abi:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: dobord/cef
+          ref: 2aff22e09daaa5c28780c5766a70ee13e61c93b6
+          path: public-cef-abi-source
+          persist-credentials: false
+      - name: Install native public diagnostic compilers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-14 clang-18
+      - name: Validate public diagnostic syntax
+        run: python3 -m py_compile ci/cef-proxy-abi/native.py
+      - name: Observe actual pinned CEF refptr across GCC and Clang
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 ci/cef-proxy-abi/native.py \
+            --cef public-cef-abi-source --gxx g++-14 --clangxx clang++-18 \
+            | tee "$RUNNER_TEMP/cef-public-refptr-abi.json"
+      - name: Upload public synthetic observations only
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: cef-public-refptr-abi-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/cef-public-refptr-abi.json
+          if-no-files-found: error
+          retention-days: 14
