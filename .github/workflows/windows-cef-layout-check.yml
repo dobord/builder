@@ -26,10 +26,11 @@ jobs:
           commit = '4323497a6a73839e6d5260f6acd7ec0212cb3321'
           paths = ['src/objects/js-interceptor-map.h', 'src/objects/js-interceptor-map.tq',
                    'src/objects/js-interceptor-map-inl.h', 'src/objects/map.h', 'src/objects/map.tq',
-                   'src/objects/object-macros.h', 'src/objects/tagged-member.h',
-                   'src/torque/implementation-visitor.cc', 'src/torque/types.cc',
-                   'src/torque/types.h', 'src/torque/type-oracle.cc', 'src/torque/declarable.h']
+                   'src/objects/object-macros.h', 'src/torque/implementation-visitor.cc',
+                   'src/torque/types.cc', 'src/torque/types.h', 'src/torque/type-oracle.cc',
+                   'src/torque/declarable.h']
           for path in paths:
+              print('PINNED_PUBLIC_SOURCE=' + path, flush=True)
               request = urllib.request.Request('https://raw.githubusercontent.com/v8/v8/' + commit + '/' + path, headers={'User-Agent':'builder-public-source-check'})
               data = urllib.request.urlopen(request, timeout=60).read()
               if len(data) > 2000000:
