@@ -22,10 +22,12 @@ from secure_release import cef_windows_source_repair as repair
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = ROOT / "tests/fixtures/cef-windows/websocket_handshake_challenge.h"
 PAINT_FIXTURE = ROOT / "tests/fixtures/cef-windows/paint_vector_icon.h"
+AUTOFILL_FIXTURE = ROOT / "tests/fixtures/cef-windows/form_field_data.cc"
 
 
 def populate(work):
-    for relative, fixture in ((repair.HEADER, FIXTURE), (repair.PAINT_HEADER, PAINT_FIXTURE)):
+    for relative, fixture in ((repair.HEADER, FIXTURE), (repair.PAINT_HEADER, PAINT_FIXTURE),
+                              (repair.AUTOFILL_SOURCE, AUTOFILL_FIXTURE)):
         path = work / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(fixture.read_bytes())
@@ -483,13 +485,13 @@ class PaintHeaderTests(unittest.TestCase):
             repair.transform(old, repair.HEADER)
 
     def test_profile_binds_both_headers_and_each_digest(self):
-        expected_paths = [repair.HEADER, repair.PAINT_HEADER]
+        expected_paths = [repair.HEADER, repair.PAINT_HEADER, repair.AUTOFILL_SOURCE]
         profile = repair.profile()
         self.assertEqual(profile["schema"], 2)
-        self.assertEqual(profile["id"], "windows-string-includes-v2")
+        self.assertEqual(profile["id"], "windows-autofill-lifetime-v3")
         self.assertEqual([c["path"] for c in profile["corrections"]],
                          [p.removeprefix("download/chromium/src/") for p in expected_paths])
-        for index in (0, 1):
+        for index in (0, 1, 2):
             for field in ("path", "before_sha256", "after_sha256"):
                 altered = copy.deepcopy(profile)
                 altered["corrections"][index][field] = "0" * len(altered["corrections"][index][field])
@@ -521,7 +523,8 @@ class PaintHeaderTests(unittest.TestCase):
 
     def test_resume_verifies_both_headers_not_just_marker(self):
         self.apply()
-        for relative, fixture in ((repair.HEADER, FIXTURE), (repair.PAINT_HEADER, PAINT_FIXTURE)):
+        for relative, fixture in ((repair.HEADER, FIXTURE), (repair.PAINT_HEADER, PAINT_FIXTURE),
+                              (repair.AUTOFILL_SOURCE, AUTOFILL_FIXTURE)):
             path = self.work / relative
             fixed = path.read_bytes()
             path.write_bytes(fixture.read_bytes())
@@ -646,6 +649,13 @@ class PaintHeaderTests(unittest.TestCase):
             after = compile_header(macro)
             self.assertEqual(after.returncode, 0, after.stdout + after.stderr)
         print("CEF_PAINT_MSVC_HEADER_REPAIR_VERIFIED guards=2 toolset=" + version)
+
+
+
+def load_tests(loader, standard_tests, pattern):
+    from tests import test_cef_windows_autofill_repair
+    standard_tests.addTests(loader.loadTestsFromModule(test_cef_windows_autofill_repair))
+    return standard_tests
 
 
 if __name__ == "__main__":

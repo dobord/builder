@@ -15,7 +15,7 @@
   },
   "source_repair": {
     "schema": 2,
-    "id": "windows-string-includes-v2",
+    "id": "windows-autofill-lifetime-v3",
     "chromium_commit": "79460ebecaa5625e57a5fb679a735659e73dc687",
     "corrections": [
       {
@@ -27,8 +27,13 @@
         "path": "ui/gfx/paint_vector_icon.h",
         "before_sha256": "8e9d9819abc21afcd225345eb0ae679731b909e6f23fc4c2dc04ce1f66c6a58d",
         "after_sha256": "89e65e86fa4d5de9a72567de96c41659b6610e02cb50a063942e458e0fda70cd"
+      },
+      {
+        "path": "components/autofill/core/common/form_field_data.cc",
+        "before_sha256": "0edba08fcad529c1980260493296da86db429684b98fdaf7765ae8c083397e32",
+        "after_sha256": "fd5dcc844aa6250b7b5bb702965e7abeba4cb57f655aec2ff43f078be471b490"
       }
     ],
-    "implementation_sha256": "04494258fee2ff2c0f2a76589c7ece8d979ac579a72149a9b8f4ee38f9a29b2f"
+    "implementation_sha256": "07aaaba463d4d259852d5d8180971644af0bc2c7c2e93d43ae889d283132d4de"
   }
 }
