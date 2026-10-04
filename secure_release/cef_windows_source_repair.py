@@ -40,7 +40,7 @@ TORQUE_BEFORE = "bb857f343d860a65c111e9e178df67d3f9cf251f92eaa017202265a533c63ab
 TORQUE_AFTER = "c53c5fda569a1d033cbdeb6213fb49474b714afa8fb1d750243e3193f1b951a3"
 TEMPLATE_HEADER = "download/chromium/src/v8/include/v8-template.h"
 TEMPLATE_BEFORE = "5ff060cc76e892c0c345a699c0438fe09e23f643a64572f738ec9ff1cfd2d122"
-TEMPLATE_AFTER = "6a559f2b14b2ca4cb038b9b08ab5dbe5c46daff0c3ff4a008ffc6f19d6bc2854"
+TEMPLATE_AFTER = "f4d4c4515727cedb7a5fba1a1b496a35bd9c6a9ee255cb7b23ed35ea8625b164"
 # Ordered, closed set of corrections; no caller-selected paths or patches.
 CORRECTIONS = (
     (HEADER, BEFORE, AFTER, (
