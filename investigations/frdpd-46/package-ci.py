@@ -57,14 +57,12 @@ def main():
     finally:
         ask.unlink(missing_ok=True)
         os.environ.pop('SOURCE_READ_TOKEN', None)
-    # Fresh builder: all dependencies come from the committed Debian control file.
     script = r'''set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y --no-install-recommends devscripts equivs lintian git python3
 mkdir -p /build/frdpd
 cp -a /input/. /build/frdpd/
-# Own only this disposable copy; do not weaken Git's ownership checks.
 chown -R --no-dereference "$(id -u):$(id -g)" /build/frdpd
 cd /build/frdpd
 export SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)
@@ -78,7 +76,6 @@ dpkg-query -W > /out/builder-packages.txt
 pkg-config --modversion xorg-server > /out/xorg-sdk-version.txt
 pkg-config --variable=abi_videodrv xorg-server > /out/xorg-video-abi.txt
 lintian --fail-on error --display-info --pedantic /build/frdpd_*.deb /build/frdpd-xorg_*.deb
-# This deliberately incompatible module is test-only and is never packaged.
 cmake --build /build/build-debian-frdpd-package --parallel 2 --target frdp-xorg-video-invalid-abi
 mkdir /out/native-fixture
 cp /build/build-debian-frdpd-package/server/frdp/xorg-frdp-invalid-abi/frdp_drv.so /out/native-fixture/
@@ -92,8 +89,8 @@ cp /build/build-debian-frdpd-package/server/frdp/xorg-frdp-invalid-abi/frdp_drv.
         raise ValueError('Expected exactly the main and Xorg binary packages')
     hashes = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in OUT.glob('*.deb')}
     (OUT / 'package-sha256.json').write_text(json.dumps(hashes, indent=2))
-    # Separate Ubuntu rootfs: installed product files, never build-tree binaries.
-    script = r'''set -euo pipefail
+    # Only static/install commands are traced; no site credentials are used here.
+    script = r'''set -euxo pipefail
 export DEBIAN_FRONTEND=noninteractive
 sed -i '\|^path-exclude=/usr/share/man/|d' /etc/dpkg/dpkg.cfg.d/excludes
 apt-get update -qq
@@ -116,12 +113,12 @@ config=/usr/share/frdpd/xorg/xorg-frdp.conf
 smoke=/usr/libexec/frdpd/frdp-xorg-smoke
 test -f "$module" && test -f "$config" && test -x "$smoke"
 ! dpkg-query -L frdpd-xorg | grep -E '^/(build|opt|tmp|usr/local)/'
-grep -F '/usr/lib/x86_64-linux-gnu/frdpd/xorg/modules' "$config"
+# The existing helper passes ModulePath via Xorg argv, not a config directive.
+grep -Eq '^[[:space:]]*Driver[[:space:]]+"frdp"[[:space:]]*$' "$config"
 sha256sum "$module" "$config" "$smoke" > /out/installed-native-sha256.txt
 mkdir -m 0755 /tmp/frdp-invalid-abi
 cp /packages/native-fixture/frdp_drv.so /tmp/frdp-invalid-abi/
 chmod 0644 /tmp/frdp-invalid-abi/frdp_drv.so
-# The installed helper drops to nobody itself. Never retain root for this gate.
 unset FRDP_XORG_SMOKE_KEEP_ROOT
 timeout --kill-after=5s 180s "$smoke" /usr/lib/xorg/Xorg "$config" \
     /usr/lib/x86_64-linux-gnu/frdpd/xorg/modules /usr/lib/xorg/modules \
