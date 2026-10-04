@@ -120,6 +120,28 @@ class ExampleTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'inventory'):
             example.verify(self.sdk, self.review)
 
+    def test_full_sdk_inventory_does_not_use_the_source_text_size_policy(self):
+        info = self.sdk / 'installed/vcpkg/info'
+        empty = info / ('empty_1.0_' + example.TRIPLET + '.list')
+        empty.write_bytes(b'')
+        large = info / ('large_1.0_' + example.TRIPLET + '.list')
+        data = (example.TRIPLET + '/share/public-fixture/header.h\n').encode() * 25000
+        self.assertGreater(len(data), 1024**2)
+        large.write_bytes(data)
+        self.assertEqual(example.read_listing(empty), b'')
+        self.assertEqual(example.read_listing(large), data)
+        example.verify(self.sdk, self.review)
+        with self.assertRaises(ValueError):
+            example.read(large)
+        large.write_bytes(b'a' * (8*1024**2 + 1))
+        with self.assertRaises(ValueError):
+            example.read_listing(large)
+        empty.unlink()
+        large.unlink()
+        self.listing.write_bytes(b'')
+        with self.assertRaisesRegex(ValueError, 'ownership'):
+            example.verify(self.sdk, self.review)
+
     def test_owner_missing_wrong_or_duplicated_is_fatal(self):
         original = self.listing.read_bytes()
         self.listing.write_text(example.TRIPLET + '/share/unrelated\n')

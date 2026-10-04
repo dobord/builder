@@ -82,7 +82,7 @@ def ownership(installed: Path, required: set[str]) -> None:
     checked.require(0 < len(lists) <= 4096, "Invalid FreeRDP owner inventory")
     found, total = set(), 0
     for listing in lists:
-        data = checked.read(listing); total += len(data)
+        data = checked.read_listing(listing); total += len(data)
         checked.require(total <= 32 * 1024**2, "FreeRDP owner inventory exceeds limit")
         for name in data.decode().splitlines():
             if name in required:

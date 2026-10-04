@@ -45,15 +45,27 @@ def clean(path: Path) -> Path:
     return path
 
 
-def read(path: Path) -> bytes:
+def _read_text(path: Path, maximum: int, *, empty: bool = False) -> bytes:
     path = clean(path)
-    require(path.is_file() and safeio.regular(path) and 0 < path.stat().st_size <= 1024**2,
+    require(path.is_file() and safeio.regular(path) and (empty or path.stat().st_size > 0)
+            and path.stat().st_size <= maximum,
             "Missing or oversized SDK example input")
     with path.open("rb") as stream:
-        data = stream.read(1024**2 + 1)
-    require(0 < len(data) <= 1024**2 and b"\0" not in data, "Invalid SDK example text")
+        data = stream.read(maximum + 1)
+    require((empty or len(data) > 0) and len(data) <= maximum and b"\0" not in data,
+            "Invalid SDK example text")
     data.decode("utf-8")
     return data
+
+
+def read(path: Path) -> bytes:
+    return _read_text(path, 1024**2)
+
+
+def read_listing(path: Path) -> bytes:
+    """Package inventory is metadata, not source text; aggregate caps still apply."""
+    require(path.suffix == ".list", "Not package ownership metadata")
+    return _read_text(path, 8 * 1024**2, empty=True)
 
 
 def blob(data: bytes) -> str:
@@ -102,7 +114,7 @@ def verify(sdk: Path, review: dict) -> dict:
         require(re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*_[^/]+_" + re.escape(TRIPLET) + r"\.list",
                              listing.name) is not None,
                 "Invalid SDK package ownership label")
-        data = read(listing)
+        data = read_listing(listing)
         total += len(data)
         require(total <= 32 * 1024**2, "SDK ownership evidence exceeds limit")
         for line in data.decode().splitlines():

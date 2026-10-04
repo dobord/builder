@@ -101,3 +101,11 @@ hooks. Run `37201859932/1` passed the engine smoke and installed the full graph
 before the ownership check rejected the reused root; its exact accepted
 checkpoint/cache context is retained in `LINUX_INSTALL_CONTINUATION` for this
 correction. Ownership and SDK readiness requirements are unchanged.
+
+Package `.list` inventories use a dedicated metadata reader: empty meta-port
+inventories are valid, each listing is bounded to 8 MiB, and existing 32 MiB
+aggregate ownership budgets remain mandatory. Source/example files keep their
+separate non-empty 1 MiB policy. Run `37209361089/1` completed frozen replay and
+runtime checks before the shared source reader rejected ownership metadata;
+`LINUX_INVENTORY_CONTINUATION` retains only its exact accepted checkpoint/cache
+for this correction, under the unchanged original authenticated context.

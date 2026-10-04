@@ -39,7 +39,7 @@ def ownership(installed: Path) -> None:
     lists = sorted(info.glob("*_" + TRIPLET + ".list"))
     checked.require(0 < len(lists) <= 4096, "Invalid protoc owner inventory")
     for listing in lists:
-        data = checked.read(listing); total += len(data)
+        data = checked.read_listing(listing); total += len(data)
         checked.require(total <= 32 * 1024**2, "Protoc owner evidence exceeds limit")
         for name in data.decode().splitlines():
             if name in expected:
