@@ -5,35 +5,73 @@ on:
 permissions:
   contents: read
 jobs:
-  public-inputs:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
+  regression:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    env:
+      CEF_WINDOWS_LAYOUT_SOURCE_ROOT: ${{ github.workspace }}/public-v8
+      CEF_WINDOWS_CFUNCTION_SOURCE_ROOT: ${{ github.workspace }}/public-v8
+      CEF_REPAIR_RECIPE_DIR: ${{ github.workspace }}/public-cef
+      CEF_WINDOWS_ACCESSIBILITY_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
     steps:
-      - name: Fetch bounded public Chromium inputs at the production revision
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p public-inputs
-          for path in \
-            LICENSE \
-            ui/accessibility/platform/browser_accessibility.h \
-            ui/accessibility/platform/browser_accessibility.cc \
-            ui/accessibility/platform/browser_accessibility_manager.cc \
-            ui/accessibility/platform/child_iterator.h \
-            ui/accessibility/ax_node.h \
-            base/containers/adapters.h; do
-            mkdir -p "public-inputs/$(dirname "$path")"
-            curl --fail --silent --show-error --proto '=https' --tlsv1.2 --connect-timeout 20 --max-time 60 --max-filesize 1048576 \
-              "https://raw.githubusercontent.com/chromium/chromium/79460ebecaa5625e57a5fb679a735659e73dc687/$path" \
-              -o "public-inputs/$path"
-          done
-          cd public-inputs
-          find . -type f -print0 | sort -z | xargs -0 sha256sum > ../SHA256SUMS
-          mv ../SHA256SUMS .
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          name: public-chromium-inputs-${{ github.run_id }}
-          path: public-inputs/
-          if-no-files-found: error
-          retention-days: 2
-          compression-level: 0
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: v8/v8
+          ref: 4323497a6a73839e6d5260f6acd7ec0212cb3321
+          path: public-v8
+          persist-credentials: false
+          sparse-checkout: |
+            include
+            src/base
+            src/torque
+            src/objects
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: dobord/cef
+          ref: 03abd124ebe3b8a57fb78470a75b5aa3ce064e31
+          path: public-cef
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.12'
+      - name: Verify exact source revisions
+        shell: python
+        run: |
+          import os, subprocess
+          pins = {'.': os.environ['GITHUB_SHA'], 'public-v8': '4323497a6a73839e6d5260f6acd7ec0212cb3321', 'public-cef': '03abd124ebe3b8a57fb78470a75b5aa3ce064e31'}
+          for path, sha in pins.items():
+              assert subprocess.check_output(['git', '-C', path, 'rev-parse', 'HEAD'], text=True).strip() == sha
+      - name: Verify offline wheelhouse
+        run: python tools/verify_wheelhouse.py
+      - name: Install only hash-pinned offline cryptography
+        run: |
+          python -m pip install --no-index --find-links=vendor/wheels --disable-pip-version-check --require-hashes --only-binary=:all: -r requirements.lock
+      - name: Acquire and verify complete pinned public Chromium test inputs
+        shell: python
+        run: |
+          import ast, hashlib, pathlib, urllib.request
+          tree = ast.parse(pathlib.Path('tests/cef_windows_accessibility_inputs.py').read_text('utf-8'))
+          pins = [ast.literal_eval(node.value) for node in tree.body if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == 'INPUTS' for t in node.targets)]
+          assert len(pins) == 1 and len(pins[0]) == 7
+          root = pathlib.Path('public-chromium'); root.mkdir()
+          for path, (size, digest, blob) in pins[0].items():
+              assert not pathlib.PurePosixPath(path).is_absolute() and '..' not in pathlib.PurePosixPath(path).parts and 0 < size < 131072
+              url = 'https://raw.githubusercontent.com/chromium/chromium/79460ebecaa5625e57a5fb679a735659e73dc687/' + path
+              with urllib.request.urlopen(url, timeout=30) as stream:
+                  assert stream.geturl() == url
+                  raw = stream.read(size + 1)
+              assert len(raw) == size and hashlib.sha256(raw).hexdigest() == digest
+              assert hashlib.sha1(b'blob ' + str(len(raw)).encode() + b'\0' + raw).hexdigest() == blob
+              target = root / path; target.parent.mkdir(parents=True, exist_ok=True); target.write_bytes(raw)
+          print('PUBLIC_CHROMIUM_ITERATOR_INPUTS_VERIFIED files=7')
+      - name: Native regressions and complete production checkpoint preflight
+        run: python -m unittest tests.test_cef_windows_source_repair tests.test_cef_windows_cfunction_span_repair tests.test_openssl_tink_logs -v
+      - name: Full regression suite
+        run: python -m unittest discover -s tests -v

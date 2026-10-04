@@ -9,6 +9,7 @@ import hashlib
 import os
 from pathlib import Path
 import urllib.request
+from tests.cef_windows_accessibility_inputs import fixture_bytes as accessibility_fixture
 
 V8 = "4323497a6a73839e6d5260f6acd7ec0212cb3321"
 SOURCE_ROOT = os.environ.get("CEF_WINDOWS_LAYOUT_SOURCE_ROOT")
@@ -45,6 +46,8 @@ _GENERATOR = public_input("src/torque/implementation-visitor.cc")
 
 
 def fixture_bytes(name):
+    if name in {"browser_accessibility.h", "browser_accessibility.cc"}:
+        return accessibility_fixture(name)
     if name == "implementation-visitor.cc":
         return _GENERATOR
     if name == "v8-template.h":

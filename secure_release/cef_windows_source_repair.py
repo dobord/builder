@@ -1,9 +1,9 @@
-"""Eight reviewed Windows source corrections, bound to a new build contract.
+"""Ten reviewed Windows source corrections, bound to a new build contract.
 
 The baseline CEF checkout and native checkpoint codec stay unchanged. Only the
 exact legacy producer below may cross into this profile, after authenticated
 restore under its OLD contract. New checkpoints carry the NEW contract and a
-verified source marker covering all eight files. Neither receipts nor fixtures
+verified source marker covering all ten files. Neither receipts nor fixtures
 constitute runtime proof.
 """
 from __future__ import annotations
@@ -44,6 +44,12 @@ TEMPLATE_AFTER = "f4d4c4515727cedb7a5fba1a1b496a35bd9c6a9ee255cb7b23ed35ea8625b1
 BIND_HEADER = "download/chromium/src/v8/src/base/functional/bind-internal.h"
 BIND_BEFORE = "0848488073fd36b6b75088d66518cd7b9bbe0f60190b47e12590d1748abae796"
 BIND_AFTER = "e08f2225e93df5a1afc02a1c375e87645449fd7e82b5d7b520c4e7aa31ce501b"
+ACCESSIBILITY_HEADER = "download/chromium/src/ui/accessibility/platform/browser_accessibility.h"
+ACCESSIBILITY_HEADER_BEFORE = "4892eaa5acd222a0c672d9b5990f0a77009a210649fa8c775bc80e803cfd5f1d"
+ACCESSIBILITY_HEADER_AFTER = "ce013afbf9a06a045260b9b38c2aacfe645090e4fb6e110429903a3f6cd725c1"
+ACCESSIBILITY_SOURCE = "download/chromium/src/ui/accessibility/platform/browser_accessibility.cc"
+ACCESSIBILITY_SOURCE_BEFORE = "f7e3cf4414bf31a8de222ea1a40b147f9fa4014d7e7604192ba3963e307f629a"
+ACCESSIBILITY_SOURCE_AFTER = "2db1d2329a419e61c4409b630447c3c56e63987c76a1c76c34bbfac6e097ffe8"
 # Ordered, closed set of corrections; no caller-selected paths or patches.
 CORRECTIONS = (
     (HEADER, BEFORE, AFTER, (
@@ -90,8 +96,16 @@ CORRECTIONS = (
         (b'#define BIND_INTERNAL_EXTRACT_CALLABLE_RUN_TYPE_WITH_QUALS(quals)     \\\n  template <typename Callable, typename R, typename... Args>          \\\n  struct ExtractCallableRunTypeImpl<Callable,                         \\\n                                    R (Callable::*)(Args...) quals> { \\\n    using Type = R(Args...);                                          \\\n  }',
          b'// An inherited call operator belongs to its declaring base, not Callable.\n#define BIND_INTERNAL_EXTRACT_CALLABLE_RUN_TYPE_WITH_QUALS(quals)       \\\n  template <typename Callable, typename Receiver, typename R,          \\\n            typename... Args>                                         \\\n  struct ExtractCallableRunTypeImpl<Callable,                          \\\n                                    R (Receiver::*)(Args...) quals> { \\\n    using Type = R(Args...);                                           \\\n  }'),
     )),
-
-
+    (ACCESSIBILITY_HEADER, ACCESSIBILITY_HEADER_BEFORE, ACCESSIBILITY_HEADER_AFTER, (
+        (b'    PlatformChildIterator(const BrowserAccessibility* parent,\n',
+         b'    // A singular iterator, comparable with other value-initialized iterators.\n    PlatformChildIterator();\n    PlatformChildIterator(const BrowserAccessibility* parent,\n'),
+    )),
+    (ACCESSIBILITY_SOURCE, ACCESSIBILITY_SOURCE_BEFORE, ACCESSIBILITY_SOURCE_AFTER, (
+        (b'BrowserAccessibility::PlatformChildIterator::PlatformChildIterator(\n    const PlatformChildIterator& it)\n',
+         b'BrowserAccessibility::PlatformChildIterator::PlatformChildIterator()\n    : parent_(nullptr), platform_iterator(nullptr, nullptr) {}\n\nBrowserAccessibility::PlatformChildIterator::PlatformChildIterator(\n    const PlatformChildIterator& it)\n'),
+        (b'BrowserAccessibility::PlatformChildIterator::GetIndexInParent() const {\n',
+         b'BrowserAccessibility::PlatformChildIterator::GetIndexInParent() const {\n  // Singular iterators have no parent or index. Do not dereference either.\n  if (!parent_) {\n    return std::nullopt;\n  }\n\n'),
+    )),
 )
 BASE_KEY = "60a369f6b051ba651cb301af299e7dadcc99608d0db6894bccab87b953817602"
 LEGACY = {
@@ -107,7 +121,7 @@ LEGACY = {
 
 def profile() -> dict:
     return {
-        "schema": 2, "id": "windows-v8-inherited-callable-v9",
+        "schema": 2, "id": "windows-accessibility-default-iterator-v10",
         "chromium_commit": CHROMIUM,
         "v8_commit": V8,
         "corrections": [
@@ -227,6 +241,14 @@ def _read(work: Path, relative: str, limit: int = 65536) -> tuple[Path, bytes, o
     return path, data, before
 
 
+def source_limit(relative: str) -> int:
+    if relative == TORQUE_SOURCE:
+        return 262144
+    if relative == ACCESSIBILITY_SOURCE:
+        return 131072
+    return 65536
+
+
 def apply(work: Path, contract: str, origin: str) -> str:
     if origin not in {"fresh", "legacy", "resume"} or contract != build_key(BASE_KEY):
         raise ValueError("Invalid Windows source repair invocation")
@@ -239,7 +261,7 @@ def apply(work: Path, contract: str, origin: str) -> str:
     # file must not cause a seemingly valid partial source transition.
     inputs = []
     for relative, _, _, _ in CORRECTIONS:
-        path, original, before = _read(work, relative, 262144 if relative == TORQUE_SOURCE else 65536)
+        path, original, before = _read(work, relative, source_limit(relative))
         inputs.append((relative, path, original, before, transform(original, relative)))
     if origin == "resume":
         _, data, _ = _read(work, MARKER, 8192)
@@ -270,7 +292,7 @@ def apply(work: Path, contract: str, origin: str) -> str:
     # Publish the marker only after ALL corrections verify. An interrupted
     # transition fails closed; it cannot produce a qualified checkpoint.
     for relative, _, _, before, changed in inputs:
-        _, result, after = _read(work, relative, 262144 if relative == TORQUE_SOURCE else 65536)
+        _, result, after = _read(work, relative, source_limit(relative))
         if result != changed or after.st_mtime_ns <= before.st_mtime_ns:
             raise ValueError("Windows header correction or input clock verification failed")
     with marker.open("xb") as stream:
