@@ -9,8 +9,8 @@ concurrency:
   group: frdpd-47-${{ github.sha }}
   cancel-in-progress: false
 env:
-  SOURCE_SHA: '1b76a25df093a1f32aa440ec14497805c841fd5c'
-  SOURCE_TREE: '7681430f31d8b225a006ce65aa505eb274cbec8d'
+  SOURCE_SHA: '45a1c69186c60d1ee5a5ce78f1023a5d719cde86'
+  SOURCE_TREE: '724e9fdccb6ba53d671710e7573275c7d4d12249'
   ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
 jobs:
   qualification:
@@ -79,7 +79,7 @@ jobs:
                   status = original(name, script, timeout)
                   if name == 'focused' and status == 0:
                       original('provenance-unit', 'python3 /src/server/frdp/test/TestFreeRDPFrdpClientProvenance.py -v', 60)
-                      original('component-repeat', 'ctest --test-dir /opt/freerdp-build --no-tests=error --output-on-failure --verbose --timeout 120 --repeat until-fail:10 -R "^TestFreeRDPFrdp(ClientProvenance|WindowPixelOracle|SceneSubscribe|WindowCodec|GfxSender|FramePipeline|WindowExchange|PipelineStages|FrameScheduler|SurfaceManager|WindowRegistry|InstalledManifest|SesmandStringBounds|ListenerStringBounds)$"', 400)
+                      original('component-repeat', 'ctest --test-dir /opt/freerdp-build --no-tests=error --output-on-failure --verbose --timeout 120 --repeat until-fail:10 -R "^TestFreeRDPFrdp(X11WindowCapture|ClientProvenance|WindowPixelOracle|SceneSubscribe|WindowCodec|GfxSender|FramePipeline|WindowExchange|PipelineStages|FrameScheduler|SurfaceManager|WindowRegistry|InstalledManifest|SesmandStringBounds|ListenerStringBounds)$"', 400)
                       original('agent-stop-repeat', 'ctest --test-dir /opt/freerdp-build --no-tests=error --output-on-failure --verbose --timeout 120 --repeat until-fail:30 -R "^TestFreeRDPFrdpAgentStop$"', 600)
                       negative = '''set -euo pipefail
           /opt/freerdp-build/client/X11/xfreerdp /version | grep -F 'FreeRDP version 3.31.0'
