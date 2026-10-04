@@ -1,0 +1,46 @@
+name: Windows CEF CFunction span verification
+on:
+  push:
+    branches: [repair/windows-cef-42-cfunction-span]
+permissions:
+  contents: read
+jobs:
+  public-inputs:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 460e5e126af03e2c701394985b0e6846be4befc4
+          persist-credentials: false
+      - name: Archive exact public builder tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 460e5e126af03e2c701394985b0e6846be4befc4
+          mkdir public-inputs
+          git archive --format=tar HEAD > public-inputs/builder-source.tar
+          git rev-parse HEAD > public-inputs/builder-commit.txt
+          git rev-parse HEAD^{tree} > public-inputs/builder-tree.txt
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: v8/v8
+          ref: 4323497a6a73839e6d5260f6acd7ec0212cb3321
+          path: public-v8
+          persist-credentials: false
+          sparse-checkout: include
+      - name: Archive pinned public V8 headers
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C public-v8 rev-parse HEAD)" = 4323497a6a73839e6d5260f6acd7ec0212cb3321
+          git -C public-v8 archive --format=tar HEAD include LICENSE > public-inputs/v8-include.tar
+          git -C public-v8 rev-parse HEAD > public-inputs/v8-commit.txt
+          cd public-inputs
+          sha256sum *.tar *-commit.txt *-tree.txt > SHA256SUMS
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: public-cfunction-inputs-${{ github.run_id }}
+          path: public-inputs/*
+          if-no-files-found: error
+          retention-days: 3
