@@ -146,5 +146,9 @@ class SmokeCheckpointCacheTests(LinuxCacheTests):
     RECORD = 'LINUX_SMOKE_CONTINUATION'
 
 
+class AuditCheckpointCacheTests(LinuxCacheTests):
+    RECORD = 'LINUX_AUDIT_CONTINUATION'
+
+
 if __name__ == '__main__':
     unittest.main()

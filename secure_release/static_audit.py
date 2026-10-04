@@ -238,11 +238,16 @@ def safe_members(archive: zipfile.ZipFile) -> list[zipfile.ZipInfo]:
     return entries
 
 
-def inspect_sdk(path: Path, platform: str) -> dict:
+def inspect_sdk(path: Path, platform: str, *, reviewed_objects: dict | None = None) -> dict:
     require(platform in ('linux', 'windows'), 'unsupported target platform')
     require(path.is_file() and not path.is_symlink(), 'SDK is not a regular file')
     prefix = f'installed/x64-{platform}-static-release/'
     checked, violations, target_files = [], [], 0
+    objects, object_records, seen_objects = [], {}, set()
+    if reviewed_objects is not None:
+        from . import safeio
+        object_records = safeio._object_review(reviewed_objects)
+        require(platform == 'linux', 'Installed object review is Linux-only')
     with path.open('rb') as source:
         sdk_digest = hashlib.file_digest(source, 'sha256').hexdigest()
     with zipfile.ZipFile(path) as archive:
@@ -258,6 +263,18 @@ def inspect_sdk(path: Path, platform: str) -> dict:
             reason = None
             if SHARED_NAME.search(relative):
                 reason = 'shared-library-file'
+            elif entry.filename in object_records:
+                record = object_records[entry.filename]
+                try:
+                    require(entry.file_size == record['size'], 'Reviewed object size changed')
+                    with archive.open(entry) as stream:
+                        data = stream.read(record['size'] + 1)
+                    safeio._object_payload(data, record)
+                    require(object_kind(data, relative, platform) == 'elf-object', 'Not a native target object')
+                    objects.append({'path': relative, **record})
+                    seen_objects.add(entry.filename)
+                except (ValueError, struct.error) as error:
+                    reason = 'invalid-reviewed-object: ' + str(error)
             elif relative.lower().endswith(('.a', '.lib', '.rlib')):
                 try:
                     with archive.open(entry) as stream:
@@ -282,15 +299,20 @@ def inspect_sdk(path: Path, platform: str) -> dict:
                     reason = 'target-image-requires-separate-linkage-audit'
             if reason:
                 violations.append({'path': relative, 'reason': reason})
-    native_objects = sum(r['kinds'].get('elf-object', 0) + r['kinds'].get('coff-object', 0) for r in checked)
+    if seen_objects != set(object_records):
+        violations.append({'path': '', 'reason': 'reviewed-object-inventory-incomplete'})
+    native_objects = sum(r['kinds'].get('elf-object', 0) + r['kinds'].get('coff-object', 0) for r in checked) + len(objects)
     require(target_files > 0 and checked, 'SDK has no auditable target archives')
     if not native_objects:
         violations.append({'path': '', 'reason': 'no-native-target-objects'})
-    return {'schema': 1, 'kind': 'target-archive-audit', 'platform': platform,
+    report = {'schema': 1, 'kind': 'target-archive-audit', 'platform': platform,
             'triplet': f'x64-{platform}-static-release', 'sdk_sha256': sdk_digest,
             'target_files': target_files, 'native_objects': native_objects, 'archives': checked, 'violations': violations,
             'target_archives_static': not violations,
-            'runtime_dependencies_verified': False, 'sdk_code_executed': False}
+             'runtime_dependencies_verified': False, 'sdk_code_executed': False}
+    if object_records:
+        report['reviewed_objects'] = objects
+    return report
 
 
 def summarize(report: dict) -> dict:

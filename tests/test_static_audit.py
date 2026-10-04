@@ -1,5 +1,6 @@
 """Native compiler plus synthetic binary regressions; no CEF execution claim."""
 import io
+import hashlib
 import os
 from pathlib import Path
 import shutil
@@ -42,6 +43,39 @@ def coff(section=b'.text', big=False):
 
 
 class AuditTests(unittest.TestCase):
+    def test_reviewed_freerdp_object_is_relocatable_code_not_a_target_image(self):
+        if sys.platform != 'linux' or not shutil.which('cc'):
+            self.skipTest('native Linux compiler unavailable')
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d).resolve()
+            source, obj, shared = root/'fixture.c', root/'fixture.o', root/'fixture.so'
+            source.write_text('int public_fixture(void) { return 7; }\n')
+            subprocess.run(['cc', '-fPIC', '-c', str(source), '-o', str(obj)], check=True)
+            subprocess.run(['cc', '-shared', str(obj), '-o', str(shared)], check=True)
+            name = 'installed/x64-linux-static-release/lib/freerdp3/objects-Release/disp-server/disp_main.c.o'
+            archive = root/'sdk.zip'
+            data = obj.read_bytes()
+            def package(payload):
+                with zipfile.ZipFile(archive, 'w') as sdk:
+                    sdk.writestr('installed/x64-linux-static-release/lib/public.a', ar(elf()))
+                    sdk.writestr(name, payload)
+            records = {name: {'size': len(data), 'sha256': hashlib.sha256(data).hexdigest()}}
+            package(data)
+            self.assertFalse(audit.inspect_sdk(archive, 'linux')['target_archives_static'])
+            report = audit.inspect_sdk(archive, 'linux', reviewed_objects=records)
+            self.assertTrue(report['target_archives_static'])
+            self.assertEqual(len(report['reviewed_objects']), 1)
+            self.assertEqual(report['native_objects'], 2)
+            package(data + b'changed')
+            self.assertFalse(audit.inspect_sdk(archive, 'linux', reviewed_objects=records)['target_archives_static'])
+            image = shared.read_bytes()
+            package(image)
+            image_record = {name: {'size': len(image), 'sha256': hashlib.sha256(image).hexdigest()}}
+            self.assertFalse(audit.inspect_sdk(archive, 'linux', reviewed_objects=image_record)['target_archives_static'])
+            with zipfile.ZipFile(archive, 'w') as sdk:
+                sdk.writestr('installed/x64-linux-static-release/lib/public.a', ar(elf()))
+            self.assertFalse(audit.inspect_sdk(archive, 'linux', reviewed_objects=records)['target_archives_static'])
+
     def test_native_linux_archive_and_shared_detection(self):
         if sys.platform != 'linux' or not shutil.which('cc') or not shutil.which('ar'):
             self.skipTest('native Linux compiler/ar unavailable')

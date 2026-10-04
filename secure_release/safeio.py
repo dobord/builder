@@ -382,7 +382,14 @@ def _object_bytes(path: Path, record: dict | None = None) -> bytes:
         if not 64 <= st.st_size <= MAX_REVIEWED_OBJECT_BYTES:
             raise ValueError("invalid installed object size")
         data = stream.read(MAX_REVIEWED_OBJECT_BYTES + 1)
-    if (len(data) != st.st_size or data[:7] != b"\x7fELF\x02\x01\x01"
+    if len(data) != st.st_size:
+        raise ValueError("installed object size changed")
+    return _object_payload(data, record)
+
+
+def _object_payload(data: bytes, record: dict | None = None) -> bytes:
+    """Validate the same native relocatable bytes before ZIP and inside audit."""
+    if (not 64 <= len(data) <= MAX_REVIEWED_OBJECT_BYTES or data[:7] != b"\x7fELF\x02\x01\x01"
             or int.from_bytes(data[16:18], "little") != 1
             or int.from_bytes(data[18:20], "little") != 62
             or int.from_bytes(data[20:24], "little") != 1
