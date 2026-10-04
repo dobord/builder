@@ -77,25 +77,28 @@ cp /build/build-debian-frdpd-package/CMakeCache.txt /out/package-CMakeCache.txt
 dpkg-query -W > /out/builder-packages.txt
 pkg-config --modversion xorg-server > /out/xorg-sdk-version.txt
 pkg-config --variable=abi_videodrv xorg-server > /out/xorg-video-abi.txt
-lintian --fail-on error --display-info --pedantic /build/frdpd_*.deb
+lintian --fail-on error --display-info --pedantic /build/frdpd_*.deb /build/frdpd-xorg_*.deb
+# This deliberately incompatible module is test-only and is never packaged.
+cmake --build /build/build-debian-frdpd-package --parallel 2 --target frdp-xorg-video-invalid-abi
+mkdir /out/native-fixture
+cp /build/build-debian-frdpd-package/server/frdp/xorg-frdp-invalid-abi/frdp_drv.so /out/native-fixture/
 '''
     args = ['docker', 'run', '--rm', '--init', '-v', str(SOURCE)+':/input:ro',
             '-v', str(OUT)+':/out', 'ubuntu:24.04', 'bash', '-lc', script]
     if run('clean-deb-build', args, 2400):
         return 1
     packages = list(OUT.glob('frdpd_*.deb'))
-    if len(packages) != 1:
-        raise ValueError('Expected one main binary package')
+    if len(packages) != 1 or len(list(OUT.glob('frdpd-xorg_*.deb'))) != 1:
+        raise ValueError('Expected exactly the main and Xorg binary packages')
     hashes = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in OUT.glob('*.deb')}
     (OUT / 'package-sha256.json').write_text(json.dumps(hashes, indent=2))
-    # Separate Ubuntu rootfs: do not copy build-tree binaries or configure the site.
+    # Separate Ubuntu rootfs: installed product files, never build-tree binaries.
     script = r'''set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
-# Keep packaged manuals, matching the existing clean-install gate.
 sed -i '\|^path-exclude=/usr/share/man/|d' /etc/dpkg/dpkg.cfg.d/excludes
 apt-get update -qq
-apt-get install -y --no-install-recommends python3 freerdp3-x11 /packages/frdpd_*.deb
-verification=$(dpkg -V frdpd)
+apt-get install -y --no-install-recommends python3 freerdp3-x11 /packages/frdpd_*.deb /packages/frdpd-xorg_*.deb
+verification=$(dpkg -V frdpd frdpd-xorg)
 printf '%s\n' "$verification" > /out/dpkg-verify.txt
 test -z "$verification"
 for unit in frdpd frdp-authd frdp-sesmand; do
@@ -108,11 +111,31 @@ for process in /proc/[0-9]*/comm; do
     esac
 done
 python3 /input/server/frdp/test/e2e/scripts/installed-window-manifest.py /out/installed-manifest.json
+module=/usr/lib/x86_64-linux-gnu/frdpd/xorg/modules/frdp_drv.so
+config=/usr/share/frdpd/xorg/xorg-frdp.conf
+smoke=/usr/libexec/frdpd/frdp-xorg-smoke
+test -f "$module" && test -f "$config" && test -x "$smoke"
+! dpkg-query -L frdpd-xorg | grep -E '^/(build|opt|tmp|usr/local)/'
+grep -F '/usr/lib/x86_64-linux-gnu/frdpd/xorg/modules' "$config"
+sha256sum "$module" "$config" "$smoke" > /out/installed-native-sha256.txt
+mkdir -m 0755 /tmp/frdp-invalid-abi
+cp /packages/native-fixture/frdp_drv.so /tmp/frdp-invalid-abi/
+chmod 0644 /tmp/frdp-invalid-abi/frdp_drv.so
+# The installed helper drops to nobody itself. Never retain root for this gate.
+unset FRDP_XORG_SMOKE_KEEP_ROOT
+timeout --kill-after=5s 180s "$smoke" /usr/lib/xorg/Xorg "$config" \
+    /usr/lib/x86_64-linux-gnu/frdpd/xorg/modules /usr/lib/xorg/modules \
+    /tmp/frdp-invalid-abi > /out/installed-native-smoke.log 2>&1
+grep -F 'frdp native Xorg smoke passed:' /out/installed-native-smoke.log
+for process in /proc/[0-9]*/comm; do
+    case $(cat "$process" 2>/dev/null || true) in Xorg) exit 1 ;; esac
+done
 dpkg-query -W > /out/installed-packages.txt
-apt-get purge -y frdpd
+apt-get purge -y frdpd-xorg frdpd
 test ! -e /usr/bin/frdpd
 test ! -e /usr/bin/frdp-session-agent
-printf 'result=pass\n' > /out/clean-install-result.txt
+test ! -e "$module" && test ! -e "$config" && test ! -e "$smoke"
+printf 'result=pass\nnative_smoke=pass\n' > /out/clean-install-result.txt
 '''
     args = ['docker', 'run', '--rm', '--init', '-v', str(SOURCE)+':/input:ro',
             '-v', str(OUT)+':/packages:ro', '-v', str(OUT)+':/out',
