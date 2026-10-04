@@ -48,7 +48,7 @@ def _artifact_selector(client: Client, platform: str, run: int, attempt: int,
     workflow = build_workflow(producer.get("path", ""))
     if platform not in BUILD_WORKFLOWS[workflow]:
         raise ValueError("continuation platform differs from producer workflow")
-    if run == cef_cache.LINUX_CONTINUATION["run"] and workflow != "build-linux-release.yml":
+    if cef_cache.continuation_record(run) is not None and workflow != "build-linux-release.yml":
         raise ValueError("reviewed Linux continuation workflow changed")
     check_run(producer, BUILDER, workflow, builder_sha, attempt,
               "workflow_dispatch", success=False)
@@ -100,8 +100,9 @@ def _apply_continuation(plan: dict, inputs: dict, builder_sha: str, client: Clie
         if selected != {"mode": "source-fresh", "checkpoint": None, "binary_cache": None}:
             raise ValueError("CEF continuation only starts from a fresh signed plan")
         run, attempt = number(run_text), number(attempt_text)
-        if run == cef_cache.LINUX_CONTINUATION["run"]:
-            if (platform != "linux" or result["cef"]["recipe_commit"] != cef_cache.LINUX_CONTINUATION["recipe_commit"]):
+        reviewed = cef_cache.continuation_record(run)
+        if reviewed is not None:
+            if (platform != "linux" or result["cef"]["recipe_commit"] != reviewed["recipe_commit"]):
                 raise ValueError("Reviewed Linux continuation recipe changed")
         checkpoint = _artifact_selector(client, platform, run, attempt, builder_sha,
                                         "cef-checkpoint", required=True)
@@ -151,8 +152,9 @@ def request():
         str(continuation_inputs.get(p + suffix, "")).strip()
         for p in cef_contract.TRIPLETS for suffix in ("_builder_run", "_builder_attempt")
     ):
-        if (str(continuation_inputs.get("linux_builder_run", "")).strip() == str(cef_cache.LINUX_CONTINUATION["run"])
-                and source_sha != cef_cache.LINUX_CONTINUATION["source_sha"]):
+        run_text = str(continuation_inputs.get("linux_builder_run", "")).strip()
+        reviewed = cef_cache.continuation_record(int(run_text)) if run_text.isdecimal() else None
+        if reviewed is not None and source_sha != reviewed["source_sha"]:
             raise ValueError("reviewed Linux continuation source revision changed")
         cache_reader = Client(env("BUILDER_CACHE_READ_TOKEN"))
         plan = _apply_continuation(plan, continuation_inputs, builder_sha, cache_reader, platforms)
@@ -470,6 +472,10 @@ def diagnostics():
             shutil.copyfileobj(stream, out, 1024 * 1024)
         remaining = 32 * 1024**2
         candidates = []
+        runtime_logs = root / "upstream/buildtrees/cef-static/diagnostics"
+        if runtime_logs.is_dir() and not runtime_logs.is_symlink():
+            for pattern in ("smoke-progress-*.json", "stdout.txt", "stderr.txt", "cef-static.log"):
+                candidates.extend(sorted(runtime_logs.rglob(pattern)))
         for folder in sorted((root / "upstream/buildtrees").glob("*")):
             if folder.is_dir() and not folder.is_symlink():
                 candidates.extend(sorted(folder.glob("*.log")))

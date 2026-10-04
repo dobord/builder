@@ -33,13 +33,29 @@ LINUX_CONTINUATION = {
         "vcpkg-binaries": (11285904084, "4a135b120ac264a2f30c19555738adaf203d6162e90b21b054c1dffae3dfd6f8"),
     },
 }
+LINUX_RUNTIME_CONTINUATION = {
+    "run": 37189898552, "attempt": 1,
+    "revision": "7bcd9b89ab7f109bb8450ddd45275072724b313c",
+    "source_sha": "40ec6aa95709336f5454921d90988f8da248a4d7",
+    "recipe_commit": "5d427cb2d29cd14fbdb3d7fbccbf3822e3b03896",
+    "artifacts": {
+        "cef-checkpoint": (11302152363, "7f2feda983ae80df64220e942a7942cc856439bed03e8b975c8b2fdab8c419d5"),
+        "vcpkg-binaries": (11302207175, "380945e4c0fdb48f06ac57cb1dcd4a353c14dfc069fbc81fce8850102f9fa5bc"),
+    },
+}
+
+
+def continuation_record(run: int) -> dict | None:
+    return next((record for record in (LINUX_CONTINUATION, LINUX_RUNTIME_CONTINUATION)
+                 if record["run"] == run), None)
 
 
 def producer_revision(platform: str, kind: str, run: int, attempt: int, revision: str) -> str:
-    if run == LINUX_CONTINUATION["run"]:
-        require(platform == "linux" and kind in KINDS and attempt == LINUX_CONTINUATION["attempt"],
+    record = continuation_record(run)
+    if record is not None:
+        require(platform == "linux" and kind in KINDS and attempt == record["attempt"],
                 "Reviewed Linux continuation scope changed")
-        return LINUX_CONTINUATION["revision"]
+        return record["revision"]
     return revision
 
 
@@ -47,8 +63,9 @@ def selected_revision(selected: dict | None, platform: str, kind: str, revision:
     if selected is None:
         return revision
     selected_sha = producer_revision(platform, kind, selected["run"], selected["attempt"], revision)
-    if selected["run"] == LINUX_CONTINUATION["run"]:
-        artifact_id, expected = LINUX_CONTINUATION["artifacts"][kind]
+    record = continuation_record(selected["run"])
+    if record is not None:
+        artifact_id, expected = record["artifacts"][kind]
         require(selected["artifact_id"] == artifact_id and selected["artifact_sha256"] == expected,
                 "Reviewed Linux continuation artifact changed")
     return selected_sha
@@ -179,7 +196,7 @@ def fetch(api, selected: dict, directory: Path, *, platform: str, kind: str, key
     producer = api.get(f"/repos/{BUILDER}/actions/runs/{run}/attempts/{attempt}")
     workflow = build_workflow(producer.get("path", ""))
     require(platform in BUILD_WORKFLOWS[workflow], "Cache platform differs from producer workflow")
-    if run == LINUX_CONTINUATION["run"]:
+    if continuation_record(run) is not None:
         require(workflow == "build-linux-release.yml", "Reviewed Linux continuation workflow changed")
     check_run(producer, BUILDER, workflow, revision, attempt, "workflow_dispatch", success=False)
     require(producer["status"] == "completed", "Cache producer is still running")

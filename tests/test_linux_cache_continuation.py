@@ -10,12 +10,13 @@ from secure_release import cef_cache, crypto, protocol
 
 
 class LinuxCacheTests(unittest.TestCase):
+    RECORD = 'LINUX_CONTINUATION'
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.root = Path(temp.name).resolve()
         self.private, self.public = crypto.generate('encrypt')
-        self.review = copy.deepcopy(cef_cache.LINUX_CONTINUATION)
+        self.review = copy.deepcopy(getattr(cef_cache, self.RECORD))
         self.current = 'a'*40
         self.run = self.review['run']
         source = self.root/'source'
@@ -43,7 +44,7 @@ class LinuxCacheTests(unittest.TestCase):
                          'workflow_run': {'id': self.run, 'head_sha': self.review['revision']}}
         self.api = self
         self.downloaded = False
-        self.patcher = patch.object(cef_cache, 'LINUX_CONTINUATION', self.review)
+        self.patcher = patch.object(cef_cache, self.RECORD, self.review)
         self.patcher.start()
         self.addCleanup(self.patcher.stop)
 
@@ -127,6 +128,10 @@ class LinuxCacheTests(unittest.TestCase):
         self.artifact['digest'] = 'sha256:'+crypto.digest(self.transport)
         result = self.restore(self.root/'new-restored')
         self.assertFalse(result['sdk_verified'])
+
+
+class RuntimeCheckpointCacheTests(LinuxCacheTests):
+    RECORD = 'LINUX_RUNTIME_CONTINUATION'
 
 
 if __name__ == '__main__':

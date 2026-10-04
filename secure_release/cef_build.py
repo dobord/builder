@@ -188,6 +188,10 @@ def run_engine(root: Path, cfg: dict, platform: str, execute, environment: dict,
     if linux_sdk_profile:
         from . import linux_sdk
         linux_sdk.prepare_engine(root, cfg, environment)
+        execute([sys.executable, str(recipe / "vcpkg/ports/cef-static/source_build.py"),
+                 "check", "--work", str(work), "--logs", str(logs), *platform_args],
+                stage="preflight", timeout=7200, cwd=recipe)
+        linux_sdk.prepare_smoke(root, environment)
     state = logs / "iteration.json"
     failure = None
     try:

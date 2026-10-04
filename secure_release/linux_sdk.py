@@ -9,7 +9,8 @@ from . import (crypto, safeio, build_support, cef_boringssl_isolation,
                cef_sdk_headers, cef_sdk_aliases, cef_sdk_xz,
                cef_sdk_source_interfaces, cef_sdk_objects, cef_sdk_protoc,
                cef_native_link_static, cef_strict_iteration, cef_nss_isolation,
-               cef_combined_port, cef_frozen_dependencies)
+               cef_combined_port, cef_frozen_dependencies, cef_x11_static,
+               cef_unwind_backtrace, cef_smoke_progress)
 
 TRIPLET = "x64-linux-static-release"
 OS_MODULES = {"libc.so.6", "libm.so.6", "ld-linux-x86-64.so.2"}
@@ -69,7 +70,18 @@ def prepare_engine(root: Path, cfg: dict, environment: dict) -> None:
     summary["native_link"] = cef_native_link_static.install(
         root / "cef-recipe/vcpkg/ports/cef-static/source_build.py", source,
         authenticated_revision=cfg["recipe_commit"])
+    summary["x11"] = cef_x11_static.install(source, manifest, prefix, platform_sha)
+    summary["backtrace"] = cef_unwind_backtrace.install(source)
     (root / "linux-native-profile.json").write_bytes(crypto.canonical(summary))
+
+
+def prepare_smoke(root: Path, environment: dict) -> None:
+    """Instrument the checked reference source without changing success gates."""
+    source = root / "cef-work/download/chromium/src"
+    cef_smoke_progress.install(source, root / "cef-recipe/vcpkg/ports/cef-static/smoke.c")
+    logs = root / "cef-logs/runtime-progress"
+    logs.mkdir(mode=0o700, parents=True, exist_ok=True)
+    environment["CEF_STATIC_SMOKE_PROGRESS_DIR"] = str(logs)
 
 
 def prepare_install(root: Path, cfg: dict, platform_probe: dict, upstream: Path, triplets: Path) -> dict:

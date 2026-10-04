@@ -84,3 +84,11 @@ publication. Restoration authenticates its original producer context and the
 unchanged native recipe/platform contract. Newly persisted caches use the new
 producer's own identity and key. No ciphertext, checkpoint identity or context
 is rewritten, and this exception does not admit other old producers.
+
+Run `37189898552/1` completed engine compilation and produced an accepted
+checkpoint before SDK installation stopped at its mandatory runtime smoke.
+`cef_cache.LINUX_RUNTIME_CONTINUATION` binds that checkpoint and package cache
+to their exact IDs/digests and original producer context for requalification
+with the complete static X11/unwind profile. This is not runtime qualification
+or SDK publication authorization. The source and installed-port smokes keep
+strict runtime checks and collect bounded milestones privately.
