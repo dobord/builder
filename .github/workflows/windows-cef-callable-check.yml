@@ -1,0 +1,44 @@
+name: Windows CEF callable verification
+on:
+  push:
+    branches: [repair/windows-cef-43-callable]
+permissions:
+  contents: read
+jobs:
+  public-inputs:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: v8/v8
+          ref: 4323497a6a73839e6d5260f6acd7ec0212cb3321
+          path: public-v8
+          persist-credentials: false
+          sparse-checkout: |
+            include
+            src/base
+            src/torque
+            src/objects
+      - name: Archive only immutable tracked public sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git -C public-v8 rev-parse HEAD)" = 4323497a6a73839e6d5260f6acd7ec0212cb3321
+          mkdir public-inputs
+          git archive --format=tar d004d834c027f735fb917b2a5bd7cbc3ef2c093d > public-inputs/builder-source.tar
+          git ls-tree -r d004d834c027f735fb917b2a5bd7cbc3ef2c093d > public-inputs/builder-tree.txt
+          git -C public-v8 archive --format=tar HEAD include LICENSE src/base src/torque/implementation-visitor.cc src/objects/map.h src/objects/object-macros.h src/objects/js-interceptor-map.h src/objects/map.tq src/objects/js-interceptor-map.tq > public-inputs/v8-inputs.tar
+          git -C public-v8 ls-tree -r HEAD include LICENSE src/base src/torque/implementation-visitor.cc src/objects/map.h src/objects/object-macros.h src/objects/js-interceptor-map.h src/objects/map.tq src/objects/js-interceptor-map.tq > public-inputs/v8-tree.txt
+          cd public-inputs
+          sha256sum *.tar *-tree.txt > SHA256SUMS
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: public-callable-inputs-${{ github.run_id }}
+          path: public-inputs/*
+          if-no-files-found: error
+          retention-days: 3
