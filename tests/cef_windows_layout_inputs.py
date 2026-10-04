@@ -18,8 +18,7 @@ INPUTS = {'src/torque/implementation-visitor.cc': (174726, 'bb857f343d860a65c111
 
 def verify_public(path, data):
     size, digest = INPUTS[path]
-    if ((size and len(data) != size)
-            or hashlib.sha256(data).hexdigest() != digest):
+    if len(data) != size or hashlib.sha256(data).hexdigest() != digest:
         raise ValueError("Pinned public V8 fixture mismatch")
     return data
 
@@ -53,6 +52,7 @@ def fixture_bytes(name):
     if name != Path(name).name or name not in {
         "websocket_handshake_challenge.h", "paint_vector_icon.h",
         "form_field_data.cc", "atomic_string.cc", "heap-object-header.h",
+        "bind-internal.h", "function-ref.h",
     }:
         raise ValueError("Unreviewed Windows repair fixture")
     return (FIXTURES/name).read_bytes()

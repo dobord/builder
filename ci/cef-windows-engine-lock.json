@@ -15,7 +15,7 @@
   },
   "source_repair": {
     "schema": 2,
-    "id": "windows-v8-cfunction-span-v8",
+    "id": "windows-v8-inherited-callable-v9",
     "chromium_commit": "79460ebecaa5625e57a5fb679a735659e73dc687",
     "v8_commit": "4323497a6a73839e6d5260f6acd7ec0212cb3321",
     "corrections": [
@@ -53,8 +53,13 @@
         "path": "v8/include/v8-template.h",
         "before_sha256": "5ff060cc76e892c0c345a699c0438fe09e23f643a64572f738ec9ff1cfd2d122",
         "after_sha256": "f4d4c4515727cedb7a5fba1a1b496a35bd9c6a9ee255cb7b23ed35ea8625b164"
+      },
+      {
+        "path": "v8/src/base/functional/bind-internal.h",
+        "before_sha256": "0848488073fd36b6b75088d66518cd7b9bbe0f60190b47e12590d1748abae796",
+        "after_sha256": "e08f2225e93df5a1afc02a1c375e87645449fd7e82b5d7b520c4e7aa31ce501b"
       }
     ],
-    "implementation_sha256": "b843d46add49faf98ac993017b1c6bef74b12a7e469a3ab18896bced03e017d6"
+    "implementation_sha256": "b2c528bfb984d64b89cfb8a0a2778170c6918df6f1608de35c8fa6b395f189c6"
   }
 }
