@@ -1,9 +1,9 @@
-"""Ten reviewed Windows source corrections, bound to a new build contract.
+"""Eleven reviewed Windows source corrections, bound to a new build contract.
 
 The baseline CEF checkout and native checkpoint codec stay unchanged. Only the
 exact legacy producer below may cross into this profile, after authenticated
 restore under its OLD contract. New checkpoints carry the NEW contract and a
-verified source marker covering all ten files. Neither receipts nor fixtures
+verified source marker covering all eleven files. Neither receipts nor fixtures
 constitute runtime proof.
 """
 from __future__ import annotations
@@ -50,6 +50,9 @@ ACCESSIBILITY_HEADER_AFTER = "ce013afbf9a06a045260b9b38c2aacfe645090e4fb6e110429
 ACCESSIBILITY_SOURCE = "download/chromium/src/ui/accessibility/platform/browser_accessibility.cc"
 ACCESSIBILITY_SOURCE_BEFORE = "f7e3cf4414bf31a8de222ea1a40b147f9fa4014d7e7604192ba3963e307f629a"
 ACCESSIBILITY_SOURCE_AFTER = "2db1d2329a419e61c4409b630447c3c56e63987c76a1c76c34bbfac6e097ffe8"
+WTF_STRING_HEADER = "download/chromium/src/third_party/blink/renderer/platform/wtf/text/wtf_string.h"
+WTF_STRING_BEFORE = "1b4a503d160ffc0480c49710f65d3b6656c498e8ac23dbaaedee491e92ae71ef"
+WTF_STRING_AFTER = "cfe2cf6bbb93d0ef053d0c8cf51d8d8071d54876fc53ca5f1f57d00231925d57"
 # Ordered, closed set of corrections; no caller-selected paths or patches.
 CORRECTIONS = (
     (HEADER, BEFORE, AFTER, (
@@ -106,6 +109,11 @@ CORRECTIONS = (
         (b'BrowserAccessibility::PlatformChildIterator::GetIndexInParent() const {\n',
          b'BrowserAccessibility::PlatformChildIterator::GetIndexInParent() const {\n  // Singular iterators have no parent or index. Do not dereference either.\n  if (!parent_) {\n    return std::nullopt;\n  }\n\n'),
     )),
+    (WTF_STRING_HEADER, WTF_STRING_BEFORE, WTF_STRING_AFTER, (
+        (b'#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"\n',
+         b'#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"\n'
+         b'#include "third_party/blink/renderer/platform/wtf/text/code_point_iterator.h"\n'),
+    )),
 )
 BASE_KEY = "60a369f6b051ba651cb301af299e7dadcc99608d0db6894bccab87b953817602"
 LEGACY = {
@@ -121,7 +129,7 @@ LEGACY = {
 
 def profile() -> dict:
     return {
-        "schema": 2, "id": "windows-accessibility-default-iterator-v10",
+        "schema": 2, "id": "windows-blink-string-codepoint-iterator-v11",
         "chromium_commit": CHROMIUM,
         "v8_commit": V8,
         "corrections": [
