@@ -415,10 +415,15 @@ def build():
         safeio.sdk_zip(sdk, package)
     safeio.extract_zip(package, root / "consumer-sdk")
     source = root / "workspace" / payload["plan"]["smoke_path"]
+    smoke_fixture = root / "cef-recipe/vcpkg/ports/cef-static/smoke.c"
+    if linux_review is not None:
+        from . import cef_combined_smoke
+        source = cef_combined_smoke.prepare(source, smoke_fixture, root / "linux-smoke-project")
+        smoke_fixture = source / "smoke.c"
     out = root / "smoke-build"
     configure = build_support.consumer_configure_command(source, out, root / "consumer-sdk", triplet)
     if cfg is not None:
-        configure.append("-DCEF_STATIC_SMOKE_SOURCE=" + str(root / "cef-recipe/vcpkg/ports/cef-static/smoke.c"))
+        configure.append("-DCEF_STATIC_SMOKE_SOURCE=" + str(smoke_fixture))
         if platform == "linux":
             from . import cef_consumer_linker
             configure.append(cef_consumer_linker.cmake_flag())

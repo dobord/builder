@@ -63,11 +63,22 @@ LINUX_INVENTORY_CONTINUATION = {
         "vcpkg-binaries": (11309356037, "20a71a566e000deedadb2844991ec566924f37ad31426776dadc233f0adbae65"),
     },
 }
+LINUX_SMOKE_CONTINUATION = {
+    "run": 37220574288, "attempt": 1,
+    "revision": "9191e18d173373d9bd80d7b8175179e36fb02861",
+    "source_sha": "40ec6aa95709336f5454921d90988f8da248a4d7",
+    "recipe_commit": "5d427cb2d29cd14fbdb3d7fbccbf3822e3b03896",
+    "artifacts": {
+        "cef-checkpoint": (11312251579, "078f152037af1a9e30d1a2a0cba7b6f40a2b802b299f114319c902d1e6309d53"),
+        "vcpkg-binaries": (11311947701, "f47db81d9f74db3f482f42612994980024a048ad0664622cbd69a0c50ae90cbe"),
+    },
+}
 
 
 def continuation_record(run: int) -> dict | None:
     return next((record for record in (LINUX_CONTINUATION, LINUX_RUNTIME_CONTINUATION,
-                                      LINUX_INSTALL_CONTINUATION, LINUX_INVENTORY_CONTINUATION)
+                                      LINUX_INSTALL_CONTINUATION, LINUX_INVENTORY_CONTINUATION,
+                                      LINUX_SMOKE_CONTINUATION)
                  if record["run"] == run), None)
 
 

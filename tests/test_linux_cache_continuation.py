@@ -142,5 +142,9 @@ class InventoryCheckpointCacheTests(LinuxCacheTests):
     RECORD = 'LINUX_INVENTORY_CONTINUATION'
 
 
+class SmokeCheckpointCacheTests(LinuxCacheTests):
+    RECORD = 'LINUX_SMOKE_CONTINUATION'
+
+
 if __name__ == '__main__':
     unittest.main()
