@@ -10,7 +10,7 @@ from . import (crypto, safeio, build_support, cef_boringssl_isolation,
                cef_sdk_source_interfaces, cef_sdk_objects, cef_sdk_protoc,
                cef_native_link_static, cef_strict_iteration, cef_nss_isolation,
                cef_combined_port, cef_frozen_dependencies, cef_x11_static,
-               cef_unwind_backtrace, cef_smoke_progress)
+               cef_unwind_backtrace, cef_smoke_progress, cef_sdk_gettext)
 
 TRIPLET = "x64-linux-static-release"
 OS_MODULES = {"libc.so.6", "libm.so.6", "ld-linux-x86-64.so.2"}
@@ -120,6 +120,7 @@ def prepare(root: Path, installed: Path, upstream: Path, sources: dict, native: 
     cef_boringssl_isolation.verify(installed, engine, isolation)
     return {**sources, "engine": engine, "isolation": isolation,
             "objects": cef_sdk_objects.capture(installed),
+            "host_tools": cef_sdk_gettext.capture(installed, upstream),
             "protoc": cef_sdk_protoc.capture(installed, upstream, root / "linux-protoc-proof")}
 
 
@@ -132,6 +133,7 @@ def package(root: Path, sdk: Path, archive: Path, review: dict, platform_probe: 
     docs = cef_sdk_xz.verify(sdk)
     interfaces = cef_sdk_source_interfaces.verify(sdk)
     objects = cef_sdk_objects.verify(sdk / "installed", review["objects"])
+    cef_sdk_gettext.verify(sdk / "installed", review["host_tools"])
     safeio.sdk_zip(sdk, archive, reviewed_sources=sources, reviewed_include_sources=headers,
                    reviewed_aliases=aliases, reviewed_doc_sources=docs,
                    reviewed_interface_sources=interfaces, reviewed_objects=objects)

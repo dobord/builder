@@ -238,12 +238,18 @@ def safe_members(archive: zipfile.ZipFile) -> list[zipfile.ZipInfo]:
     return entries
 
 
-def inspect_sdk(path: Path, platform: str, *, reviewed_objects: dict | None = None) -> dict:
+def inspect_sdk(path: Path, platform: str, *, reviewed_objects: dict | None = None,
+                reviewed_host_tools: dict | None = None) -> dict:
     require(platform in ('linux', 'windows'), 'unsupported target platform')
     require(path.is_file() and not path.is_symlink(), 'SDK is not a regular file')
     prefix = f'installed/x64-{platform}-static-release/'
     checked, violations, target_files = [], [], 0
     objects, object_records, seen_objects = [], {}, set()
+    host_tools, tool_records, seen_tools = [], {}, set()
+    if reviewed_host_tools is not None:
+        from . import cef_sdk_gettext
+        tool_records = cef_sdk_gettext.review(reviewed_host_tools)
+        require(platform == 'linux', 'Gettext host tool review is Linux-only')
     if reviewed_objects is not None:
         from . import safeio
         object_records = safeio._object_review(reviewed_objects)
@@ -263,6 +269,17 @@ def inspect_sdk(path: Path, platform: str, *, reviewed_objects: dict | None = No
             reason = None
             if SHARED_NAME.search(relative):
                 reason = 'shared-library-file'
+            elif entry.filename in tool_records:
+                record = tool_records[entry.filename]
+                try:
+                    require(entry.file_size == record['size'], 'Gettext tool size changed')
+                    with archive.open(entry) as stream:
+                        data = stream.read(record['size'] + 1)
+                    cef_sdk_gettext.payload(data, record)
+                    host_tools.append({'path': relative, **record})
+                    seen_tools.add(entry.filename)
+                except (ValueError, struct.error) as error:
+                    reason = 'invalid-reviewed-host-tool: ' + str(error)
             elif entry.filename in object_records:
                 record = object_records[entry.filename]
                 try:
@@ -301,6 +318,8 @@ def inspect_sdk(path: Path, platform: str, *, reviewed_objects: dict | None = No
                 violations.append({'path': relative, 'reason': reason})
     if seen_objects != set(object_records):
         violations.append({'path': '', 'reason': 'reviewed-object-inventory-incomplete'})
+    if seen_tools != set(tool_records):
+        violations.append({'path': '', 'reason': 'reviewed-host-tool-inventory-incomplete'})
     native_objects = sum(r['kinds'].get('elf-object', 0) + r['kinds'].get('coff-object', 0) for r in checked) + len(objects)
     require(target_files > 0 and checked, 'SDK has no auditable target archives')
     if not native_objects:
@@ -312,6 +331,8 @@ def inspect_sdk(path: Path, platform: str, *, reviewed_objects: dict | None = No
              'runtime_dependencies_verified': False, 'sdk_code_executed': False}
     if object_records:
         report['reviewed_objects'] = objects
+    if tool_records:
+        report['reviewed_host_tools'] = host_tools
     return report
 
 
