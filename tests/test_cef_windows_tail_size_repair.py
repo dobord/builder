@@ -24,10 +24,11 @@ from tests import test_cef_windows_layout_repair as layout
 GENERATOR = 'src/torque/implementation-visitor.cc'
 V6_KEY = '87e54ca80f456a52ac85ea50a925866eba5bce50108d727fc31378b45d81896e'
 V6_DIGEST = 'e1bba1f74d36cbbb9bcdd8810f6f2e91ea9197fd6ab6e3a98d07f2787b035359'
+TORQUE_CORRECTION = next(c for c in repair.CORRECTIONS if c[0] == repair.TORQUE_SOURCE)
 
 
 def previous_generator(raw):
-    old, new = repair.CORRECTIONS[-1][3][0]
+    old, new = TORQUE_CORRECTION[3][0]
     result = raw.replace(old, new, 1)
     if hashlib.sha256(result).hexdigest() != V6_DIGEST:
         raise ValueError('Previous generator identity mismatch')
@@ -170,25 +171,25 @@ class TorqueTailSizeTests(unittest.TestCase):
         self.v6=previous_generator(self.raw)
 
     def test_exact_profile_keeps_source_set_and_rejects_v6(self):
-        self.assertEqual(repair.profile()['id'],'windows-torque-tail-size-v7')
-        self.assertEqual(len(repair.CORRECTIONS),6)
+        self.assertEqual(repair.profile()['id'],'windows-v8-cfunction-span-v8')
+        self.assertEqual(len(repair.CORRECTIONS),7)
         self.assertEqual(repair.profile()['v8_commit'],'4323497a6a73839e6d5260f6acd7ec0212cb3321')
         self.assertNotEqual(repair.build_key(repair.BASE_KEY),V6_KEY)
         for selected in (dict(repair.LEGACY,build_key=V6_KEY),dict(repair.LEGACY,run=37144079381)):
             with self.assertRaises(ValueError):repair.restore_contract(selected,repair.BASE_KEY)
 
     def test_generator_edit_preserves_offsets_and_adds_extent_checks(self):
-        self.assertEqual(len(repair.CORRECTIONS[-1][3]),3)
+        self.assertEqual(len(TORQUE_CORRECTION[3]),3)
         self.assertIn(b'kSize + alignof(',self.fixed)
         self.assertIn(b'End + 1 == ',self.fixed)
         self.assertEqual(self.raw.count(b'static_assert(')+1,self.fixed.count(b'static_assert('))
-        for old,new in repair.CORRECTIONS[-1][3][1:]:
+        for old,new in TORQUE_CORRECTION[3][1:]:
             self.assertNotIn(b'ExtendedMap',new)
             self.assertNotIn(b'#if',new)
             self.assertEqual(self.v6.count(old),1)
         # Changes are confined to existing assertion generation and v6's parent fix.
         restored=self.fixed
-        for old,new in reversed(repair.CORRECTIONS[-1][3]):restored=restored.replace(new,old,1)
+        for old,new in reversed(TORQUE_CORRECTION[3]):restored=restored.replace(new,old,1)
         self.assertEqual(restored,self.raw)
 
     def test_half_applied_generator_and_previous_marker_are_rejected(self):
@@ -199,7 +200,7 @@ class TorqueTailSizeTests(unittest.TestCase):
         self.assertEqual(before,{p:p.read_bytes() for p in before})
         self.assertFalse((work/repair.MARKER).exists())
         for i in (1,2):
-            old,new=repair.CORRECTIONS[-1][3][i]
+            old,new=TORQUE_CORRECTION[3][i]
             with self.assertRaises(ValueError):repair.transform(self.v6.replace(old,new,1),repair.TORQUE_SOURCE)
 
     def test_fixed_generator_resume_is_idempotent_and_proof_exact(self):

@@ -18,7 +18,7 @@ from unittest import mock
 
 from secure_release import cef_contract, cef_windows_iteration as worker
 from secure_release import cef_windows_source_repair as repair
-from tests.cef_windows_layout_inputs import fixture_bytes
+from tests.cef_windows_layout_inputs import fixture_bytes, public_input
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = ROOT / "tests/fixtures/cef-windows/websocket_handshake_challenge.h"
@@ -33,10 +33,13 @@ def populate(work):
                               (repair.AUTOFILL_SOURCE, AUTOFILL_FIXTURE),
                               (repair.ATOMIC_SOURCE, ATOMIC_FIXTURE),
                               (repair.HEAP_HEADER, HEAP_FIXTURE),
-                              (repair.TORQUE_SOURCE, Path("implementation-visitor.cc"))):
+                              (repair.TORQUE_SOURCE, Path("implementation-visitor.cc")),
+                              (repair.TEMPLATE_HEADER, Path("v8-template.h"))):
         path = work / relative
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(fixture_bytes(fixture.name))
+        path.write_bytes(public_input("include/v8-template.h")
+                         if relative == repair.TEMPLATE_HEADER
+                         else fixture_bytes(fixture.name))
 
 
 class RepairTests(unittest.TestCase):
@@ -491,13 +494,14 @@ class PaintHeaderTests(unittest.TestCase):
             repair.transform(old, repair.HEADER)
 
     def test_profile_binds_both_headers_and_each_digest(self):
-        expected_paths = [repair.HEADER, repair.PAINT_HEADER, repair.AUTOFILL_SOURCE, repair.ATOMIC_SOURCE, repair.HEAP_HEADER, repair.TORQUE_SOURCE]
+        expected_paths = [repair.HEADER, repair.PAINT_HEADER, repair.AUTOFILL_SOURCE, repair.ATOMIC_SOURCE,
+                          repair.HEAP_HEADER, repair.TORQUE_SOURCE, repair.TEMPLATE_HEADER]
         profile = repair.profile()
         self.assertEqual(profile["schema"], 2)
-        self.assertEqual(profile["id"], "windows-torque-tail-size-v7")
+        self.assertEqual(profile["id"], "windows-v8-cfunction-span-v8")
         self.assertEqual([c["path"] for c in profile["corrections"]],
                          [p.removeprefix("download/chromium/src/") for p in expected_paths])
-        for index in (0, 1, 2, 3, 4):
+        for index in range(len(expected_paths)):
             for field in ("path", "before_sha256", "after_sha256"):
                 altered = copy.deepcopy(profile)
                 altered["corrections"][index][field] = "0" * len(altered["corrections"][index][field])
@@ -533,10 +537,13 @@ class PaintHeaderTests(unittest.TestCase):
                               (repair.AUTOFILL_SOURCE, AUTOFILL_FIXTURE),
                               (repair.ATOMIC_SOURCE, ATOMIC_FIXTURE),
                               (repair.HEAP_HEADER, HEAP_FIXTURE),
-                              (repair.TORQUE_SOURCE, Path("implementation-visitor.cc"))):
+                              (repair.TORQUE_SOURCE, Path("implementation-visitor.cc")),
+                              (repair.TEMPLATE_HEADER, Path("v8-template.h"))):
             path = self.work / relative
             fixed = path.read_bytes()
-            path.write_bytes(fixture_bytes(fixture.name))
+            path.write_bytes(public_input("include/v8-template.h")
+                             if relative == repair.TEMPLATE_HEADER
+                             else fixture_bytes(fixture.name))
             with self.assertRaises(ValueError):
                 self.apply("resume")
             path.write_bytes(fixed)
