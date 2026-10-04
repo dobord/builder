@@ -9,48 +9,30 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          repository: dobord/builder
-          ref: ac0814831f09eb1b9640ebb162b76d548c92b3a1
-          path: public-builder
-          persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          repository: v8/v8
-          ref: 4323497a6a73839e6d5260f6acd7ec0212cb3321
-          path: public-v8
-          persist-credentials: false
-          sparse-checkout: |
-            include
-            src/base
-            src/torque
-            src/objects
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          repository: dobord/cef
-          ref: 03abd124ebe3b8a57fb78470a75b5aa3ce064e31
-          path: public-cef
-          persist-credentials: false
-      - name: Archive only pinned public Git objects
+      - name: Fetch bounded public Chromium inputs at the production revision
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C public-builder rev-parse HEAD)" = ac0814831f09eb1b9640ebb162b76d548c92b3a1
-          test "$(git -C public-v8 rev-parse HEAD)" = 4323497a6a73839e6d5260f6acd7ec0212cb3321
-          test "$(git -C public-cef rev-parse HEAD)" = 03abd124ebe3b8a57fb78470a75b5aa3ce064e31
-          mkdir public-inputs
-          git -C public-builder archive --format=zip --output="$GITHUB_WORKSPACE/public-inputs/builder.zip" HEAD
-          git -C public-v8 archive --format=zip --output="$GITHUB_WORKSPACE/public-inputs/v8.zip" HEAD include src/base src/torque src/objects
-          git -C public-cef archive --format=zip --output="$GITHUB_WORKSPACE/public-inputs/cef.zip" HEAD
-          for name in builder v8 cef; do
-            git -C "public-$name" ls-tree -r HEAD > "public-inputs/$name.git-tree.txt"
+          mkdir -p public-inputs
+          for path in \
+            LICENSE \
+            ui/accessibility/platform/browser_accessibility.h \
+            ui/accessibility/platform/browser_accessibility.cc \
+            ui/accessibility/platform/browser_accessibility_manager.cc \
+            ui/accessibility/platform/child_iterator.h \
+            ui/accessibility/ax_node.h \
+            base/containers/adapters.h; do
+            mkdir -p "public-inputs/$(dirname "$path")"
+            curl --fail --silent --show-error --proto '=https' --tlsv1.2 --connect-timeout 20 --max-time 60 --max-filesize 1048576 \
+              "https://raw.githubusercontent.com/chromium/chromium/79460ebecaa5625e57a5fb679a735659e73dc687/$path" \
+              -o "public-inputs/$path"
           done
           cd public-inputs
-          sha256sum *.zip *.txt > SHA256SUMS
+          find . -type f -print0 | sort -z | xargs -0 sha256sum > ../SHA256SUMS
+          mv ../SHA256SUMS .
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: public-regression-inputs-${{ github.run_id }}
+          name: public-chromium-inputs-${{ github.run_id }}
           path: public-inputs/
           if-no-files-found: error
           retention-days: 2
