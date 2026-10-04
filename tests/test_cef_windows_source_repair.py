@@ -265,13 +265,17 @@ class RepairTests(unittest.TestCase):
         self.assertFalse((self.work / repair.MARKER).exists())
 
     def test_lock_is_explicit_versioned_and_does_not_relabel_old_checkpoint(self):
-        value = worker.qualification_lock(ROOT)
-        self.assertEqual(value["schema"], 2)
-        self.assertEqual(value["source_repair"], repair.profile())
-        # Future successful checkpoints may replace this exact initial legacy selector.
-        repair.restore_contract(value["checkpoint"], repair.BASE_KEY)
+        production = json.loads((ROOT / "ci/cef-windows-engine-lock.json").read_text())
+        candidate = dict(production, source_repair=repair.profile())
         (self.root / "ci").mkdir()
         path = self.root / "ci/cef-windows-engine-lock.json"
+        path.write_text(json.dumps(candidate))
+        value = worker.qualification_lock(self.root)
+        self.assertEqual(value["schema"], 2)
+        self.assertEqual(value["source_repair"], repair.profile())
+        # The candidate profile must still cross only from the exact legacy selector.
+        self.assertEqual(value["checkpoint"], repair.LEGACY)
+        repair.restore_contract(value["checkpoint"], repair.BASE_KEY)
         for changes in ({"schema": 1}, {"schema": True}, {"source_repair": {}},
                         {"vcpkg_commit": "0" * 40}):
             path.write_text(json.dumps(dict(value, **changes)))

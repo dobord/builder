@@ -48,6 +48,8 @@ _GENERATOR = public_input("src/torque/implementation-visitor.cc")
 def fixture_bytes(name):
     if name == "implementation-visitor.cc":
         return _GENERATOR
+    if name == "v8-template.h":
+        return public_input("include/v8-template.h")
     if name != Path(name).name or name not in {
         "websocket_handshake_challenge.h", "paint_vector_icon.h",
         "form_field_data.cc", "atomic_string.cc", "heap-object-header.h",
