@@ -10,8 +10,8 @@ concurrency:
   group: frdpd-46-${{ github.sha }}
   cancel-in-progress: false
 env:
-  SOURCE_SHA: '2b58118c2dd7e7dcf1f87f9d97a4ec41e5876b32'
-  SOURCE_TREE: '6a39c93d992795f34810d1226e30f6d9cdcfeaab'
+  SOURCE_SHA: '04de8666f02be34d1295c6bdb5c071172febbdd9'
+  SOURCE_TREE: '5f7f712b869b9cb58f149209667cc9c245df755b'
   ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
 jobs:
   qualification:
@@ -58,6 +58,17 @@ jobs:
                       raise ValueError('Existing regression driver changed; review it first')
                   api = runpy.run_path(str(driver))
                   original = api['docker']
+                  original_run = api['run']
+                  def repeated_run(name, args, *, env=None, timeout=900):
+                      status = original_run(name, args, env=env, timeout=timeout)
+                      if name in ('e2e-xorg-dummy', 'e2e-xorg-native'):
+                          for index in (2, 3):
+                              local = dict(env)
+                              label = name + '-repeat-' + str(index)
+                              local['FRDP_E2E_ARTIFACTS'] = str(root / label)
+                              local['COMPOSE_PROJECT_NAME'] += '-repeat-' + str(index)
+                              original_run(label, args, env=local, timeout=timeout)
+                      return status
                   def verified(name, script, timeout=900):
                       script = script.replace('-DWITH_FRDPD_STRICT_WARNINGS=ON', '-DWITH_FRDPD_STRICT_WARNINGS=ON -DWITH_VERBOSE_WINPR_ASSERT=OFF')
                       script = script.replace('GfxPolicy|ZGfxHistory', 'GfxPolicy|GfxSender|WindowCodec|WindowPixelOracle|SceneSubscribe|InstalledManifest|SesmandStringBounds|ListenerStringBounds|CursorAdapter|FrameScheduler|FramePipeline|WindowExchange|PipelineStages|ZGfxHistory')
@@ -72,10 +83,11 @@ jobs:
                       status = original(name, script, timeout)
                       if name == 'focused' and status == 0:
                           original('manifest-unit', 'python3 /src/server/frdp/test/TestFreeRDPFrdpInstalledManifest.py -v', 60)
-                          original('component-repeat', 'ctest --test-dir /opt/freerdp-build --no-tests=error --output-on-failure --verbose --timeout 120 --repeat until-fail:10 -R "^TestFreeRDPFrdp(WindowPixelOracle|SceneSubscribe|WindowCodec|GfxSender|FramePipeline|WindowExchange|PipelineStages|FrameScheduler|SurfaceManager|WindowRegistry|InstalledManifest|SesmandStringBounds|ListenerStringBounds)$"', 300)
+                          original('component-repeat', 'ctest --test-dir /opt/freerdp-build --no-tests=error --output-on-failure --verbose --timeout 120 --repeat until-fail:10 -R "^TestFreeRDPFrdp(X11WindowCapture|WindowPixelOracle|SceneSubscribe|WindowCodec|GfxSender|FramePipeline|WindowExchange|PipelineStages|FrameScheduler|SurfaceManager|WindowRegistry|InstalledManifest|SesmandStringBounds|ListenerStringBounds)$"', 300)
                           original('agent-stop-repeat', 'ctest --test-dir /opt/freerdp-build --no-tests=error --output-on-failure --verbose --timeout 120 --repeat until-fail:30 -R "^TestFreeRDPFrdpAgentStop$"', 600)
                       return status
                   api['main'].__globals__['docker'] = verified
+                  api['main'].__globals__['run'] = repeated_run
                   rc = api['main']()
           except Exception:
               (root / 'driver-error.log').write_text(traceback.format_exc())
