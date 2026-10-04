@@ -385,6 +385,7 @@ def build():
             return  # Persisted checkpoint + completed packages; never an installed/published SDK.
         if linux_sources is not None:
             linux_native = linux_sdk.prepare_install(root, cfg, platform_probe, upstream, triplets)
+            linux_sdk.fresh_replay_installation(root)
             args = ["--overlay-triplets=" + str(linux_native["triplets"])
                     if a.startswith("--overlay-triplets=") else a for a in args]
             build_support.protect_source_archives(root / "workspace", downloads,

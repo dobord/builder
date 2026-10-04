@@ -97,6 +97,17 @@ def prepare_install(root: Path, cfg: dict, platform_probe: dict, upstream: Path,
     return {"triplets": replay, "profile": profile}
 
 
+def fresh_replay_installation(root: Path) -> None:
+    """Classic vcpkg skips installed packages; replay requires a fresh final root."""
+    installed = root / "installed"
+    preserved = root / "platform-installed-before-replay"
+    if installed.is_symlink() or not installed.is_dir() or preserved.exists() or preserved.is_symlink():
+        raise ValueError("Invalid preflight installation transition")
+    if not safeio.regular(installed / "vcpkg/status"):
+        raise ValueError("Preflight installation lacks package ownership")
+    installed.rename(preserved)
+
+
 def prepare(root: Path, installed: Path, upstream: Path, sources: dict, native: dict,
             platform_probe: dict) -> dict:
     cef_frozen_dependencies.verify_installed(installed / TRIPLET, root / "cef-work/platform-inputs.json",

@@ -43,10 +43,20 @@ LINUX_RUNTIME_CONTINUATION = {
         "vcpkg-binaries": (11302207175, "380945e4c0fdb48f06ac57cb1dcd4a353c14dfc069fbc81fce8850102f9fa5bc"),
     },
 }
+LINUX_INSTALL_CONTINUATION = {
+    "run": 37201859932, "attempt": 1,
+    "revision": "7489b44ec772033c3bfc6bcc5e1b46e4dd4a32c4",
+    "source_sha": "40ec6aa95709336f5454921d90988f8da248a4d7",
+    "recipe_commit": "5d427cb2d29cd14fbdb3d7fbccbf3822e3b03896",
+    "artifacts": {
+        "cef-checkpoint": (11305216330, "e9cc0d0ce78b0571fd443e563dc12158e4588e036a15e2228b8efd815e4fea94"),
+        "vcpkg-binaries": (11304976785, "d75638024d3666db810927a87afa2e27af710b351a4a67beda601a1747d1d6d1"),
+    },
+}
 
 
 def continuation_record(run: int) -> dict | None:
-    return next((record for record in (LINUX_CONTINUATION, LINUX_RUNTIME_CONTINUATION)
+    return next((record for record in (LINUX_CONTINUATION, LINUX_RUNTIME_CONTINUATION, LINUX_INSTALL_CONTINUATION)
                  if record["run"] == run), None)
 
 

@@ -134,5 +134,9 @@ class RuntimeCheckpointCacheTests(LinuxCacheTests):
     RECORD = 'LINUX_RUNTIME_CONTINUATION'
 
 
+class InstalledCheckpointCacheTests(LinuxCacheTests):
+    RECORD = 'LINUX_INSTALL_CONTINUATION'
+
+
 if __name__ == '__main__':
     unittest.main()
