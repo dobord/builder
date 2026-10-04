@@ -68,7 +68,8 @@ def recipe_payload(recipe: Path, spec: dict, *, cpp_client: bool = False) -> tup
     original_export = codecs.regular(recipe, EXPORT).read_bytes()
     require(native.git_blob(codecs.regular(recipe, "vcpkg/static/platform_export.py").read_bytes())
             == PLATFORM_EXPORT_BLOB, "Pinned platform export policy changed")
-    require(native.git_blob(codecs.regular(recipe, "vcpkg/integration/install.cmake").read_bytes())
+    original_install = codecs.regular(recipe, "vcpkg/integration/install.cmake").read_bytes()
+    require(native.git_blob(original_install)
             == (CPP_INSTALL_BLOB if cpp_client else INSTALL_BLOB), "Pinned CEF installer changed")
     spec_bytes = codecs.canonical(spec)
     helper = Path(exporter.__file__).read_text(encoding="utf-8")
@@ -76,7 +77,18 @@ def recipe_payload(recipe: Path, spec: dict, *, cpp_client: bool = False) -> tup
                  'SPEC_SHA256 = "' + hashlib.sha256(spec_bytes).hexdigest() + '"')
     before = {SOURCE_BUILD: original_source, EXPORT: original_export, POLICY: b"", SPEC: b""}
     after = {SOURCE_BUILD: patched_source, EXPORT: patch_export(original_export, cpp_client=cpp_client),
-             POLICY: helper.encode("utf-8"), SPEC: spec_bytes}
+              POLICY: helper.encode("utf-8"), SPEC: spec_bytes}
+    if cpp_client:
+        # vcpkg sanitizes its port environment. Runtime qualification must keep
+        # the strict profile and bounded milestone output independently of it.
+        text = one(original_install.decode("utf-8"),
+                   '        set(_cef_out "CEF_Static_Platform_Release_x64")\n',
+                   '        set(_cef_out "CEF_Static_Platform_Release_x64")\n'
+                   '        set(ENV{CEF_STATIC_STRICT_THIRD_PARTY} "1")\n'
+                   '        set(ENV{CEF_STATIC_SMOKE_PROGRESS_DIR} "${_logs}/runtime-progress")\n'
+                   '        file(MAKE_DIRECTORY "${_logs}/runtime-progress")\n')
+        before["vcpkg/integration/install.cmake"] = original_install
+        after["vcpkg/integration/install.cmake"] = text.encode("utf-8")
     for name in (SOURCE_BUILD, EXPORT, POLICY):
         compile(after[name], name, "exec")
     return before, after
