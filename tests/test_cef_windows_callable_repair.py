@@ -1,4 +1,4 @@
-"""Exact V8 inherited-callable traits and authenticated eight-source transition.
+"""Exact V8 inherited-callable traits and authenticated source transition.
 
 Compile the entire pinned bind-internal.h, not a replacement implementation.
 The FunctionRef compatibility predicate is extracted verbatim from its pinned
@@ -77,7 +77,7 @@ class CallableRepairTests(unittest.TestCase):
         self.assertEqual(hashlib.sha256(self.raw).hexdigest(), repair.BIND_BEFORE)
         fixed = repair.transform(self.raw, repair.BIND_HEADER)
         self.assertEqual(hashlib.sha256(fixed).hexdigest(), repair.BIND_AFTER)
-        correction = repair.CORRECTIONS[-1]
+        correction = repair.CORRECTIONS[7]
         self.assertEqual(correction[0], repair.BIND_HEADER)
         self.assertEqual(len(correction[3]), 1)
         before, after = correction[3][0]
@@ -97,8 +97,8 @@ class CallableRepairTests(unittest.TestCase):
 
     def test_exact_profile_and_current_repository_lock(self):
         profile = repair.profile()
-        self.assertEqual(profile['id'], 'windows-v8-inherited-callable-v9')
-        self.assertEqual(len(profile['corrections']), 8)
+        self.assertEqual(profile['id'], 'windows-accessibility-default-iterator-v10')
+        self.assertEqual(len(profile['corrections']), 10)
         self.assertEqual(worker.qualification_lock(ROOT)['source_repair'], profile)
         self.assertEqual(profile['implementation_sha256'], hashlib.sha256(Path(repair.__file__).read_bytes()).hexdigest())
         for stale in (V8_KEY, '45d4c9074ab014a263f4c81a1a8e929951adaba4cc1b8c5232bccc13e72e5920'):
@@ -107,7 +107,7 @@ class CallableRepairTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             repair.restore_contract(dict(repair.LEGACY, run=37191476160), repair.BASE_KEY)
         self.assertEqual(repair.restore_contract(repair.LEGACY, repair.BASE_KEY), (repair.BASE_KEY, 'legacy'))
-        for index in range(8):
+        for index in range(10):
             for field in ('path', 'before_sha256', 'after_sha256'):
                 altered = copy.deepcopy(profile)
                 altered['corrections'][index][field] = '0' * len(altered['corrections'][index][field])
@@ -129,7 +129,7 @@ class CallableRepairTests(unittest.TestCase):
                 self.assertEqual(snapshot(work), before)
                 self.assertFalse((work / repair.MARKER).exists())
 
-    def test_all_eight_inputs_resume_and_proof_are_required(self):
+    def test_all_inputs_resume_and_proof_are_required(self):
         work = self.root / 'work'; populate(work)
         self.assertEqual(repair.apply(work, self.key, 'legacy'), 'applied')
         original = snapshot(work)

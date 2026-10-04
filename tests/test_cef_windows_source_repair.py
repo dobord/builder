@@ -35,7 +35,9 @@ def populate(work):
                               (repair.HEAP_HEADER, HEAP_FIXTURE),
                               (repair.TORQUE_SOURCE, Path("implementation-visitor.cc")),
                               (repair.TEMPLATE_HEADER, Path("v8-template.h")),
-                              (repair.BIND_HEADER, Path("bind-internal.h"))):
+                              (repair.BIND_HEADER, Path("bind-internal.h")),
+                              (repair.ACCESSIBILITY_HEADER, Path("browser_accessibility.h")),
+                              (repair.ACCESSIBILITY_SOURCE, Path("browser_accessibility.cc"))):
         path = work / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(public_input("include/v8-template.h")
@@ -497,10 +499,11 @@ class PaintHeaderTests(unittest.TestCase):
 
     def test_profile_binds_both_headers_and_each_digest(self):
         expected_paths = [repair.HEADER, repair.PAINT_HEADER, repair.AUTOFILL_SOURCE, repair.ATOMIC_SOURCE,
-                          repair.HEAP_HEADER, repair.TORQUE_SOURCE, repair.TEMPLATE_HEADER, repair.BIND_HEADER]
+                          repair.HEAP_HEADER, repair.TORQUE_SOURCE, repair.TEMPLATE_HEADER, repair.BIND_HEADER,
+                          repair.ACCESSIBILITY_HEADER, repair.ACCESSIBILITY_SOURCE]
         profile = repair.profile()
         self.assertEqual(profile["schema"], 2)
-        self.assertEqual(profile["id"], "windows-v8-inherited-callable-v9")
+        self.assertEqual(profile["id"], "windows-accessibility-default-iterator-v10")
         self.assertEqual([c["path"] for c in profile["corrections"]],
                          [p.removeprefix("download/chromium/src/") for p in expected_paths])
         for index in range(len(expected_paths)):
@@ -541,7 +544,9 @@ class PaintHeaderTests(unittest.TestCase):
                               (repair.HEAP_HEADER, HEAP_FIXTURE),
                               (repair.TORQUE_SOURCE, Path("implementation-visitor.cc")),
                               (repair.TEMPLATE_HEADER, Path("v8-template.h")),
-                              (repair.BIND_HEADER, Path("bind-internal.h"))):
+                              (repair.BIND_HEADER, Path("bind-internal.h")),
+                              (repair.ACCESSIBILITY_HEADER, Path("browser_accessibility.h")),
+                              (repair.ACCESSIBILITY_SOURCE, Path("browser_accessibility.cc"))):
             path = self.work / relative
             fixed = path.read_bytes()
             path.write_bytes(public_input("include/v8-template.h")
@@ -682,6 +687,10 @@ def load_tests(loader, standard_tests, pattern):
     standard_tests.addTests(loader.loadTestsFromModule(test_cef_windows_layout_repair))
     from tests import test_cef_windows_tail_size_repair
     standard_tests.addTests(loader.loadTestsFromModule(test_cef_windows_tail_size_repair))
+    from tests import test_cef_windows_callable_repair
+    standard_tests.addTests(loader.loadTestsFromModule(test_cef_windows_callable_repair))
+    from tests import test_cef_windows_accessibility_iterator_repair
+    standard_tests.addTests(loader.loadTestsFromModule(test_cef_windows_accessibility_iterator_repair))
     return standard_tests
 
 
