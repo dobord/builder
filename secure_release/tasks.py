@@ -432,7 +432,8 @@ def build():
     execute(["ctest", "--test-dir", str(out), "-C", "Release", "--output-on-failure", "--timeout", "60"], stage="consumer-test", timeout=180)
     cef_proof = cef_build.verify_consumer(
         root, cfg, platform, execute, platform_sha256, platform_probe,
-        **({"reviewed_objects": linux_review["objects"]["objects"]} if linux_review is not None else {})
+        **({"reviewed_objects": linux_review["objects"]["objects"],
+            "reviewed_host_tools": linux_review["host_tools"]["records"]} if linux_review is not None else {})
     ) if cfg is not None else None
     cpp_proof = linux_sdk.verify_cpp(root, root / "consumer-sdk", linux_review, execute) if linux_review is not None else None
     platform_preflight = None

@@ -150,5 +150,9 @@ class AuditCheckpointCacheTests(LinuxCacheTests):
     RECORD = 'LINUX_AUDIT_CONTINUATION'
 
 
+class HostToolCheckpointCacheTests(LinuxCacheTests):
+    RECORD = 'LINUX_HOST_TOOL_CONTINUATION'
+
+
 if __name__ == '__main__':
     unittest.main()

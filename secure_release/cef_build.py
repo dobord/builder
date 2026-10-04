@@ -225,7 +225,8 @@ def run_engine(root: Path, cfg: dict, platform: str, execute, environment: dict,
 def verify_consumer(root: Path, cfg: dict, platform: str, execute,
                     platform_sha256: str | None = None,
                     platform_preflight: dict | None = None,
-                    *, recipe_root: Path | None = None, reviewed_objects: dict | None = None) -> dict:
+                    *, recipe_root: Path | None = None, reviewed_objects: dict | None = None,
+                    reviewed_host_tools: dict | None = None) -> dict:
     """Run a NEW relocated combined consumer; upstream receipts are provenance only."""
     recipe = root / "cef-recipe" if recipe_root is None else recipe_root
     if recipe_root is not None:
@@ -303,6 +304,8 @@ def verify_consumer(root: Path, cfg: dict, platform: str, execute,
     # Detailed paths stay in encrypted diagnostics. A clean structural audit
     # does not upgrade the engine-only runtime profile.
     audit_args = {"reviewed_objects": reviewed_objects} if reviewed_objects is not None else {}
+    if reviewed_host_tools is not None:
+        audit_args['reviewed_host_tools'] = reviewed_host_tools
     report = static_audit.inspect_sdk(root / "sdk.zip", platform, **audit_args)
     (logs / "target-archive-audit.json").write_bytes(crypto.canonical(report))
     proof["target_archive_audit"] = static_audit.summarize(report)

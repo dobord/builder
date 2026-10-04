@@ -125,3 +125,10 @@ Unreviewed loose objects and target/shared images remain violations. The exact
 accepted producer from `37227230399/1` is retained in
 `LINUX_AUDIT_CONTINUATION`; this run passed relocated C API runtime before the
 generic audit classified the retained OBJECT-library inputs as images.
+
+Three exact gettext host executables under `lib/gettext` are reviewed separately
+from target libraries. The pinned upstream port/manifest, unique gettext owner,
+byte hashes, sizes, executable mode and native executable ELF structure must
+match before export and audit. No other target image is admitted. The exact
+accepted producer `37234254699/1` is retained in `LINUX_HOST_TOOL_CONTINUATION`
+for this host-tool classification correction.
