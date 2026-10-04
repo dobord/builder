@@ -10,8 +10,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
-      SOURCE_SHA: '55db6d31857f0fdf7eee1f5a298d257d3970c1a5'
-      SOURCE_TREE: 'ffe5bd510f06b4af95fa30ae9110316353394bad'
+      SOURCE_SHA: '1e4aac087d4a41705ad03775a224005b335ba995'
+      SOURCE_TREE: '811a23872f7751cfcb0ef7c4f0b227bda59a4222'
       ARTIFACT_ENCRYPTION_PUBLIC_KEY: '{"primaryKeyId":341452413,"key":[{"keyData":{"typeUrl":"type.googleapis.com/google.crypto.tink.HpkePublicKey","value":"EgYIARABGAIaIEZ8/6Ix7wwUaPaf97F3P+pJFZYdq4doLNb8MNvTrsQJ","keyMaterialType":"ASYMMETRIC_PUBLIC"},"status":"ENABLED","keyId":341452413,"outputPrefixType":"TINK"}]}'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
