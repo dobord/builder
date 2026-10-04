@@ -92,3 +92,12 @@ to their exact IDs/digests and original producer context for requalification
 with the complete static X11/unwind profile. This is not runtime qualification
 or SDK publication authorization. The source and installed-port smokes keep
 strict runtime checks and collect bounded milestones privately.
+
+Final frozen replay uses a fresh `installed/` root. The completed preflight
+installation is retained as `platform-installed-before-replay/`, and is hidden
+alongside the final producer roots during consumer verification. Classic vcpkg
+otherwise skips already-installed dependencies and never invokes their replay
+hooks. Run `37201859932/1` passed the engine smoke and installed the full graph
+before the ownership check rejected the reused root; its exact accepted
+checkpoint/cache context is retained in `LINUX_INSTALL_CONTINUATION` for this
+correction. Ownership and SDK readiness requirements are unchanged.

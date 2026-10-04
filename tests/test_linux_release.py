@@ -17,6 +17,24 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class LinuxReleaseTests(unittest.TestCase):
+    def test_final_replay_starts_fresh_and_preserves_preflight_ownership(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder).resolve()
+            installed = root/'installed'
+            (installed/'vcpkg').mkdir(parents=True)
+            (installed/'vcpkg/status').write_text('public synthetic owner\n')
+            (installed/'old-package').write_bytes(b'preflight bytes')
+            linux_sdk.fresh_replay_installation(root)
+            self.assertFalse(installed.exists())
+            preserved = root/'platform-installed-before-replay'
+            self.assertEqual((preserved/'old-package').read_bytes(), b'preflight bytes')
+            installed.mkdir()
+            (installed/'new-replay-receipt').write_bytes(b'owned final replay')
+            self.assertFalse((installed/'old-package').exists())
+            with self.assertRaises(ValueError):
+                linux_sdk.fresh_replay_installation(root)
+            self.assertEqual((preserved/'vcpkg/status').read_text(), 'public synthetic owner\n')
+
     def test_linux_publication_revalidates_exact_workflow_attempt(self):
         run = {'id': 99, 'workflow_id': 7, 'run_attempt': 1,
                'repository': {'id': protocol.IDS[protocol.BUILDER]},

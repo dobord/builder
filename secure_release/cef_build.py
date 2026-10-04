@@ -258,7 +258,7 @@ def verify_consumer(root: Path, cfg: dict, platform: str, execute,
                "--work", str(root / "cef-work"), "--logs", str(logs),
                "--contract", cef_contract.build_key(cfg, platform, platform_sha256), "--state", str(state),
                "--executable", str(deployed / name)]
-    for folder in (root / "installed", root / "consumer-sdk", root / "cef-work",
+    for folder in (root / "installed", root / "platform-installed-before-replay", root / "consumer-sdk", root / "cef-work",
                    root / "export/sdk", root / "smoke-build"):
         if folder.exists():
             command.extend(["--hide", str(folder)])
