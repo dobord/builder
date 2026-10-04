@@ -62,8 +62,15 @@ class CFunctionSpanRepairTests(unittest.TestCase):
             repair.transform(self.raw, repair.TEMPLATE_HEADER)
         )
         source = root / "probe.cc"
-        source.write_text('#include "v8-template.h"\nint main(){return 0;}\n',
-                          encoding="utf-8")
+        source.write_text(
+            '#include "v8-template.h"\n'
+            'std::span<const v8::CFunction> MakeSpan(\n'
+            '    const v8::CFunction* first, const v8::CFunction* last) {\n'
+            '  return std::span<const v8::CFunction>(first, last);\n'
+            '}\n'
+            'int main(){return 0;}\n',
+            encoding="utf-8",
+        )
 
         vswhere = (Path(os.environ.get("ProgramFiles(x86)", "C:/Program Files (x86)"))
                    / "Microsoft Visual Studio/Installer/vswhere.exe")
