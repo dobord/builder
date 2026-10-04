@@ -117,3 +117,11 @@ edited. `LINUX_SMOKE_CONTINUATION` retains the exact accepted producer from
 `37220574288/1`, which completed SDK packaging before the legacy marker guard
 stopped consumer configure. The marker remains uniquely required and all
 runtime/component checks remain in place.
+
+The final structural audit receives the exact installed FreeRDP object review
+already verified during packaging. It checks complete inventory, SHA-256, sizes,
+native x64 ELF relocatable structure and absence of GCC LTO sections in the ZIP.
+Unreviewed loose objects and target/shared images remain violations. The exact
+accepted producer from `37227230399/1` is retained in
+`LINUX_AUDIT_CONTINUATION`; this run passed relocated C API runtime before the
+generic audit classified the retained OBJECT-library inputs as images.
