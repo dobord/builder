@@ -70,7 +70,7 @@ def verify(sdk: Path) -> dict:
     checked.require(0 < len(lists) <= 4096, "Invalid XZ ownership inventory")
     found, total = set(), 0
     for listing in lists:
-        data = checked.read(listing)
+        data = checked.read_listing(listing)
         total += len(data)
         checked.require(total <= 32 * 1024**2, "XZ ownership inventory exceeds limit")
         for line in data.decode().splitlines():

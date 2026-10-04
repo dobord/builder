@@ -62,7 +62,7 @@ def verify(sdk: Path) -> dict:
         checked.require(re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*_[^/]+_" +
                                     re.escape(TRIPLET) + r"\.list", listing.name) is not None,
                         "Invalid SDK source-interface owner label")
-        data = checked.read(listing)
+        data = checked.read_listing(listing)
         total += len(data)
         checked.require(total <= 32 * 1024**2, "SDK source-interface ownership exceeds limit")
         for line in data.decode().splitlines():

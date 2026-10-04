@@ -124,7 +124,7 @@ def verify(sdk: Path, manifest: Path, platform_sha256: str, *,
     checked.require(0 < len(lists) <= 4096, "Invalid SDK alias owner inventory")
     actual, total = {}, 0
     for listing in lists:
-        data = checked.read(listing)
+        data = checked.read_listing(listing)
         total += len(data)
         checked.require(total <= 32 * 1024**2, "SDK alias owner evidence exceeds limit")
         for line in data.decode().splitlines():

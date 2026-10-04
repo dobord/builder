@@ -54,7 +54,7 @@ def verify(sdk: Path, manifest: Path, platform_sha256: str) -> dict:
         checked.require(re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*_[^/]+_"
                         + re.escape(TRIPLET) + r"\.list", listing.name) is not None,
                         "Invalid GLib ownership label")
-        contents = checked.read(listing)
+        contents = checked.read_listing(listing)
         total += len(contents)
         checked.require(total <= 32 * 1024**2, "GLib ownership inventory exceeds limit")
         owners.extend(listing.name for line in contents.decode().splitlines() if line == member)
