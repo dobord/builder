@@ -48,7 +48,8 @@ jobs:
       - name: Verify offline wheelhouse
         run: python tools/verify_wheelhouse.py
       - name: Install only hash-pinned offline cryptography
-        run: python -m pip install --no-index --find-links=vendor/wheels --disable-pip-version-check --require-hashes --only-binary=:all: -r requirements.lock
+        run: >-
+          python -m pip install --no-index --find-links=vendor/wheels --disable-pip-version-check --require-hashes --only-binary=:all: -r requirements.lock
       - name: Native callable and complete checkpoint transition regressions
         run: python -m unittest tests.test_cef_windows_callable_repair tests.test_cef_windows_source_repair tests.test_cef_windows_layout_repair tests.test_cef_windows_tail_size_repair tests.test_cef_windows_cfunction_span_repair tests.test_openssl_tink_logs -v
       - name: Full regression suite
