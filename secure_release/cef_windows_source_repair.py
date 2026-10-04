@@ -1,9 +1,9 @@
-"""Seven reviewed Windows source corrections, bound to a new build contract.
+"""Eight reviewed Windows source corrections, bound to a new build contract.
 
 The baseline CEF checkout and native checkpoint codec stay unchanged. Only the
 exact legacy producer below may cross into this profile, after authenticated
 restore under its OLD contract. New checkpoints carry the NEW contract and a
-verified source marker covering all seven files. Neither receipts nor fixtures
+verified source marker covering all eight files. Neither receipts nor fixtures
 constitute runtime proof.
 """
 from __future__ import annotations
@@ -41,6 +41,9 @@ TORQUE_AFTER = "c53c5fda569a1d033cbdeb6213fb49474b714afa8fb1d750243e3193f1b951a3
 TEMPLATE_HEADER = "download/chromium/src/v8/include/v8-template.h"
 TEMPLATE_BEFORE = "5ff060cc76e892c0c345a699c0438fe09e23f643a64572f738ec9ff1cfd2d122"
 TEMPLATE_AFTER = "f4d4c4515727cedb7a5fba1a1b496a35bd9c6a9ee255cb7b23ed35ea8625b164"
+BIND_HEADER = "download/chromium/src/v8/src/base/functional/bind-internal.h"
+BIND_BEFORE = "0848488073fd36b6b75088d66518cd7b9bbe0f60190b47e12590d1748abae796"
+BIND_AFTER = "e08f2225e93df5a1afc02a1c375e87645449fd7e82b5d7b520c4e7aa31ce501b"
 # Ordered, closed set of corrections; no caller-selected paths or patches.
 CORRECTIONS = (
     (HEADER, BEFORE, AFTER, (
@@ -83,6 +86,10 @@ CORRECTIONS = (
          b'#include "v8-fast-api-calls.h"      // NOLINT(build/include_directory)\n'
          b'#include "v8-function-callback.h"  // NOLINT(build/include_directory)\n'),
     )),
+    (BIND_HEADER, BIND_BEFORE, BIND_AFTER, (
+        (b'#define BIND_INTERNAL_EXTRACT_CALLABLE_RUN_TYPE_WITH_QUALS(quals)     \\\n  template <typename Callable, typename R, typename... Args>          \\\n  struct ExtractCallableRunTypeImpl<Callable,                         \\\n                                    R (Callable::*)(Args...) quals> { \\\n    using Type = R(Args...);                                          \\\n  }',
+         b'// An inherited call operator belongs to its declaring base, not Callable.\n#define BIND_INTERNAL_EXTRACT_CALLABLE_RUN_TYPE_WITH_QUALS(quals)       \\\n  template <typename Callable, typename Receiver, typename R,          \\\n            typename... Args>                                         \\\n  struct ExtractCallableRunTypeImpl<Callable,                          \\\n                                    R (Receiver::*)(Args...) quals> { \\\n    using Type = R(Args...);                                           \\\n  }'),
+    )),
 
 
 )
@@ -100,7 +107,7 @@ LEGACY = {
 
 def profile() -> dict:
     return {
-        "schema": 2, "id": "windows-v8-cfunction-span-v8",
+        "schema": 2, "id": "windows-v8-inherited-callable-v9",
         "chromium_commit": CHROMIUM,
         "v8_commit": V8,
         "corrections": [

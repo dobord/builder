@@ -5,13 +5,20 @@ on:
 permissions:
   contents: read
 jobs:
-  public-inputs:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
+  regression:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      CEF_WINDOWS_LAYOUT_SOURCE_ROOT: ${{ github.workspace }}/public-v8
+      CEF_WINDOWS_CFUNCTION_SOURCE_ROOT: ${{ github.workspace }}/public-v8
+      CEF_REPAIR_RECIPE_DIR: ${{ github.workspace }}/public-cef
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: d004d834c027f735fb917b2a5bd7cbc3ef2c093d
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -24,22 +31,25 @@ jobs:
             src/base
             src/torque
             src/objects
-      - name: Archive only immutable tracked public sources
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(git rev-parse HEAD)" = d004d834c027f735fb917b2a5bd7cbc3ef2c093d
-          test "$(git -C public-v8 rev-parse HEAD)" = 4323497a6a73839e6d5260f6acd7ec0212cb3321
-          mkdir public-inputs
-          git archive --format=tar HEAD > public-inputs/builder-source.tar
-          git ls-tree -r HEAD > public-inputs/builder-tree.txt
-          git -C public-v8 archive --format=tar HEAD include LICENSE src/base src/torque/implementation-visitor.cc src/objects/map.h src/objects/object-macros.h src/objects/js-interceptor-map.h src/objects/map.tq src/objects/js-interceptor-map.tq > public-inputs/v8-inputs.tar
-          git -C public-v8 ls-tree -r HEAD include LICENSE src/base src/torque/implementation-visitor.cc src/objects/map.h src/objects/object-macros.h src/objects/js-interceptor-map.h src/objects/map.tq src/objects/js-interceptor-map.tq > public-inputs/v8-tree.txt
-          cd public-inputs
-          sha256sum *.tar *-tree.txt > SHA256SUMS
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          name: public-callable-inputs-${{ github.run_id }}
-          path: public-inputs/*
-          if-no-files-found: error
-          retention-days: 3
+          repository: dobord/cef
+          ref: 03abd124ebe3b8a57fb78470a75b5aa3ce064e31
+          path: public-cef
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.12'
+      - name: Verify exact public source revisions
+        run: >-
+          python -c "import os,subprocess;
+          pins={'.':os.environ['GITHUB_SHA'],'public-v8':'4323497a6a73839e6d5260f6acd7ec0212cb3321','public-cef':'03abd124ebe3b8a57fb78470a75b5aa3ce064e31'};
+          assert all(subprocess.check_output(['git','-C',path,'rev-parse','HEAD'],text=True).strip()==sha for path,sha in pins.items())"
+      - name: Verify offline wheelhouse
+        run: python tools/verify_wheelhouse.py
+      - name: Install only hash-pinned offline cryptography
+        run: python -m pip install --no-index --find-links=vendor/wheels --disable-pip-version-check --require-hashes --only-binary=:all: -r requirements.lock
+      - name: Native callable and complete checkpoint transition regressions
+        run: python -m unittest tests.test_cef_windows_callable_repair tests.test_cef_windows_source_repair tests.test_cef_windows_layout_repair tests.test_cef_windows_tail_size_repair tests.test_cef_windows_cfunction_span_repair tests.test_openssl_tink_logs -v
+      - name: Full regression suite
+        run: python -m unittest discover -s tests -v

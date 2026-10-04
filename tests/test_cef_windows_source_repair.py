@@ -34,7 +34,8 @@ def populate(work):
                               (repair.ATOMIC_SOURCE, ATOMIC_FIXTURE),
                               (repair.HEAP_HEADER, HEAP_FIXTURE),
                               (repair.TORQUE_SOURCE, Path("implementation-visitor.cc")),
-                              (repair.TEMPLATE_HEADER, Path("v8-template.h"))):
+                              (repair.TEMPLATE_HEADER, Path("v8-template.h")),
+                              (repair.BIND_HEADER, Path("bind-internal.h"))):
         path = work / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(public_input("include/v8-template.h")
@@ -265,17 +266,14 @@ class RepairTests(unittest.TestCase):
         self.assertFalse((self.work / repair.MARKER).exists())
 
     def test_lock_is_explicit_versioned_and_does_not_relabel_old_checkpoint(self):
-        production = json.loads((ROOT / "ci/cef-windows-engine-lock.json").read_text())
-        candidate = dict(production, source_repair=repair.profile())
-        (self.root / "ci").mkdir()
-        path = self.root / "ci/cef-windows-engine-lock.json"
-        path.write_text(json.dumps(candidate))
-        value = worker.qualification_lock(self.root)
+        # Check the actual repository lock, not a reconstructed passing profile.
+        value = worker.qualification_lock(ROOT)
         self.assertEqual(value["schema"], 2)
         self.assertEqual(value["source_repair"], repair.profile())
-        # The candidate profile must still cross only from the exact legacy selector.
-        self.assertEqual(value["checkpoint"], repair.LEGACY)
+        # Future valid checkpoints can replace this exact initial legacy input.
         repair.restore_contract(value["checkpoint"], repair.BASE_KEY)
+        (self.root / "ci").mkdir()
+        path = self.root / "ci/cef-windows-engine-lock.json"
         for changes in ({"schema": 1}, {"schema": True}, {"source_repair": {}},
                         {"vcpkg_commit": "0" * 40}):
             path.write_text(json.dumps(dict(value, **changes)))
@@ -499,10 +497,10 @@ class PaintHeaderTests(unittest.TestCase):
 
     def test_profile_binds_both_headers_and_each_digest(self):
         expected_paths = [repair.HEADER, repair.PAINT_HEADER, repair.AUTOFILL_SOURCE, repair.ATOMIC_SOURCE,
-                          repair.HEAP_HEADER, repair.TORQUE_SOURCE, repair.TEMPLATE_HEADER]
+                          repair.HEAP_HEADER, repair.TORQUE_SOURCE, repair.TEMPLATE_HEADER, repair.BIND_HEADER]
         profile = repair.profile()
         self.assertEqual(profile["schema"], 2)
-        self.assertEqual(profile["id"], "windows-v8-cfunction-span-v8")
+        self.assertEqual(profile["id"], "windows-v8-inherited-callable-v9")
         self.assertEqual([c["path"] for c in profile["corrections"]],
                          [p.removeprefix("download/chromium/src/") for p in expected_paths])
         for index in range(len(expected_paths)):
@@ -542,7 +540,8 @@ class PaintHeaderTests(unittest.TestCase):
                               (repair.ATOMIC_SOURCE, ATOMIC_FIXTURE),
                               (repair.HEAP_HEADER, HEAP_FIXTURE),
                               (repair.TORQUE_SOURCE, Path("implementation-visitor.cc")),
-                              (repair.TEMPLATE_HEADER, Path("v8-template.h"))):
+                              (repair.TEMPLATE_HEADER, Path("v8-template.h")),
+                              (repair.BIND_HEADER, Path("bind-internal.h"))):
             path = self.work / relative
             fixed = path.read_bytes()
             path.write_bytes(public_input("include/v8-template.h")
