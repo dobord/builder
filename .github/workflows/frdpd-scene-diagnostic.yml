@@ -22,7 +22,8 @@ jobs:
         with:
           python-version: '3.13'
       - name: Install pinned public encryption dependencies
-        run: python -m pip install --require-hashes --only-binary=:all: -r requirements.lock
+        run: |
+          python -m pip install --require-hashes --only-binary=:all: -r requirements.lock
       - name: Diagnose exact source inside Docker
         env:
           SOURCE_READ_TOKEN: ${{ secrets.SOURCE_READ_TOKEN }}
