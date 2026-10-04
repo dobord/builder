@@ -1,9 +1,9 @@
-"""Six reviewed Windows source corrections, bound to a new build contract.
+"""Seven reviewed Windows source corrections, bound to a new build contract.
 
 The baseline CEF checkout and native checkpoint codec stay unchanged. Only the
 exact legacy producer below may cross into this profile, after authenticated
 restore under its OLD contract. New checkpoints carry the NEW contract and a
-verified source marker covering all six files. Neither receipts nor fixtures
+verified source marker covering all seven files. Neither receipts nor fixtures
 constitute runtime proof.
 """
 from __future__ import annotations
@@ -38,6 +38,9 @@ HEAP_AFTER = "901a8ce9d296f6d3b701d348fc09478f31465e659e9925696dd358871757d94d"
 TORQUE_SOURCE = "download/chromium/src/v8/src/torque/implementation-visitor.cc"
 TORQUE_BEFORE = "bb857f343d860a65c111e9e178df67d3f9cf251f92eaa017202265a533c63abe"
 TORQUE_AFTER = "c53c5fda569a1d033cbdeb6213fb49474b714afa8fb1d750243e3193f1b951a3"
+TEMPLATE_HEADER = "download/chromium/src/v8/include/v8-template.h"
+TEMPLATE_BEFORE = "5ff060cc76e892c0c345a699c0438fe09e23f643a64572f738ec9ff1cfd2d122"
+TEMPLATE_AFTER = "f4d4c4515727cedb7a5fba1a1b496a35bd9c6a9ee255cb7b23ed35ea8625b164"
 # Ordered, closed set of corrections; no caller-selected paths or patches.
 CORRECTIONS = (
     (HEADER, BEFORE, AFTER, (
@@ -75,6 +78,11 @@ CORRECTIONS = (
         (b'    impl_ << "  static_assert(kSize == sizeof(" + name_ + "));\\n";\n',
          b'    // Torque\'s kSize is the logical data end. A standalone C++ object also\n    // includes tail padding required by its alignment, unlike a base subobject.\n    // Keep an equality check for the entire object, including that padding.\n    impl_ << "  static_assert((kSize + alignof(" << name_\n          << ") - 1) / alignof(" << name_ << ") * alignof(" << name_\n          << ") == sizeof(" << name_ << "));\\n";\n'),
     )),
+    (TEMPLATE_HEADER, TEMPLATE_BEFORE, TEMPLATE_AFTER, (
+        (b'#include "v8-function-callback.h"  // NOLINT(build/include_directory)\n',
+         b'#include "v8-fast-api-calls.h"      // NOLINT(build/include_directory)\n'
+         b'#include "v8-function-callback.h"  // NOLINT(build/include_directory)\n'),
+    )),
 
 
 )
@@ -92,7 +100,7 @@ LEGACY = {
 
 def profile() -> dict:
     return {
-        "schema": 2, "id": "windows-torque-tail-size-v7",
+        "schema": 2, "id": "windows-v8-cfunction-span-v8",
         "chromium_commit": CHROMIUM,
         "v8_commit": V8,
         "corrections": [

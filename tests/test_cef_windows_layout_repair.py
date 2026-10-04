@@ -27,7 +27,9 @@ def populate(work):
     for relative, _, _, _ in repair.CORRECTIONS:
         p = work/relative
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_bytes(fixture_bytes(p.name))
+        p.write_bytes(public_input("include/v8-template.h")
+                      if relative == repair.TEMPLATE_HEADER
+                      else fixture_bytes(p.name))
 
 
 def generator_probe(raw):
@@ -171,12 +173,13 @@ class TorqueLayoutRepairTests(unittest.TestCase):
         self.assertEqual(hashlib.sha256(raw).hexdigest(), repair.TORQUE_BEFORE)
         fixed = repair.transform(raw, repair.TORQUE_SOURCE)
         restored = fixed
-        for old, new in reversed(repair.CORRECTIONS[-1][3]):
+        torque = next(c for c in repair.CORRECTIONS if c[0] == repair.TORQUE_SOURCE)
+        for old, new in reversed(torque[3]):
             self.assertEqual(restored.count(new), 1)
             restored = restored.replace(new, old, 1)
         self.assertEqual(restored, raw)
         self.assertEqual(fixed.count(b'static_assert('), raw.count(b'static_assert(') + 1)
-        new = repair.CORRECTIONS[-1][3][0][1]
+        new = torque[3][0][1]
         self.assertIn(b'parent && parent->IsLayoutDefinedInCpp() && parent->HasStaticSize()',fixed)
         self.assertNotIn(b'JSInterceptorMap',new)  # No class-specific magic offset.
 
