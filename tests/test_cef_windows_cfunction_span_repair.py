@@ -81,6 +81,7 @@ class CFunctionSpanRepairTests(unittest.TestCase):
             batch = root / f"{name}.cmd"
             command = (
                 f'"{clang}" /nologo /std:c++20 /EHsc /W4 /WX '
+                f'-Wno-unused-parameter '
                 f'/I"{include}" /c "{source}" /Fo:"{obj}"'
             )
             batch.write_text(

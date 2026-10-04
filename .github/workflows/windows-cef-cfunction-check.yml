@@ -67,5 +67,10 @@ jobs:
           CEF_WINDOWS_CFUNCTION_SOURCE_ROOT: ${{ github.workspace }}/public-v8
         run: |
           python -m unittest tests.test_cef_windows_cfunction_span_repair -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m unittest tests.test_cef_windows_source_repair -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m unittest tests.test_cef_windows_layout_repair -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m unittest tests.test_cef_windows_tail_size_repair -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
