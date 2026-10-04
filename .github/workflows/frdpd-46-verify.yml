@@ -1,5 +1,5 @@
 name: FRDPD issue 46 encrypted package qualification
-# Strict fortified build and direct production string-boundary regressions.
+# Strict fortified build, installed DDX smoke and existing lifecycle gates.
 on:
   push:
     branches: [test/frdpd-46-installed-window-20261003]
