@@ -109,3 +109,11 @@ separate non-empty 1 MiB policy. Run `37209361089/1` completed frozen replay and
 runtime checks before the shared source reader rejected ownership metadata;
 `LINUX_INVENTORY_CONTINUATION` retains only its exact accepted checkpoint/cache
 for this correction, under the unchanged original authenticated context.
+
+The relocated combined C API consumer uses `cef_combined_smoke.prepare` to
+validate the exact original sources and fix only CMake's semicolon/list marker
+counting in an isolated copy. The immutable registry, recipe and SDK are not
+edited. `LINUX_SMOKE_CONTINUATION` retains the exact accepted producer from
+`37220574288/1`, which completed SDK packaging before the legacy marker guard
+stopped consumer configure. The marker remains uniquely required and all
+runtime/component checks remain in place.
