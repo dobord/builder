@@ -13,15 +13,6 @@ jobs:
         with:
           ref: d02681085e2bf3331f73152e6cc69da794561dfb
           persist-credentials: false
-      - name: Snapshot exact public builder tree
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(git rev-parse HEAD)" = d02681085e2bf3331f73152e6cc69da794561dfb
-          mkdir public-inputs
-          git archive --format=tar HEAD > public-inputs/builder-source.tar
-          git rev-parse HEAD > public-inputs/builder-commit.txt
-          git rev-parse HEAD^{tree} > public-inputs/builder-tree.txt
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: chromium/chromium
@@ -30,18 +21,25 @@ jobs:
           persist-credentials: false
           sparse-checkout-cone-mode: false
           sparse-checkout: |
-            base/no_destructor.h
-            third_party/blink/renderer/core/layout/inline/inline_node.h
-            third_party/blink/renderer/platform/wtf/text/text_offset_map.h
-      - name: Snapshot pinned public regression headers
+            base/containers/adapters.h
+            base/containers/adapters_internal.h
+            ui/accessibility/ax_node.h
+            ui/accessibility/platform/browser_accessibility.h
+            ui/accessibility/platform/browser_accessibility.cc
+            ui/accessibility/platform/child_iterator.h
+            ui/accessibility/platform/browser_accessibility_manager.cc
+            third_party/blink/renderer/platform/wtf/text/wtf_string.h
+            third_party/blink/renderer/platform/wtf/text/code_point_iterator.h
+      - name: Snapshot exact public regression inputs
         shell: bash
         run: |
           set -euo pipefail
           test "$(git -C public-chromium rev-parse HEAD)" = 79460ebecaa5625e57a5fb679a735659e73dc687
           git -C public-chromium diff --exit-code
-          tar -cf public-inputs/chromium-headers.tar -C public-chromium base/no_destructor.h third_party/blink/renderer/core/layout/inline/inline_node.h third_party/blink/renderer/platform/wtf/text/text_offset_map.h
+          mkdir public-inputs
+          tar -cf public-inputs/chromium-v11-inputs.tar -C public-chromium base/containers/adapters.h base/containers/adapters_internal.h ui/accessibility/ax_node.h ui/accessibility/platform/browser_accessibility.h ui/accessibility/platform/browser_accessibility.cc ui/accessibility/platform/child_iterator.h ui/accessibility/platform/browser_accessibility_manager.cc third_party/blink/renderer/platform/wtf/text/wtf_string.h third_party/blink/renderer/platform/wtf/text/code_point_iterator.h
           cd public-inputs
-          sha256sum *.tar *-commit.txt *-tree.txt > SHA256SUMS
+          sha256sum *.tar > SHA256SUMS
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: public-inline-optional-inputs-${{ github.run_id }}
