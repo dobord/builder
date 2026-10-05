@@ -1,0 +1,49 @@
+name: Windows CEF inline optional verification
+on:
+  push:
+    branches: [repair/windows-cef-47-inline-empty]
+permissions:
+  contents: read
+jobs:
+  public-inputs:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: d02681085e2bf3331f73152e6cc69da794561dfb
+          persist-credentials: false
+      - name: Snapshot exact public builder tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = d02681085e2bf3331f73152e6cc69da794561dfb
+          mkdir public-inputs
+          git archive --format=tar HEAD > public-inputs/builder-source.tar
+          git rev-parse HEAD > public-inputs/builder-commit.txt
+          git rev-parse HEAD^{tree} > public-inputs/builder-tree.txt
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: chromium/chromium
+          ref: 79460ebecaa5625e57a5fb679a735659e73dc687
+          path: public-chromium
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            base/no_destructor.h
+            third_party/blink/renderer/core/layout/inline/inline_node.h
+            third_party/blink/renderer/platform/wtf/text/text_offset_map.h
+      - name: Snapshot pinned public regression headers
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C public-chromium rev-parse HEAD)" = 79460ebecaa5625e57a5fb679a735659e73dc687
+          git -C public-chromium archive --format=tar HEAD base/no_destructor.h third_party/blink/renderer/core/layout/inline/inline_node.h third_party/blink/renderer/platform/wtf/text/text_offset_map.h > public-inputs/chromium-headers.tar
+          cd public-inputs
+          sha256sum *.tar *-commit.txt *-tree.txt > SHA256SUMS
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: public-inline-optional-inputs-${{ github.run_id }}
+          path: public-inputs/*
+          if-no-files-found: error
+          retention-days: 7
