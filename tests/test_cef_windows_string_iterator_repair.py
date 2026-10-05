@@ -162,9 +162,9 @@ class StringIteratorCompletenessTests(unittest.TestCase):
 
     def test_v11_profile_lock_and_failed45_not_resume_inputs(self):
         profile = repair.profile()
-        self.assertEqual(profile["id"], "windows-blink-string-codepoint-iterator-v11")
-        self.assertEqual(len(profile["corrections"]), 11)
-        self.assertEqual(profile["corrections"][-1], {
+        self.assertEqual(profile["id"], "windows-inline-empty-lifetime-v12")
+        self.assertEqual(len(profile["corrections"]), 12)
+        self.assertEqual(profile["corrections"][10], {
             "path": WTF,
             "before_sha256": repair.WTF_STRING_BEFORE,
             "after_sha256": repair.WTF_STRING_AFTER,
@@ -174,7 +174,7 @@ class StringIteratorCompletenessTests(unittest.TestCase):
             repair.restore_contract(dict(repair.LEGACY, run=37220692089), repair.BASE_KEY)
         for field in ("path", "before_sha256", "after_sha256"):
             altered = copy.deepcopy(profile)
-            altered["corrections"][-1][field] = "0" * len(altered["corrections"][-1][field])
+            altered["corrections"][10][field] = "0" * len(altered["corrections"][10][field])
             with mock.patch.object(repair, "profile", return_value=altered):
                 self.assertNotEqual(repair.build_key(repair.BASE_KEY), self.key)
 

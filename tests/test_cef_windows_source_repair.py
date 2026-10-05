@@ -38,7 +38,8 @@ def populate(work):
                               (repair.BIND_HEADER, Path("bind-internal.h")),
                               (repair.ACCESSIBILITY_HEADER, Path("browser_accessibility.h")),
                               (repair.ACCESSIBILITY_SOURCE, Path("browser_accessibility.cc")),
-                              (repair.WTF_STRING_HEADER, Path("wtf_string.h"))):
+                              (repair.WTF_STRING_HEADER, Path("wtf_string.h")),
+                              (repair.INLINE_HEADER, Path("inline_node.h"))):
         path = work / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(public_input("include/v8-template.h")
@@ -376,7 +377,10 @@ class OrchestrationTests(unittest.TestCase):
     def test_new_checkpoint_resumes_without_reapplying_header(self):
         self.exercise(True)
 
-    def exercise(self, migrated):
+    def test_qualified_v11_restore_and_v12_save_use_distinct_contracts(self):
+        self.exercise(False, prior=True)
+
+    def exercise(self, migrated, prior=False):
         cfg = {"schema": 1, "recipe_commit": worker.CEF, "profile": "static-third-party",
                "release_lock": None, "slice_seconds": 9000, "jobs": 4,
                "platforms": {p: {"mode": "source-fresh", "checkpoint": None, "binary_cache": None}
@@ -384,10 +388,10 @@ class OrchestrationTests(unittest.TestCase):
         base = cef_contract.build_key(cfg, "windows")
         self.assertEqual(base, repair.BASE_KEY)
         key = repair.build_key(base)
-        selected = dict(repair.LEGACY)
+        selected = dict(repair.UPGRADE_V11 if prior else repair.LEGACY)
         if migrated:
             selected.update(run=101, producer_sha="a" * 40, build_key=key)
-        input_key = key if migrated else base
+        input_key = repair.V11_KEY if prior else key if migrated else base
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder).resolve(); temp = root / "temp"; temp.mkdir()
             registry = root / "private-vcpkg/ci"; registry.mkdir(parents=True)
@@ -404,7 +408,11 @@ class OrchestrationTests(unittest.TestCase):
                 args = list(map(str, command)); calls.append(args)
                 if "restore" in args:
                     self.assertEqual(args[args.index("--contract") + 1], input_key)
-                    populate(work)
+                    if prior:
+                        from tests.test_cef_windows_inline_empty_repair import populate_v11
+                        populate_v11(work)
+                    else:
+                        populate(work)
                     if migrated:
                         repair.apply(work, key, "legacy")
                 elif "slice" in args:
@@ -501,10 +509,10 @@ class PaintHeaderTests(unittest.TestCase):
     def test_profile_binds_both_headers_and_each_digest(self):
         expected_paths = [repair.HEADER, repair.PAINT_HEADER, repair.AUTOFILL_SOURCE, repair.ATOMIC_SOURCE,
                           repair.HEAP_HEADER, repair.TORQUE_SOURCE, repair.TEMPLATE_HEADER, repair.BIND_HEADER,
-                          repair.ACCESSIBILITY_HEADER, repair.ACCESSIBILITY_SOURCE, repair.WTF_STRING_HEADER]
+                          repair.ACCESSIBILITY_HEADER, repair.ACCESSIBILITY_SOURCE, repair.WTF_STRING_HEADER, repair.INLINE_HEADER]
         profile = repair.profile()
         self.assertEqual(profile["schema"], 2)
-        self.assertEqual(profile["id"], "windows-blink-string-codepoint-iterator-v11")
+        self.assertEqual(profile["id"], "windows-inline-empty-lifetime-v12")
         self.assertEqual([c["path"] for c in profile["corrections"]],
                          [p.removeprefix("download/chromium/src/") for p in expected_paths])
         for index in range(len(expected_paths)):
@@ -548,7 +556,8 @@ class PaintHeaderTests(unittest.TestCase):
                               (repair.BIND_HEADER, Path("bind-internal.h")),
                               (repair.ACCESSIBILITY_HEADER, Path("browser_accessibility.h")),
                               (repair.ACCESSIBILITY_SOURCE, Path("browser_accessibility.cc")),
-                              (repair.WTF_STRING_HEADER, Path("wtf_string.h"))):
+                              (repair.WTF_STRING_HEADER, Path("wtf_string.h")),
+                              (repair.INLINE_HEADER, Path("inline_node.h"))):
             path = self.work / relative
             fixed = path.read_bytes()
             path.write_bytes(public_input("include/v8-template.h")
@@ -695,6 +704,8 @@ def load_tests(loader, standard_tests, pattern):
     standard_tests.addTests(loader.loadTestsFromModule(test_cef_windows_accessibility_iterator_repair))
     from tests import test_cef_windows_string_iterator_repair
     standard_tests.addTests(loader.loadTestsFromModule(test_cef_windows_string_iterator_repair))
+    from tests import test_cef_windows_inline_empty_repair
+    standard_tests.addTests(loader.loadTestsFromModule(test_cef_windows_inline_empty_repair))
     return standard_tests
 
 
