@@ -30,7 +30,8 @@ jobs:
         with:
           python-version: '3.13'
       - name: Install exact hash-pinned public dependencies
-        run: python -m pip install --require-hashes --only-binary=:all: -r requirements.lock
+        run: |
+          python -m pip install --require-hashes --only-binary=:all: -r requirements.lock
       - name: Qualify exact source and telemetry inside Docker
         env:
           SOURCE_READ_TOKEN: ${{ secrets.SOURCE_READ_TOKEN }}
