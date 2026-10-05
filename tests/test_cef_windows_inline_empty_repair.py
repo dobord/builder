@@ -1,4 +1,4 @@
-"""Public InlineNode empty sentinel and exact v11-to-v12 transition regressions.
+"""Public InlineNode empty sentinel and exact v11-to-current transition regressions.
 
 The native probe extracts FirstLineOffsetMap verbatim from the pinned public
 header and compiles the actual TextOffsetMap/NoDestructor headers. The surrounding
@@ -147,7 +147,7 @@ class InlineEmptyRepairTests(unittest.TestCase):
         self.assertEqual(hashlib.sha256(self.old).hexdigest(), repair.INLINE_BEFORE)
         self.assertEqual(hashlib.sha256(self.fixed).hexdigest(), repair.INLINE_AFTER)
         reversed_source = self.fixed
-        for before, after in reversed(repair.CORRECTIONS[-1][3]):
+        for before, after in reversed(repair.CORRECTIONS[11][3]):
             self.assertEqual(reversed_source.count(after), 1)
             reversed_source = reversed_source.replace(after, before, 1)
         self.assertEqual(reversed_source, self.old)
@@ -281,7 +281,7 @@ class V11TransitionTests(unittest.TestCase):
         before = {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in self.work.rglob("*") if p.is_file()}
         self.assertEqual(self.apply(), "upgraded-v11")
         for path, snap in before.items():
-            if path not in (self.path, self.marker):
+            if path not in (self.path, self.work / repair.DOM_HEADER, self.marker):
                 self.assertEqual((path.read_bytes(), path.stat().st_mtime_ns), snap)
         self.assertGreater(self.path.stat().st_mtime_ns, before[self.path][1])
         self.assertEqual(parse(self.marker.read_bytes())["build_key"], self.key)
@@ -339,7 +339,7 @@ class V11TransitionTests(unittest.TestCase):
             with self.assertRaises(ValueError): self.apply()
         self.assertEqual(self.marker.read_bytes(), b"concurrent marker")
 
-    def test_native_v11_restore_upgrade_and_v12_roundtrip(self):
+    def test_native_v11_restore_upgrade_and_current_roundtrip(self):
         location = os.environ.get("CEF_REPAIR_RECIPE_DIR")
         if not location:
             self.skipTest("Pinned native checkpoint recipe not supplied")
