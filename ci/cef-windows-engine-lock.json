@@ -15,7 +15,7 @@
   },
   "source_repair": {
     "schema": 2,
-    "id": "windows-accessibility-default-iterator-v10",
+    "id": "windows-blink-string-codepoint-iterator-v11",
     "chromium_commit": "79460ebecaa5625e57a5fb679a735659e73dc687",
     "v8_commit": "4323497a6a73839e6d5260f6acd7ec0212cb3321",
     "corrections": [
@@ -68,8 +68,13 @@
         "path": "ui/accessibility/platform/browser_accessibility.cc",
         "before_sha256": "f7e3cf4414bf31a8de222ea1a40b147f9fa4014d7e7604192ba3963e307f629a",
         "after_sha256": "2db1d2329a419e61c4409b630447c3c56e63987c76a1c76c34bbfac6e097ffe8"
+      },
+      {
+        "path": "third_party/blink/renderer/platform/wtf/text/wtf_string.h",
+        "before_sha256": "1b4a503d160ffc0480c49710f65d3b6656c498e8ac23dbaaedee491e92ae71ef",
+        "after_sha256": "cfe2cf6bbb93d0ef053d0c8cf51d8d8071d54876fc53ca5f1f57d00231925d57"
       }
     ],
-    "implementation_sha256": "3835e4885c3d88cb9b78b6a3af697b26fcdffea4a1439411bbf4a26a482c80ec"
+    "implementation_sha256": "4fee03fa893a82324554c0bd12a790a8487bd3b030aa77438968f1fde494a48d"
   }
 }

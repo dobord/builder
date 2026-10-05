@@ -57,7 +57,7 @@ def probe_source(fixed, *, omit_index_guard=False):
         header = repair.transform(header, repair.ACCESSIBILITY_HEADER)
         source = repair.transform(source, repair.ACCESSIBILITY_SOURCE)
         if omit_index_guard:
-            before, after = repair.CORRECTIONS[-1][3][1]
+            before, after = repair.CORRECTIONS[9][3][1]
             if source.count(after) != 1:
                 raise ValueError('Index guard control boundary changed')
             source = source.replace(after, before, 1)
@@ -123,7 +123,7 @@ class AccessibilityIteratorTests(unittest.TestCase):
             for invalid in (raw[:-1], raw+b'\n', b'X'+raw[1:]):
                 with self.assertRaises(ValueError): verify_public(path, invalid)
         with self.assertRaises(ValueError): public_input('../unreviewed.h')
-        for relative, before, after, edits in repair.CORRECTIONS[-2:]:
+        for relative, before, after, edits in repair.CORRECTIONS[8:10]:
             raw = fixture_bytes(Path(relative).name)
             self.assertEqual(hashlib.sha256(raw).hexdigest(), before)
             changed = repair.transform(raw, relative)
@@ -132,7 +132,7 @@ class AccessibilityIteratorTests(unittest.TestCase):
                 self.assertEqual(changed.count(new), 1)
                 changed = changed.replace(new, old, 1)
             self.assertEqual(changed, raw)
-        self.assertEqual([len(item[3]) for item in repair.CORRECTIONS[-2:]], [1, 2])
+        self.assertEqual([len(item[3]) for item in repair.CORRECTIONS[8:10]], [1, 2])
         self.assertIn(b'for (const auto& child : base::Reversed(range))',
                       public_input(PREFIX + 'browser_accessibility_manager.cc'))
         self.assertIn('DCHECK(parent);', probe_source(True))
@@ -141,8 +141,8 @@ class AccessibilityIteratorTests(unittest.TestCase):
 
     def test_new_profile_and_repository_lock_reject_v9_and_failed44(self):
         profile = repair.profile()
-        self.assertEqual(profile['id'], 'windows-accessibility-default-iterator-v10')
-        self.assertEqual(len(profile['corrections']), 10)
+        self.assertEqual(profile['id'], 'windows-blink-string-codepoint-iterator-v11')
+        self.assertEqual(len(profile['corrections']), 11)
         self.assertEqual(worker.qualification_lock(ROOT)['source_repair'], profile)
         selected = worker.qualification_lock(ROOT)['checkpoint']
         self.assertIn(repair.restore_contract(selected, repair.BASE_KEY)[1], ('legacy', 'resume'))
@@ -158,7 +158,7 @@ class AccessibilityIteratorTests(unittest.TestCase):
                     self.assertNotEqual(repair.build_key(repair.BASE_KEY), self.key)
 
     def test_newlines_idempotence_and_partial_corrections_rejected(self):
-        for relative, _, _, edits in repair.CORRECTIONS[-2:]:
+        for relative, _, _, edits in repair.CORRECTIONS[8:10]:
             raw = fixture_bytes(Path(relative).name)
             for nl in (b'\n', b'\r\n'):
                 original = raw.replace(b'\n', nl)
@@ -210,7 +210,7 @@ class AccessibilityIteratorTests(unittest.TestCase):
         before = snapshot(work)
         self.assertEqual(repair.apply(work, self.key, 'resume'), 'already-applied')
         self.assertEqual(snapshot(work), before)
-        for relative, _, _, _ in repair.CORRECTIONS[-2:]:
+        for relative, _, _, _ in repair.CORRECTIONS[8:10]:
             p = work / relative; fixed = p.read_bytes()
             p.write_bytes(fixture_bytes(p.name))
             with self.assertRaises(ValueError): repair.apply(work, self.key, 'resume')
