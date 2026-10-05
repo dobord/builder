@@ -1,9 +1,9 @@
-"""Twelve reviewed Windows source corrections, bound to a new build contract.
+"""Thirteen reviewed Windows source corrections, bound to a new build contract.
 
 The baseline CEF checkout and native checkpoint codec stay unchanged. Only the
 exact reviewed producers below may cross into this profile, after authenticated
 restore under its OLD contract. New checkpoints carry the NEW contract and a
-verified source marker covering all twelve files. Neither receipts nor fixtures
+verified source marker covering all thirteen files. Neither receipts nor fixtures
 constitute runtime proof.
 """
 from __future__ import annotations
@@ -56,6 +56,9 @@ WTF_STRING_AFTER = "cfe2cf6bbb93d0ef053d0c8cf51d8d8071d54876fc53ca5f1f57d0023192
 INLINE_HEADER = "download/chromium/src/third_party/blink/renderer/core/layout/inline/inline_node.h"
 INLINE_BEFORE = "2aa20d294ebe0a6ae3c7d3a168bb9763d5ce73c0916f7270fde93eb967aebfcc"
 INLINE_AFTER = "3fa4cfb6be4f52f090fbc4c05e0958c120b72065fca623473cf53faa0d888019"
+DOM_HEADER = "download/chromium/src/services/data_decoder/xml/dom_builder.h"
+DOM_BEFORE = "969acc87746001c86ef0d98eeb2a15de80e02e56b6a2727d0d3b7dc73cc37882"
+DOM_AFTER = "596393505d3d16f2ffe7bd3cd6b7c51c7c534d16896028739bcbd05c48bc0e4a"
 # Ordered, closed set of corrections; no caller-selected paths or patches.
 CORRECTIONS = (
     (HEADER, BEFORE, AFTER, (
@@ -125,6 +128,10 @@ CORRECTIONS = (
         (b'    return kEmpty;\n',
          b'    return *kEmpty;\n'),
     )),
+    (DOM_HEADER, DOM_BEFORE, DOM_AFTER, (
+        (b'#include "third_party/rust/cxx/v1/cxx.h"\n',
+         b'#include <memory>\n\n#include "third_party/rust/cxx/v1/cxx.h"\n'),
+    )),
 )
 BASE_KEY = "60a369f6b051ba651cb301af299e7dadcc99608d0db6894bccab87b953817602"
 LEGACY = {
@@ -172,7 +179,7 @@ def prior_profile() -> dict:
 
 def profile() -> dict:
     return {
-        "schema": 2, "id": "windows-inline-empty-lifetime-v12",
+        "schema": 2, "id": "windows-xml-dom-memory-v13",
         "chromium_commit": CHROMIUM,
         "v8_commit": V8,
         "corrections": [
@@ -367,10 +374,10 @@ def _upgrade_v11(work: Path, expected: bytes, inputs: list) -> str:
     marker, marker_data, marker_before = _read(work, MARKER, 8192)
     previous = canonical({"schema": 1, "kind": "cef-windows-source-repair",
                           "build_key": V11_KEY, "source_repair": prior_profile()})
-    if (canonical(parse(marker_data)) != previous or len(inputs) != 12
-            or inputs[-1][0] != INLINE_HEADER
+    if (canonical(parse(marker_data)) != previous or len(inputs) != 13
+            or tuple(item[0] for item in inputs[11:]) != (INLINE_HEADER, DOM_HEADER)
             or any(original != changed for _, _, original, _, changed in inputs[:11])
-            or inputs[-1][2] == inputs[-1][4]):
+            or any(original == changed for _, _, original, _, changed in inputs[11:])):
         raise ValueError("Windows v11 source/marker transition mismatch")
 
     def verify_marker():
@@ -379,33 +386,35 @@ def _upgrade_v11(work: Path, expected: bytes, inputs: list) -> str:
                 or _snapshot(info) != _snapshot(marker_before)):
             raise ValueError("Windows v11 marker changed during upgrade")
 
-    def verify_sources(replaced=False):
+    def verify_sources(replaced=0):
         for index, (relative, path, original, before, changed) in enumerate(inputs):
             current, data, info = _read(work, relative, source_limit(relative))
-            is_new = replaced and index == 11
+            is_new = 11 <= index < 11 + replaced
             if (current != path or data != (changed if is_new else original)
                     or (not is_new and _snapshot(info) != _snapshot(before))
                     or (is_new and info.st_mtime_ns <= before.st_mtime_ns)):
                 raise ValueError("Windows v11 source changed during upgrade")
 
-    relative, path, original, before, changed = inputs[-1]
-    fd, name = tempfile.mkstemp(prefix=".cef-header-", dir=path.parent)
-    temporary = Path(name)
-    try:
-        with os.fdopen(fd, "wb") as stream:
-            stream.write(changed)
-            stream.flush()
-            os.fsync(stream.fileno())
-        temporary.chmod(stat.S_IMODE(before.st_mode))
-        new_time = max(time.time_ns(), before.st_mtime_ns + 1_000_000)
-        os.utime(temporary, ns=(new_time, new_time))
-        verify_sources()
+    # Both new headers were validated before any write. After each replacement,
+    # recheck the complete source set and old marker; a partial upgrade is fatal.
+    for replaced, (relative, path, original, before, changed) in enumerate(inputs[11:]):
+        fd, name = tempfile.mkstemp(prefix=".cef-header-", dir=path.parent)
+        temporary = Path(name)
+        try:
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(changed)
+                stream.flush()
+                os.fsync(stream.fileno())
+            temporary.chmod(stat.S_IMODE(before.st_mode))
+            new_time = max(time.time_ns(), before.st_mtime_ns + 1_000_000)
+            os.utime(temporary, ns=(new_time, new_time))
+            verify_sources(replaced)
+            verify_marker()
+            os.replace(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)
+        verify_sources(replaced + 1)
         verify_marker()
-        os.replace(temporary, path)
-    finally:
-        temporary.unlink(missing_ok=True)
-    verify_sources(replaced=True)
-    verify_marker()
     fd, name = tempfile.mkstemp(prefix=".cef-marker-", dir=work)
     temporary = Path(name)
     try:
@@ -414,7 +423,7 @@ def _upgrade_v11(work: Path, expected: bytes, inputs: list) -> str:
             stream.flush()
             os.fsync(stream.fileno())
         temporary.chmod(stat.S_IMODE(marker_before.st_mode))
-        verify_sources(replaced=True)
+        verify_sources(replaced=2)
         verify_marker()
         os.replace(temporary, marker)
     finally:
@@ -422,5 +431,5 @@ def _upgrade_v11(work: Path, expected: bytes, inputs: list) -> str:
     _, data, _ = _read(work, MARKER, 8192)
     if canonical(parse(data)) != expected:
         raise ValueError("Windows upgraded marker verification failed")
-    verify_sources(replaced=True)
+    verify_sources(replaced=2)
     return "upgraded-v11"

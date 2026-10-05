@@ -5,21 +5,47 @@ on:
 permissions:
   contents: read
 jobs:
-  public-inputs:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
+  tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    env:
+      CEF_REPAIR_RECIPE_DIR: ${{ github.workspace }}/private-cef
+      CEF_WINDOWS_LAYOUT_SOURCE_ROOT: ${{ github.workspace }}/public-v8
+      CEF_WINDOWS_CFUNCTION_SOURCE_ROOT: ${{ github.workspace }}/public-v8
+      CEF_WINDOWS_ACCESSIBILITY_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+      CEF_WINDOWS_DOM_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+      CEF_WINDOWS_STRING_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
     steps:
+      - name: Preserve exact public fixture newlines
+        run: git config --global core.autocrlf false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - name: Snapshot exact public builder tree
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir public-inputs
-          git rev-parse HEAD > public-inputs/builder-commit.txt
-          git rev-parse HEAD^{tree} > public-inputs/builder-tree.txt
-          git archive HEAD > public-inputs/builder-source.tar
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: dobord/cef
+          ref: 03abd124ebe3b8a57fb78470a75b5aa3ce064e31
+          path: private-cef
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: v8/v8
+          ref: 4323497a6a73839e6d5260f6acd7ec0212cb3321
+          path: public-v8
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /include/
+            /src/torque/implementation-visitor.cc
+            /src/objects/map.h
+            /src/objects/object-macros.h
+            /src/objects/js-interceptor-map.h
+            /src/objects/map.tq
+            /src/objects/js-interceptor-map.tq
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: chromium/chromium
@@ -28,24 +54,60 @@ jobs:
           persist-credentials: false
           sparse-checkout-cone-mode: false
           sparse-checkout: |
-            /services/data_decoder/xml/dom_builder.h
-            /services/data_decoder/xml/dom_builder.cc
-            /services/data_decoder/public/cpp/xml_dom.h
             /third_party/rust/cxx/v1/cxx.h
             /third_party/rust/chromium_crates_io/vendor/cxx-v1/include/cxx.h
-      - name: Snapshot pinned public XML inputs
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(git -C public-chromium rev-parse HEAD)" = 79460ebecaa5625e57a5fb679a735659e73dc687
-          git -C public-chromium diff --exit-code
-          tar -cf public-inputs/chromium-xml-inputs.tar -C public-chromium services/data_decoder/xml/dom_builder.h services/data_decoder/xml/dom_builder.cc services/data_decoder/public/cpp/xml_dom.h third_party/rust/cxx/v1/cxx.h third_party/rust/chromium_crates_io/vendor/cxx-v1/include/cxx.h
-          cd public-inputs
-          sha256sum builder-source.tar builder-commit.txt builder-tree.txt chromium-xml-inputs.tar > SHA256SUMS
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+            /base/containers/adapters.h
+            /base/containers/adapters_internal.h
+            /ui/accessibility/ax_node.h
+            /ui/accessibility/platform/browser_accessibility.h
+            /ui/accessibility/platform/browser_accessibility.cc
+            /ui/accessibility/platform/child_iterator.h
+            /ui/accessibility/platform/browser_accessibility_manager.cc
+            /third_party/blink/renderer/platform/wtf/text/wtf_string.h
+            /third_party/blink/renderer/platform/wtf/text/code_point_iterator.h
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
         with:
-          name: public-dom-memory-inputs-${{ github.run_id }}
-          path: public-inputs/*
+          python-version: '3.12'
+      - name: Verify exact input revisions and offline test runtime
+        shell: python
+        run: |
+          import os, subprocess, sys
+          pins = {'.': os.environ['GITHUB_SHA'], 'private-cef': '03abd124ebe3b8a57fb78470a75b5aa3ce064e31', 'public-v8': '4323497a6a73839e6d5260f6acd7ec0212cb3321', 'public-chromium': '79460ebecaa5625e57a5fb679a735659e73dc687'}
+          for path, pin in pins.items():
+              if subprocess.check_output(['git', '-C', path, 'rev-parse', 'HEAD'], text=True).strip() != pin:
+                  raise RuntimeError('Public regression revision mismatch: ' + path)
+          subprocess.run([sys.executable, 'tools/verify_wheelhouse.py'], check=True)
+          subprocess.run([sys.executable, '-m', 'pip', 'install', '--disable-pip-version-check', '--no-index', '--find-links', 'vendor/wheels', '--require-hashes', '--only-binary=:all:', '-r', 'requirements.lock'], check=True)
+          subprocess.run([sys.executable, 'tools/tink_offline.py', '--version'], check=True)
+      - name: Verify syntax
+        run: python -m py_compile secure_release/cef_windows_source_repair.py tests/test_cef_windows_dom_memory_repair.py
+      - name: Native DOM and complete regression suites
+        shell: python
+        run: |
+          import json, os, re, subprocess, sys
+          from pathlib import Path
+          stages = {
+              'focused': ['tests.test_cef_windows_dom_memory_repair', 'tests.test_cef_windows_inline_empty_repair', '-v'],
+              'repair': ['discover', '-s', 'tests', '-p', 'test_cef_windows_source_repair.py', '-v'],
+              'full': ['discover', '-s', 'tests', '-v'],
+          }
+          report = {'schema': 1, 'kind': 'public-dom-memory-test-results', 'sha': os.environ['GITHUB_SHA'], 'run': int(os.environ['GITHUB_RUN_ID']), 'attempt': int(os.environ['GITHUB_RUN_ATTEMPT']), 'os': os.environ['RUNNER_OS'], 'python': sys.version, 'stages': {}}
+          for name, args in stages.items():
+              result = subprocess.run([sys.executable, '-m', 'unittest', *args], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors='replace', timeout=1100)
+              print(result.stdout)
+              count = re.findall(r'Ran (\d+) tests? in ([0-9.]+)s', result.stdout)
+              skipped = re.findall(r'OK \(skipped=(\d+)\)', result.stdout)
+              proof = [line for line in result.stdout.splitlines() if line.startswith('CEF_DOM_MEMORY_NATIVE ')]
+              report['stages'][name] = {'exit_code': result.returncode, 'tests': int(count[-1][0]) if count else None, 'skipped': int(skipped[-1]) if skipped else 0, 'native_proof': proof}
+              Path('dom-ci-results.json').write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
+              if result.returncode != 0 or len(count) != 1 or not proof:
+                  raise RuntimeError('Required regression stage failed: ' + name)
+              if os.environ['RUNNER_OS'] == 'Windows' and not all('original_failed=[True, True]' in line for line in proof):
+                  raise RuntimeError('Missing original Windows reproduction: ' + name)
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: public-dom-memory-tests-${{ runner.os }}-${{ github.run_id }}
+          path: dom-ci-results.json
           if-no-files-found: error
           retention-days: 7
-          compression-level: 6

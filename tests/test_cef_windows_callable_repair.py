@@ -97,8 +97,8 @@ class CallableRepairTests(unittest.TestCase):
 
     def test_exact_profile_and_current_repository_lock(self):
         profile = repair.profile()
-        self.assertEqual(profile['id'], 'windows-inline-empty-lifetime-v12')
-        self.assertEqual(len(profile['corrections']), 12)
+        self.assertEqual(profile['id'], 'windows-xml-dom-memory-v13')
+        self.assertEqual(len(profile['corrections']), 13)
         self.assertEqual(worker.qualification_lock(ROOT)['source_repair'], profile)
         self.assertEqual(profile['implementation_sha256'], hashlib.sha256(Path(repair.__file__).read_bytes()).hexdigest())
         for stale in (V8_KEY, '45d4c9074ab014a263f4c81a1a8e929951adaba4cc1b8c5232bccc13e72e5920'):
