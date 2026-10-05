@@ -58,7 +58,7 @@ def fixture_bytes(name):
     if name != Path(name).name or name not in {
         "websocket_handshake_challenge.h", "paint_vector_icon.h",
         "form_field_data.cc", "atomic_string.cc", "heap-object-header.h",
-        "bind-internal.h", "function-ref.h",
+        "bind-internal.h", "function-ref.h", "inline_node.h",
     }:
         raise ValueError("Unreviewed Windows repair fixture")
     return (FIXTURES/name).read_bytes()

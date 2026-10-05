@@ -1,9 +1,9 @@
-"""Eleven reviewed Windows source corrections, bound to a new build contract.
+"""Twelve reviewed Windows source corrections, bound to a new build contract.
 
 The baseline CEF checkout and native checkpoint codec stay unchanged. Only the
-exact legacy producer below may cross into this profile, after authenticated
+exact reviewed producers below may cross into this profile, after authenticated
 restore under its OLD contract. New checkpoints carry the NEW contract and a
-verified source marker covering all eleven files. Neither receipts nor fixtures
+verified source marker covering all twelve files. Neither receipts nor fixtures
 constitute runtime proof.
 """
 from __future__ import annotations
@@ -53,6 +53,9 @@ ACCESSIBILITY_SOURCE_AFTER = "2db1d2329a419e61c4409b630447c3c56e63987c76a1c76c34
 WTF_STRING_HEADER = "download/chromium/src/third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 WTF_STRING_BEFORE = "1b4a503d160ffc0480c49710f65d3b6656c498e8ac23dbaaedee491e92ae71ef"
 WTF_STRING_AFTER = "cfe2cf6bbb93d0ef053d0c8cf51d8d8071d54876fc53ca5f1f57d00231925d57"
+INLINE_HEADER = "download/chromium/src/third_party/blink/renderer/core/layout/inline/inline_node.h"
+INLINE_BEFORE = "2aa20d294ebe0a6ae3c7d3a168bb9763d5ce73c0916f7270fde93eb967aebfcc"
+INLINE_AFTER = "3fa4cfb6be4f52f090fbc4c05e0958c120b72065fca623473cf53faa0d888019"
 # Ordered, closed set of corrections; no caller-selected paths or patches.
 CORRECTIONS = (
     (HEADER, BEFORE, AFTER, (
@@ -114,6 +117,14 @@ CORRECTIONS = (
          b'#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"\n'
          b'#include "third_party/blink/renderer/platform/wtf/text/code_point_iterator.h"\n'),
     )),
+    (INLINE_HEADER, INLINE_BEFORE, INLINE_AFTER, (
+        (b'#include "base/gtest_prod_util.h"\n',
+         b'#include "base/gtest_prod_util.h"\n#include "base/no_destructor.h"\n'),
+        (b'    static const std::optional<TextOffsetMap> kEmpty;\n',
+         b'    static const base::NoDestructor<std::optional<TextOffsetMap>> kEmpty;\n'),
+        (b'    return kEmpty;\n',
+         b'    return *kEmpty;\n'),
+    )),
 )
 BASE_KEY = "60a369f6b051ba651cb301af299e7dadcc99608d0db6894bccab87b953817602"
 LEGACY = {
@@ -126,10 +137,42 @@ LEGACY = {
     "build_key": BASE_KEY,
 }
 
+V11_KEY = "3236c681bbaa2549857e41479929c717a41e6e44ae5bfb496d2849d3c55c4f94"
+UPGRADE_V11 = {
+    "run": 37246298528,
+    "attempt": 1,
+    "producer_sha": "a1878e179eeeea98e9e1453046c1ee8b8bb76238",
+    "artifact_id": 11325301513,
+    "artifact_sha256": "7d5c828da84f2e959016a7accc87b0cbfb38c862d6a2673be6ebd8a5d3af7fae",
+    "summary_artifact_id": 11324997284,
+    "summary_artifact_sha256": "fb9d7f5eb91c8e60b3b0ddfebef2ce1dbfe8c9786cb123bdccdebf5db55a1065",
+    "build_key": "3236c681bbaa2549857e41479929c717a41e6e44ae5bfb496d2849d3c55c4f94"
+}
+
+
+def prior_profile() -> dict:
+    """The immutable, independently hash-bound profile of qualified producer #46."""
+    value = {
+        "schema": 2, "id": "windows-blink-string-codepoint-iterator-v11",
+        "chromium_commit": CHROMIUM, "v8_commit": V8,
+        "corrections": [
+            {"path": path.removeprefix("download/chromium/src/"),
+             "before_sha256": before, "after_sha256": after}
+            for path, before, after, _ in CORRECTIONS[:11]
+        ],
+        "implementation_sha256": "4fee03fa893a82324554c0bd12a790a8487bd3b030aa77438968f1fde494a48d",
+    }
+    digest = hashlib.sha256(canonical({
+        "schema": 2, "base_build_key": BASE_KEY, "source_repair": value,
+    })).hexdigest()
+    if digest != V11_KEY:
+        raise ValueError("Previous Windows source profile changed")
+    return value
+
 
 def profile() -> dict:
     return {
-        "schema": 2, "id": "windows-blink-string-codepoint-iterator-v11",
+        "schema": 2, "id": "windows-inline-empty-lifetime-v12",
         "chromium_commit": CHROMIUM,
         "v8_commit": V8,
         "corrections": [
@@ -156,6 +199,9 @@ def restore_contract(selected: dict | None, base_key: str) -> tuple[str, str]:
     if not isinstance(selected, dict):
         raise ValueError("Invalid Windows source repair checkpoint")
     # Canonical comparison distinguishes booleans from integer identifiers.
+    if canonical(selected) == canonical(UPGRADE_V11):
+        prior_profile()
+        return V11_KEY, "upgrade-v11"
     if canonical(selected) == canonical(LEGACY):
         return BASE_KEY, "legacy"
     if selected.get("build_key") == current:
@@ -169,9 +215,10 @@ def verify_summary(value: dict, selected: dict) -> None:
         if "source_repair" in value:
             raise ValueError("Legacy Windows checkpoint claims a repaired profile")
         return
+    expected_profile = prior_profile() if origin == "upgrade-v11" else profile()
     if (value.get("base_build_key") != BASE_KEY
             or value.get("source_repair_verified") is not True
-            or canonical(value.get("source_repair")) != canonical(profile())):
+            or canonical(value.get("source_repair")) != canonical(expected_profile)):
         raise ValueError("Windows checkpoint lacks the exact source repair proof")
 
 
@@ -258,7 +305,7 @@ def source_limit(relative: str) -> int:
 
 
 def apply(work: Path, contract: str, origin: str) -> str:
-    if origin not in {"fresh", "legacy", "resume"} or contract != build_key(BASE_KEY):
+    if origin not in {"fresh", "legacy", "resume", "upgrade-v11"} or contract != build_key(BASE_KEY):
         raise ValueError("Invalid Windows source repair invocation")
     if not work.is_absolute() or work != work.resolve(strict=True):
         raise ValueError("Noncanonical Windows source repair workspace")
@@ -271,6 +318,8 @@ def apply(work: Path, contract: str, origin: str) -> str:
     for relative, _, _, _ in CORRECTIONS:
         path, original, before = _read(work, relative, source_limit(relative))
         inputs.append((relative, path, original, before, transform(original, relative)))
+    if origin == "upgrade-v11":
+        return _upgrade_v11(work, expected, inputs)
     if origin == "resume":
         _, data, _ = _read(work, MARKER, 8192)
         if (canonical(parse(data)) != expected
@@ -306,3 +355,72 @@ def apply(work: Path, contract: str, origin: str) -> str:
     with marker.open("xb") as stream:
         stream.write(expected + b"\n")
     return "applied"
+
+
+def _upgrade_v11(work: Path, expected: bytes, inputs: list) -> str:
+    """Upgrade only the complete authenticated v11 source state; fail on partial edits.
+
+    The worker restores the exact selected producer under V11_KEY before calling
+    this function. Existing sources and output files are never retimed/relabelled.
+    The source marker is replaced only after the entire new source set verifies.
+    """
+    marker, marker_data, marker_before = _read(work, MARKER, 8192)
+    previous = canonical({"schema": 1, "kind": "cef-windows-source-repair",
+                          "build_key": V11_KEY, "source_repair": prior_profile()})
+    if (canonical(parse(marker_data)) != previous or len(inputs) != 12
+            or inputs[-1][0] != INLINE_HEADER
+            or any(original != changed for _, _, original, _, changed in inputs[:11])
+            or inputs[-1][2] == inputs[-1][4]):
+        raise ValueError("Windows v11 source/marker transition mismatch")
+
+    def verify_marker():
+        path, data, info = _read(work, MARKER, 8192)
+        if (path != marker or data != marker_data
+                or _snapshot(info) != _snapshot(marker_before)):
+            raise ValueError("Windows v11 marker changed during upgrade")
+
+    def verify_sources(replaced=False):
+        for index, (relative, path, original, before, changed) in enumerate(inputs):
+            current, data, info = _read(work, relative, source_limit(relative))
+            is_new = replaced and index == 11
+            if (current != path or data != (changed if is_new else original)
+                    or (not is_new and _snapshot(info) != _snapshot(before))
+                    or (is_new and info.st_mtime_ns <= before.st_mtime_ns)):
+                raise ValueError("Windows v11 source changed during upgrade")
+
+    relative, path, original, before, changed = inputs[-1]
+    fd, name = tempfile.mkstemp(prefix=".cef-header-", dir=path.parent)
+    temporary = Path(name)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(changed)
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary.chmod(stat.S_IMODE(before.st_mode))
+        new_time = max(time.time_ns(), before.st_mtime_ns + 1_000_000)
+        os.utime(temporary, ns=(new_time, new_time))
+        verify_sources()
+        verify_marker()
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+    verify_sources(replaced=True)
+    verify_marker()
+    fd, name = tempfile.mkstemp(prefix=".cef-marker-", dir=work)
+    temporary = Path(name)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(expected + b"\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary.chmod(stat.S_IMODE(marker_before.st_mode))
+        verify_sources(replaced=True)
+        verify_marker()
+        os.replace(temporary, marker)
+    finally:
+        temporary.unlink(missing_ok=True)
+    _, data, _ = _read(work, MARKER, 8192)
+    if canonical(parse(data)) != expected:
+        raise ValueError("Windows upgraded marker verification failed")
+    verify_sources(replaced=True)
+    return "upgraded-v11"

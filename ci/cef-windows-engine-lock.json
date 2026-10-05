@@ -15,7 +15,7 @@
   },
   "source_repair": {
     "schema": 2,
-    "id": "windows-blink-string-codepoint-iterator-v11",
+    "id": "windows-inline-empty-lifetime-v12",
     "chromium_commit": "79460ebecaa5625e57a5fb679a735659e73dc687",
     "v8_commit": "4323497a6a73839e6d5260f6acd7ec0212cb3321",
     "corrections": [
@@ -73,8 +73,13 @@
         "path": "third_party/blink/renderer/platform/wtf/text/wtf_string.h",
         "before_sha256": "1b4a503d160ffc0480c49710f65d3b6656c498e8ac23dbaaedee491e92ae71ef",
         "after_sha256": "cfe2cf6bbb93d0ef053d0c8cf51d8d8071d54876fc53ca5f1f57d00231925d57"
+      },
+      {
+        "path": "third_party/blink/renderer/core/layout/inline/inline_node.h",
+        "before_sha256": "2aa20d294ebe0a6ae3c7d3a168bb9763d5ce73c0916f7270fde93eb967aebfcc",
+        "after_sha256": "3fa4cfb6be4f52f090fbc4c05e0958c120b72065fca623473cf53faa0d888019"
       }
     ],
-    "implementation_sha256": "4fee03fa893a82324554c0bd12a790a8487bd3b030aa77438968f1fde494a48d"
+    "implementation_sha256": "e9c9141ea324b7b8666755db4080ac1b2407a94f0f5e0e88b3137f18798ed1d3"
   }
 }
