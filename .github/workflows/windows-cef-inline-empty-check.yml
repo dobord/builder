@@ -38,7 +38,8 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git -C public-chromium rev-parse HEAD)" = 79460ebecaa5625e57a5fb679a735659e73dc687
-          git -C public-chromium archive --format=tar HEAD base/no_destructor.h third_party/blink/renderer/core/layout/inline/inline_node.h third_party/blink/renderer/platform/wtf/text/text_offset_map.h > public-inputs/chromium-headers.tar
+          git -C public-chromium diff --exit-code
+          tar -cf public-inputs/chromium-headers.tar -C public-chromium base/no_destructor.h third_party/blink/renderer/core/layout/inline/inline_node.h third_party/blink/renderer/platform/wtf/text/text_offset_map.h
           cd public-inputs
           sha256sum *.tar *-commit.txt *-tree.txt > SHA256SUMS
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
