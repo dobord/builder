@@ -211,7 +211,9 @@ class V13TransitionTests(unittest.TestCase):
     def setUp(self):
         folder = tempfile.TemporaryDirectory(prefix="v13 to v14 transition "); self.addCleanup(folder.cleanup)
         self.work = Path(folder.name).resolve() / "work"; populate_v13(self.work)
-        self.path = self.work / repair.INLINE_ITEMS_SOURCE; self.marker = self.work / repair.MARKER
+        self.path = self.work / repair.INLINE_ITEMS_SOURCE
+        self.api_key = self.work / repair.API_KEY_HEADER
+        self.marker = self.work / repair.MARKER
         self.key = repair.build_key(repair.BASE_KEY)
     def apply(self): return repair.apply(self.work, self.key, "upgrade-v13")
 
@@ -239,8 +241,10 @@ class V13TransitionTests(unittest.TestCase):
         before = {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in self.work.rglob("*") if p.is_file()}
         self.assertEqual(self.apply(), "upgraded-v13")
         for path, snapshot in before.items():
-            if path == self.path:
-                self.assertEqual(path.read_bytes(), repair.transform(snapshot[0], repair.INLINE_ITEMS_SOURCE))
+            if path in (self.path, self.api_key):
+                relative = (repair.INLINE_ITEMS_SOURCE if path == self.path
+                            else repair.API_KEY_HEADER)
+                self.assertEqual(path.read_bytes(), repair.transform(snapshot[0], relative))
                 self.assertGreater(path.stat().st_mtime_ns, snapshot[1])
             elif path != self.marker:
                 self.assertEqual((path.read_bytes(), path.stat().st_mtime_ns), snapshot)
