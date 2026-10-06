@@ -1,9 +1,9 @@
-"""Fourteen reviewed Windows source corrections, bound to a new build contract.
+"""Fifteen reviewed Windows source corrections, bound to a new build contract.
 
 The baseline CEF checkout and native checkpoint codec stay unchanged. Only the
 exact reviewed producers below may cross into this profile, after authenticated
 restore under its OLD contract. New checkpoints carry the NEW contract and a
-verified source marker covering all fourteen files. Neither receipts nor fixtures
+verified source marker covering all fifteen files. Neither receipts nor fixtures
 constitute runtime proof.
 """
 from __future__ import annotations
@@ -62,6 +62,9 @@ DOM_AFTER = "596393505d3d16f2ffe7bd3cd6b7c51c7c534d16896028739bcbd05c48bc0e4a"
 INLINE_ITEMS_SOURCE = "download/chromium/src/third_party/blink/renderer/core/layout/inline/inline_items_data.cc"
 INLINE_ITEMS_BEFORE = "efe6e5d17a2d676a4c7868ff496b95a90c11bb77aa964738a517e1329934661f"
 INLINE_ITEMS_AFTER = "f2c8be99df3cbd16e07e7b1d9a377570b1884b3e5debe081d97f444d3616dccb"
+API_KEY_HEADER = "download/chromium/src/google_apis/common/api_key_request_util.h"
+API_KEY_BEFORE = "acccec39b6828f168e8f51c523cd8a07479094f46de3854c6fbf6697bc6bdfbc"
+API_KEY_AFTER = "02b32aaf140ccaa8feb78159aef9f8c2a199d91714aa8cd3a552731617838269"
 # Ordered, closed set of corrections; no caller-selected paths or patches.
 CORRECTIONS = (
     (HEADER, BEFORE, AFTER, (
@@ -143,6 +146,10 @@ CORRECTIONS = (
          b'  static const base::NoDestructor<std::optional<TextOffsetMap>> kEmpty;\n'),
         (b'  return kEmpty;\n', b'  return *kEmpty;\n'),
     )),
+    (API_KEY_HEADER, API_KEY_BEFORE, API_KEY_AFTER, (
+        (b'#include <optional>\n#include <string_view>\n',
+         b'#include <optional>\n#include <string>\n#include <string_view>\n'),
+    )),
 )
 BASE_KEY = "60a369f6b051ba651cb301af299e7dadcc99608d0db6894bccab87b953817602"
 LEGACY = {
@@ -179,6 +186,17 @@ UPGRADE_V13 = {
     "build_key": V13_KEY,
 }
 
+V14_KEY = "378126b8abd73d31b865dd7bab7fc0d9b344a0d207ecf6b7b26429b5cb587acd"
+UPGRADE_V14 = {
+    "run": 37441180545, "attempt": 1,
+    "producer_sha": "6bbe92014dba81e24713af905ae6be3de0c71157",
+    "artifact_id": 11415367897,
+    "artifact_sha256": "9e7de2213e8108033f32d1a99bc3fac412a2103cfa616e4a30a63ccc6f978d61",
+    "summary_artifact_id": 11415317880,
+    "summary_artifact_sha256": "f9eabc75abbb7a059fa0bf06071edbd9f2cce676f11b74e69e9c387b2afbe6d2",
+    "build_key": V14_KEY,
+}
+
 
 def v11_profile() -> dict:
     value = {
@@ -196,8 +214,8 @@ def v11_profile() -> dict:
     return value
 
 
-def prior_profile() -> dict:
-    """The immutable, independently hash-bound v13 profile of qualified #49."""
+def v13_profile() -> dict:
+    """Historical independently hash-bound v13 profile of qualified #49."""
     value = {
         "schema": 2, "id": "windows-xml-dom-memory-v13",
         "chromium_commit": CHROMIUM, "v8_commit": V8,
@@ -213,9 +231,26 @@ def prior_profile() -> dict:
     return value
 
 
+
+def prior_profile() -> dict:
+    """The immutable, independently hash-bound v14 profile of qualified #51."""
+    value = {
+        "schema": 2, "id": "windows-inline-items-offset-lifetime-v14",
+        "chromium_commit": CHROMIUM, "v8_commit": V8,
+        "corrections": [{"path": path.removeprefix("download/chromium/src/"),
+                         "before_sha256": before, "after_sha256": after}
+                        for path, before, after, _ in CORRECTIONS[:14]],
+        "implementation_sha256": "70fa5a0db5c70e48b78f83c498d78db687f7cb76d0e1d1ddd3ee6b3b6f7e7703",
+    }
+    digest = hashlib.sha256(canonical({"schema": 2, "base_build_key": BASE_KEY,
+                                       "source_repair": value})).hexdigest()
+    if digest != V14_KEY:
+        raise ValueError("Previous Windows v14 source profile changed")
+    return value
+
 def profile() -> dict:
     return {
-        "schema": 2, "id": "windows-inline-items-offset-lifetime-v14",
+        "schema": 2, "id": "windows-api-key-string-include-v15",
         "chromium_commit": CHROMIUM,
         "v8_commit": V8,
         "corrections": [
@@ -242,9 +277,9 @@ def restore_contract(selected: dict | None, base_key: str) -> tuple[str, str]:
     if not isinstance(selected, dict):
         raise ValueError("Invalid Windows source repair checkpoint")
     # Canonical comparison distinguishes booleans from integer identifiers.
-    if canonical(selected) == canonical(UPGRADE_V13):
+    if canonical(selected) == canonical(UPGRADE_V14):
         prior_profile()
-        return V13_KEY, "upgrade-v13"
+        return V14_KEY, "upgrade-v14"
     if canonical(selected) == canonical(LEGACY):
         return BASE_KEY, "legacy"
     if selected.get("build_key") == current:
@@ -258,7 +293,7 @@ def verify_summary(value: dict, selected: dict) -> None:
         if "source_repair" in value:
             raise ValueError("Legacy Windows checkpoint claims a repaired profile")
         return
-    expected_profile = prior_profile() if origin == "upgrade-v13" else profile()
+    expected_profile = prior_profile() if origin == "upgrade-v14" else profile()
     if (value.get("base_build_key") != BASE_KEY
             or value.get("source_repair_verified") is not True
             or canonical(value.get("source_repair")) != canonical(expected_profile)):
@@ -348,7 +383,7 @@ def source_limit(relative: str) -> int:
 
 
 def apply(work: Path, contract: str, origin: str) -> str:
-    if origin not in {"fresh", "legacy", "resume", "upgrade-v11", "upgrade-v13"} or contract != build_key(BASE_KEY):
+    if origin not in {"fresh", "legacy", "resume", "upgrade-v11", "upgrade-v13", "upgrade-v14"} or contract != build_key(BASE_KEY):
         raise ValueError("Invalid Windows source repair invocation")
     if not work.is_absolute() or work != work.resolve(strict=True):
         raise ValueError("Noncanonical Windows source repair workspace")
@@ -361,6 +396,8 @@ def apply(work: Path, contract: str, origin: str) -> str:
     for relative, _, _, _ in CORRECTIONS:
         path, original, before = _read(work, relative, source_limit(relative))
         inputs.append((relative, path, original, before, transform(original, relative)))
+    if origin == "upgrade-v14":
+        return _upgrade_v14(work, expected, inputs)
     if origin == "upgrade-v13":
         return _upgrade_v13(work, expected, inputs)
     if origin == "upgrade-v11":
@@ -412,8 +449,8 @@ def _upgrade_v11(work: Path, expected: bytes, inputs: list) -> str:
     marker, marker_data, marker_before = _read(work, MARKER, 8192)
     previous = canonical({"schema": 1, "kind": "cef-windows-source-repair",
                           "build_key": V11_KEY, "source_repair": v11_profile()})
-    if (canonical(parse(marker_data)) != previous or len(inputs) != 14
-            or tuple(item[0] for item in inputs[11:]) != (INLINE_HEADER, DOM_HEADER, INLINE_ITEMS_SOURCE)
+    if (canonical(parse(marker_data)) != previous or len(inputs) != 15
+            or tuple(item[0] for item in inputs[11:]) != (INLINE_HEADER, DOM_HEADER, INLINE_ITEMS_SOURCE, API_KEY_HEADER)
             or any(original != changed for _, _, original, _, changed in inputs[:11])
             or any(original == changed for _, _, original, _, changed in inputs[11:])):
         raise ValueError("Windows v11 source/marker transition mismatch")
@@ -461,7 +498,7 @@ def _upgrade_v11(work: Path, expected: bytes, inputs: list) -> str:
             stream.flush()
             os.fsync(stream.fileno())
         temporary.chmod(stat.S_IMODE(marker_before.st_mode))
-        verify_sources(replaced=3)
+        verify_sources(replaced=4)
         verify_marker()
         os.replace(temporary, marker)
     finally:
@@ -469,35 +506,89 @@ def _upgrade_v11(work: Path, expected: bytes, inputs: list) -> str:
     _, data, _ = _read(work, MARKER, 8192)
     if canonical(parse(data)) != expected:
         raise ValueError("Windows upgraded marker verification failed")
-    verify_sources(replaced=3)
+    verify_sources(replaced=4)
     return "upgraded-v11"
 
 
 def _upgrade_v13(work: Path, expected: bytes, inputs: list) -> str:
-    """Upgrade exact authenticated v13 state by replacing only InlineItemsData."""
+    """Historical v13 transition for regression only; production selects v14."""
     marker, marker_data, marker_before = _read(work, MARKER, 8192)
     previous = canonical({"schema": 1, "kind": "cef-windows-source-repair",
-                          "build_key": V13_KEY, "source_repair": prior_profile()})
-    if (canonical(parse(marker_data)) != previous or len(inputs) != 14
-            or inputs[-1][0] != INLINE_ITEMS_SOURCE
+                          "build_key": V13_KEY, "source_repair": v13_profile()})
+    if (canonical(parse(marker_data)) != previous or len(inputs) != 15
+            or tuple(item[0] for item in inputs[13:]) != (INLINE_ITEMS_SOURCE, API_KEY_HEADER)
             or any(original != changed for _, _, original, _, changed in inputs[:13])
-            or inputs[-1][2] == inputs[-1][4]):
+            or any(original == changed for _, _, original, _, changed in inputs[13:])):
         raise ValueError("Windows v13 source/marker transition mismatch")
 
     def verify_marker():
         path, data, info = _read(work, MARKER, 8192)
-        if (path != marker or data != marker_data
-                or _snapshot(info) != _snapshot(marker_before)):
+        if path != marker or data != marker_data or _snapshot(info) != _snapshot(marker_before):
             raise ValueError("Windows v13 marker changed during upgrade")
 
-    def verify_sources(replaced=False):
+    def verify_sources(replaced=0):
         for index, (relative, path, original, before, changed) in enumerate(inputs):
             current, data, info = _read(work, relative, source_limit(relative))
-            is_new = replaced and index == 13
+            is_new = 13 <= index < 13 + replaced
             if (current != path or data != (changed if is_new else original)
                     or (not is_new and _snapshot(info) != _snapshot(before))
                     or (is_new and info.st_mtime_ns <= before.st_mtime_ns)):
                 raise ValueError("Windows v13 source changed during upgrade")
+
+    for replaced, (relative, path, original, before, changed) in enumerate(inputs[13:]):
+        fd, name = tempfile.mkstemp(prefix=".cef-header-", dir=path.parent)
+        temporary = Path(name)
+        try:
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(changed); stream.flush(); os.fsync(stream.fileno())
+            temporary.chmod(stat.S_IMODE(before.st_mode))
+            new_time = max(time.time_ns(), before.st_mtime_ns + 1_000_000)
+            os.utime(temporary, ns=(new_time, new_time))
+            verify_sources(replaced); verify_marker(); os.replace(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)
+        verify_sources(replaced + 1); verify_marker()
+
+    fd, name = tempfile.mkstemp(prefix=".cef-marker-", dir=work)
+    temporary = Path(name)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(expected + b"\n"); stream.flush(); os.fsync(stream.fileno())
+        temporary.chmod(stat.S_IMODE(marker_before.st_mode))
+        verify_sources(replaced=2); verify_marker(); os.replace(temporary, marker)
+    finally:
+        temporary.unlink(missing_ok=True)
+    _, data, _ = _read(work, MARKER, 8192)
+    if canonical(parse(data)) != expected:
+        raise ValueError("Windows upgraded marker verification failed")
+    verify_sources(replaced=2)
+    return "upgraded-v13"
+
+
+def _upgrade_v14(work: Path, expected: bytes, inputs: list) -> str:
+    """Upgrade exact authenticated v14 state by replacing only API key header."""
+    marker, marker_data, marker_before = _read(work, MARKER, 8192)
+    previous = canonical({"schema": 1, "kind": "cef-windows-source-repair",
+                          "build_key": V14_KEY, "source_repair": prior_profile()})
+    if (canonical(parse(marker_data)) != previous or len(inputs) != 15
+            or inputs[-1][0] != API_KEY_HEADER
+            or any(original != changed for _, _, original, _, changed in inputs[:14])
+            or inputs[-1][2] == inputs[-1][4]):
+        raise ValueError("Windows v14 source/marker transition mismatch")
+
+    def verify_marker():
+        path, data, info = _read(work, MARKER, 8192)
+        if path != marker or data != marker_data or _snapshot(info) != _snapshot(marker_before):
+            raise ValueError("Windows v14 marker changed during upgrade")
+
+    def verify_sources(replaced=False):
+        for index, (relative, path, original, before, changed) in enumerate(inputs):
+            current, data, info = _read(work, relative, source_limit(relative))
+            is_new = replaced and index == 14
+            if (current != path or data != (changed if is_new else original)
+                    or (not is_new and _snapshot(info) != _snapshot(before))
+                    or (is_new and info.st_mtime_ns <= before.st_mtime_ns)):
+                raise ValueError("Windows v14 source changed during upgrade")
 
     relative, path, original, before, changed = inputs[-1]
     fd, name = tempfile.mkstemp(prefix=".cef-header-", dir=path.parent)
@@ -526,4 +617,4 @@ def _upgrade_v13(work: Path, expected: bytes, inputs: list) -> str:
     if canonical(parse(data)) != expected:
         raise ValueError("Windows upgraded marker verification failed")
     verify_sources(replaced=True)
-    return "upgraded-v13"
+    return "upgraded-v14"

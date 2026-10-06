@@ -171,8 +171,8 @@ class TorqueTailSizeTests(unittest.TestCase):
         self.v6=previous_generator(self.raw)
 
     def test_exact_profile_keeps_source_set_and_rejects_v6(self):
-        self.assertEqual(repair.profile()['id'],'windows-inline-items-offset-lifetime-v14')
-        self.assertEqual(len(repair.CORRECTIONS),14)
+        self.assertEqual(repair.profile()['id'],'windows-api-key-string-include-v15')
+        self.assertEqual(len(repair.CORRECTIONS),15)
         self.assertEqual(repair.profile()['v8_commit'],'4323497a6a73839e6d5260f6acd7ec0212cb3321')
         self.assertNotEqual(repair.build_key(repair.BASE_KEY),V6_KEY)
         for selected in (dict(repair.LEGACY,build_key=V6_KEY),dict(repair.LEGACY,run=37144079381)):

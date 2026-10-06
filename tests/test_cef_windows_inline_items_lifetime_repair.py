@@ -114,7 +114,7 @@ def populate_v13(work):
         raw = fixture_bytes(path.name)
         path.write_bytes(repair.transform(raw, relative) if index < 13 else raw)
     marker = {"schema": 1, "kind": "cef-windows-source-repair",
-              "build_key": repair.V13_KEY, "source_repair": repair.prior_profile()}
+              "build_key": repair.V13_KEY, "source_repair": repair.v13_profile()}
     (work / repair.MARKER).write_bytes(canonical(marker) + b"\n")
 
 class InlineItemsLifetimeTests(unittest.TestCase):
@@ -136,8 +136,8 @@ class InlineItemsLifetimeTests(unittest.TestCase):
         self.assertIn("return with_offset->offset_map;", method(self.fixed))
         self.assertIn("return *kEmpty;", method(self.fixed))
         self.assertNotIn(b"Wno-", self.fixed); self.assertNotIn(b"#pragma", self.fixed)
-        self.assertEqual(repair.profile()["id"], "windows-inline-items-offset-lifetime-v14")
-        self.assertEqual(len(repair.CORRECTIONS), 14)
+        self.assertEqual(repair.profile()["id"], "windows-api-key-string-include-v15")
+        self.assertEqual(len(repair.CORRECTIONS), 15)
 
     def test_idempotence_newlines_and_unreviewed_sources(self):
         for nl in (b"\n", b"\r\n"):
@@ -211,40 +211,40 @@ class V13TransitionTests(unittest.TestCase):
     def setUp(self):
         folder = tempfile.TemporaryDirectory(prefix="v13 to v14 transition "); self.addCleanup(folder.cleanup)
         self.work = Path(folder.name).resolve() / "work"; populate_v13(self.work)
-        self.path = self.work / repair.INLINE_ITEMS_SOURCE; self.marker = self.work / repair.MARKER
+        self.path = self.work / repair.INLINE_ITEMS_SOURCE
+        self.api_key = self.work / repair.API_KEY_HEADER
+        self.marker = self.work / repair.MARKER
         self.key = repair.build_key(repair.BASE_KEY)
     def apply(self): return repair.apply(self.work, self.key, "upgrade-v13")
 
-    def test_only_exact_v13_selector_is_current_upgrade(self):
-        self.assertEqual(repair.restore_contract(repair.UPGRADE_V13, repair.BASE_KEY), (repair.V13_KEY, "upgrade-v13"))
-        for field, value in repair.UPGRADE_V13.items():
-            wrong = dict(repair.UPGRADE_V13); wrong[field] = value + 1 if type(value) is int else "0" * len(value)
-            with self.subTest(field=field), self.assertRaises(ValueError): repair.restore_contract(wrong, repair.BASE_KEY)
-        for stale in (repair.UPGRADE_V11, dict(repair.UPGRADE_V13, run=37405866769), {"build_key": repair.V13_KEY}):
-            with self.assertRaises(ValueError): repair.restore_contract(stale, repair.BASE_KEY)
+    def test_v13_selector_is_historical_not_current_migration(self):
+        for stale in (repair.UPGRADE_V13, repair.UPGRADE_V11,
+                      dict(repair.UPGRADE_V13, run=37405866769),
+                      {"build_key": repair.V13_KEY}):
+            with self.assertRaises(ValueError):
+                repair.restore_contract(stale, repair.BASE_KEY)
 
     def test_prior_profile_is_independently_bound_to_v13(self):
-        old = repair.prior_profile()
+        old = repair.v13_profile()
         digest = hashlib.sha256(canonical({"schema": 2, "base_build_key": repair.BASE_KEY, "source_repair": old})).hexdigest()
         self.assertEqual(digest, repair.V13_KEY); self.assertEqual(len(old["corrections"]), 13)
         self.assertEqual(repair.profile()["corrections"][:13], old["corrections"]); self.assertNotEqual(self.key, repair.V13_KEY)
 
-    def test_producer_summary_requires_complete_v13_proof(self):
-        value = {"base_build_key": repair.BASE_KEY, "source_repair_verified": True, "source_repair": repair.prior_profile()}
-        repair.verify_summary(value, repair.UPGRADE_V13)
-        for field in value:
-            bad = copy.deepcopy(value); bad.pop(field)
-            with self.assertRaises(ValueError): repair.verify_summary(bad, repair.UPGRADE_V13)
-        bad = copy.deepcopy(value); bad["source_repair"]["corrections"].pop()
-        with self.assertRaises(ValueError): repair.verify_summary(bad, repair.UPGRADE_V13)
+    def test_v13_summary_cannot_authorize_current_transition(self):
+        value = {"base_build_key": repair.BASE_KEY, "source_repair_verified": True,
+                 "source_repair": repair.v13_profile()}
+        with self.assertRaises(ValueError):
+            repair.verify_summary(value, repair.UPGRADE_V13)
 
     def test_upgrade_preserves_previous_sources_objects_and_repeat_resume(self):
         obj = self.work / "out/keep.obj"; obj.parent.mkdir(); obj.write_bytes(b"compiled-v13")
         before = {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in self.work.rglob("*") if p.is_file()}
         self.assertEqual(self.apply(), "upgraded-v13")
         for path, snapshot in before.items():
-            if path == self.path:
-                self.assertEqual(path.read_bytes(), repair.transform(snapshot[0], repair.INLINE_ITEMS_SOURCE))
+            if path in (self.path, self.api_key):
+                relative = (repair.INLINE_ITEMS_SOURCE if path == self.path
+                            else repair.API_KEY_HEADER)
+                self.assertEqual(path.read_bytes(), repair.transform(snapshot[0], relative))
                 self.assertGreater(path.stat().st_mtime_ns, snapshot[1])
             elif path != self.marker:
                 self.assertEqual((path.read_bytes(), path.stat().st_mtime_ns), snapshot)

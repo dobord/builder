@@ -15,7 +15,7 @@
   },
   "source_repair": {
     "schema": 2,
-    "id": "windows-inline-items-offset-lifetime-v14",
+    "id": "windows-api-key-string-include-v15",
     "chromium_commit": "79460ebecaa5625e57a5fb679a735659e73dc687",
     "v8_commit": "4323497a6a73839e6d5260f6acd7ec0212cb3321",
     "corrections": [
@@ -88,8 +88,13 @@
         "path": "third_party/blink/renderer/core/layout/inline/inline_items_data.cc",
         "before_sha256": "efe6e5d17a2d676a4c7868ff496b95a90c11bb77aa964738a517e1329934661f",
         "after_sha256": "f2c8be99df3cbd16e07e7b1d9a377570b1884b3e5debe081d97f444d3616dccb"
+      },
+      {
+        "path": "google_apis/common/api_key_request_util.h",
+        "before_sha256": "acccec39b6828f168e8f51c523cd8a07479094f46de3854c6fbf6697bc6bdfbc",
+        "after_sha256": "02b32aaf140ccaa8feb78159aef9f8c2a199d91714aa8cd3a552731617838269"
       }
     ],
-    "implementation_sha256": "70fa5a0db5c70e48b78f83c498d78db687f7cb76d0e1d1ddd3ee6b3b6f7e7703"
+    "implementation_sha256": "8c133ac986230d3d5b18f08aa95ca9ab21adb6bdb9db4e8a0dbcf3c449872b8f"
   }
 }
