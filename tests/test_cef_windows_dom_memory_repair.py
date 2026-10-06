@@ -90,9 +90,9 @@ class DomMemoryTests(unittest.TestCase):
         self.assertEqual(self.fixed.count(b"#include <memory>"), 1)
         self.assertIn(b"class Node;", self.fixed)
         self.assertNotIn(b"#include <memory>", public_bytes("rust_cxx.h"))
-        self.assertEqual(repair.profile()["id"], "windows-xml-dom-memory-v13")
-        self.assertEqual(len(repair.CORRECTIONS), 13)
-        self.assertEqual(tuple(row[0] for row in repair.CORRECTIONS[11:]),
+        self.assertEqual(repair.profile()["id"], "windows-inline-items-offset-lifetime-v14")
+        self.assertEqual(len(repair.CORRECTIONS), 14)
+        self.assertEqual(tuple(row[0] for row in repair.CORRECTIONS[11:13]),
                          (repair.INLINE_HEADER, repair.DOM_HEADER))
 
     def test_newlines_idempotence_and_modified_inputs(self):
@@ -170,6 +170,7 @@ class DomUpgradeTests(unittest.TestCase):
         self.dom = self.work / repair.DOM_HEADER
         self.inline = self.work / repair.INLINE_HEADER
         self.marker = self.work / repair.MARKER
+        self.inline_items = self.work / repair.INLINE_ITEMS_SOURCE
         self.key = repair.build_key(repair.BASE_KEY)
 
     def apply(self):
@@ -180,7 +181,7 @@ class DomUpgradeTests(unittest.TestCase):
         before = {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in self.work.rglob("*") if p.is_file()}
         self.assertEqual(self.apply(), "upgraded-v11")
         for path, snapshot in before.items():
-            if path in (self.dom, self.inline):
+            if path in (self.dom, self.inline, self.inline_items):
                 self.assertEqual(path.read_bytes(), repair.transform(snapshot[0], str(path.relative_to(self.work)).replace("\\", "/")))
                 self.assertGreater(path.stat().st_mtime_ns, snapshot[1])
             elif path != self.marker:

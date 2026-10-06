@@ -97,8 +97,8 @@ class CallableRepairTests(unittest.TestCase):
 
     def test_exact_profile_and_current_repository_lock(self):
         profile = repair.profile()
-        self.assertEqual(profile['id'], 'windows-xml-dom-memory-v13')
-        self.assertEqual(len(profile['corrections']), 13)
+        self.assertEqual(profile['id'], 'windows-inline-items-offset-lifetime-v14')
+        self.assertEqual(len(profile['corrections']), 14)
         self.assertEqual(worker.qualification_lock(ROOT)['source_repair'], profile)
         self.assertEqual(profile['implementation_sha256'], hashlib.sha256(Path(repair.__file__).read_bytes()).hexdigest())
         for stale in (V8_KEY, '45d4c9074ab014a263f4c81a1a8e929951adaba4cc1b8c5232bccc13e72e5920'):
@@ -107,7 +107,7 @@ class CallableRepairTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             repair.restore_contract(dict(repair.LEGACY, run=37191476160), repair.BASE_KEY)
         self.assertEqual(repair.restore_contract(repair.LEGACY, repair.BASE_KEY), (repair.BASE_KEY, 'legacy'))
-        for index in range(12):
+        for index in range(14):
             for field in ('path', 'before_sha256', 'after_sha256'):
                 altered = copy.deepcopy(profile)
                 altered['corrections'][index][field] = '0' * len(altered['corrections'][index][field])

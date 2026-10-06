@@ -40,7 +40,7 @@ def populate_v11(work):
         raw = fixture_bytes(path.name)
         path.write_bytes(repair.transform(raw, relative) if index < 11 else raw)
     marker = {"schema": 1, "kind": "cef-windows-source-repair",
-              "build_key": repair.V11_KEY, "source_repair": repair.prior_profile()}
+              "build_key": repair.V11_KEY, "source_repair": repair.v11_profile()}
     (work / repair.MARKER).write_bytes(canonical(marker) + b"\n")
 
 
@@ -245,43 +245,36 @@ class V11TransitionTests(unittest.TestCase):
     def apply(self):
         return repair.apply(self.work, self.key, "upgrade-v11")
 
-    def test_only_exact_v11_selector_is_accepted(self):
-        self.assertEqual(repair.restore_contract(repair.UPGRADE_V11, repair.BASE_KEY), (repair.V11_KEY, "upgrade-v11"))
-        for field, value in repair.UPGRADE_V11.items():
-            wrong = dict(repair.UPGRADE_V11)
-            wrong[field] = value + 1 if type(value) is int else "0" * len(value)
-            with self.subTest(field=field), self.assertRaises(ValueError):
-                repair.restore_contract(wrong, repair.BASE_KEY)
-        for wrong in ({"build_key": repair.V11_KEY}, dict(repair.UPGRADE_V11, attempt=True),
-                      dict(repair.UPGRADE_V11, extra=1)):
+    def test_v11_selector_is_historical_not_current_migration(self):
+        for selected in (repair.UPGRADE_V11, {"build_key": repair.V11_KEY},
+                         dict(repair.UPGRADE_V11, attempt=True),
+                         dict(repair.UPGRADE_V11, extra=1)):
             with self.assertRaises(ValueError):
-                repair.restore_contract(wrong, repair.BASE_KEY)
+                repair.restore_contract(selected, repair.BASE_KEY)
 
     def test_previous_profile_key_is_independently_bound(self):
-        old = repair.prior_profile()
+        old = repair.v11_profile()
         digest = hashlib.sha256(canonical({"schema": 2, "base_build_key": repair.BASE_KEY, "source_repair": old})).hexdigest()
         self.assertEqual(digest, repair.V11_KEY)
         self.assertNotEqual(self.key, repair.V11_KEY)
         self.assertEqual(len(old["corrections"]), 11)
         self.assertEqual(repair.profile()["corrections"][:11], old["corrections"])
 
-    def test_producer_summary_requires_complete_previous_proof(self):
+    def test_v11_summary_cannot_authorize_current_transition(self):
         value = {"base_build_key": repair.BASE_KEY, "source_repair_verified": True,
-                 "source_repair": repair.prior_profile()}
-        repair.verify_summary(value, repair.UPGRADE_V11)
-        for field in value:
-            bad = copy.deepcopy(value); bad.pop(field)
-            with self.assertRaises(ValueError): repair.verify_summary(bad, repair.UPGRADE_V11)
-        bad = copy.deepcopy(value); bad["source_repair"]["corrections"].pop()
-        with self.assertRaises(ValueError): repair.verify_summary(bad, repair.UPGRADE_V11)
-        with self.assertRaises(ValueError): repair.verify_summary(value, {"build_key": self.key})
+                 "source_repair": repair.v11_profile()}
+        with self.assertRaises(ValueError):
+            repair.verify_summary(value, repair.UPGRADE_V11)
+        with self.assertRaises(ValueError):
+            repair.verify_summary(value, {"build_key": self.key})
 
     def test_upgrade_preserves_all_previous_sources_objects_and_repeat_resume(self):
         obj = self.work / "out/keep.obj"; obj.parent.mkdir(); obj.write_bytes(b"compiled-v11")
         before = {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in self.work.rglob("*") if p.is_file()}
         self.assertEqual(self.apply(), "upgraded-v11")
         for path, snap in before.items():
-            if path not in (self.path, self.work / repair.DOM_HEADER, self.marker):
+            if path not in (self.path, self.work / repair.DOM_HEADER,
+                            self.work / repair.INLINE_ITEMS_SOURCE, self.marker):
                 self.assertEqual((path.read_bytes(), path.stat().st_mtime_ns), snap)
         self.assertGreater(self.path.stat().st_mtime_ns, before[self.path][1])
         self.assertEqual(parse(self.marker.read_bytes())["build_key"], self.key)

@@ -59,6 +59,7 @@ def fixture_bytes(name):
         "websocket_handshake_challenge.h", "paint_vector_icon.h",
         "form_field_data.cc", "atomic_string.cc", "heap-object-header.h",
         "bind-internal.h", "function-ref.h", "inline_node.h", "dom_builder.h",
+        "inline_items_data.cc",
     }:
         raise ValueError("Unreviewed Windows repair fixture")
     return (FIXTURES/name).read_bytes()
