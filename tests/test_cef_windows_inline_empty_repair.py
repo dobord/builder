@@ -274,7 +274,8 @@ class V11TransitionTests(unittest.TestCase):
         self.assertEqual(self.apply(), "upgraded-v11")
         for path, snap in before.items():
             if path not in (self.path, self.work / repair.DOM_HEADER,
-                            self.work / repair.INLINE_ITEMS_SOURCE, self.marker):
+                            self.work / repair.INLINE_ITEMS_SOURCE,
+                            self.work / repair.API_KEY_HEADER, self.marker):
                 self.assertEqual((path.read_bytes(), path.stat().st_mtime_ns), snap)
         self.assertGreater(self.path.stat().st_mtime_ns, before[self.path][1])
         self.assertEqual(parse(self.marker.read_bytes())["build_key"], self.key)

@@ -162,8 +162,8 @@ class StringIteratorCompletenessTests(unittest.TestCase):
 
     def test_v11_profile_lock_and_failed45_not_resume_inputs(self):
         profile = repair.profile()
-        self.assertEqual(profile["id"], "windows-inline-items-offset-lifetime-v14")
-        self.assertEqual(len(profile["corrections"]), 14)
+        self.assertEqual(profile["id"], "windows-api-key-string-include-v15")
+        self.assertEqual(len(profile["corrections"]), 15)
         self.assertEqual(profile["corrections"][10], {
             "path": WTF,
             "before_sha256": repair.WTF_STRING_BEFORE,
