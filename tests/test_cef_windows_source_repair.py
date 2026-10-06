@@ -40,7 +40,8 @@ def populate(work):
                               (repair.ACCESSIBILITY_SOURCE, Path("browser_accessibility.cc")),
                               (repair.WTF_STRING_HEADER, Path("wtf_string.h")),
                               (repair.INLINE_HEADER, Path("inline_node.h")),
-                              (repair.DOM_HEADER, Path("dom_builder.h"))):
+                              (repair.DOM_HEADER, Path("dom_builder.h")),
+                              (repair.INLINE_ITEMS_SOURCE, Path("inline_items_data.cc"))):
         path = work / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(public_input("include/v8-template.h")
@@ -378,7 +379,7 @@ class OrchestrationTests(unittest.TestCase):
     def test_new_checkpoint_resumes_without_reapplying_header(self):
         self.exercise(True)
 
-    def test_qualified_v11_restore_and_current_save_use_distinct_contracts(self):
+    def test_qualified_v13_restore_and_current_save_use_distinct_contracts(self):
         self.exercise(False, prior=True)
 
     def exercise(self, migrated, prior=False):
@@ -389,10 +390,10 @@ class OrchestrationTests(unittest.TestCase):
         base = cef_contract.build_key(cfg, "windows")
         self.assertEqual(base, repair.BASE_KEY)
         key = repair.build_key(base)
-        selected = dict(repair.UPGRADE_V11 if prior else repair.LEGACY)
+        selected = dict(repair.UPGRADE_V13 if prior else repair.LEGACY)
         if migrated:
             selected.update(run=101, producer_sha="a" * 40, build_key=key)
-        input_key = repair.V11_KEY if prior else key if migrated else base
+        input_key = repair.V13_KEY if prior else key if migrated else base
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder).resolve(); temp = root / "temp"; temp.mkdir()
             registry = root / "private-vcpkg/ci"; registry.mkdir(parents=True)
@@ -410,8 +411,8 @@ class OrchestrationTests(unittest.TestCase):
                 if "restore" in args:
                     self.assertEqual(args[args.index("--contract") + 1], input_key)
                     if prior:
-                        from tests.test_cef_windows_inline_empty_repair import populate_v11
-                        populate_v11(work)
+                        from tests.test_cef_windows_inline_items_lifetime_repair import populate_v13
+                        populate_v13(work)
                     else:
                         populate(work)
                     if migrated:
@@ -511,10 +512,10 @@ class PaintHeaderTests(unittest.TestCase):
         expected_paths = [repair.HEADER, repair.PAINT_HEADER, repair.AUTOFILL_SOURCE, repair.ATOMIC_SOURCE,
                           repair.HEAP_HEADER, repair.TORQUE_SOURCE, repair.TEMPLATE_HEADER, repair.BIND_HEADER,
                           repair.ACCESSIBILITY_HEADER, repair.ACCESSIBILITY_SOURCE, repair.WTF_STRING_HEADER, repair.INLINE_HEADER,
-                          repair.DOM_HEADER]
+                          repair.DOM_HEADER, repair.INLINE_ITEMS_SOURCE]
         profile = repair.profile()
         self.assertEqual(profile["schema"], 2)
-        self.assertEqual(profile["id"], "windows-xml-dom-memory-v13")
+        self.assertEqual(profile["id"], "windows-inline-items-offset-lifetime-v14")
         self.assertEqual([c["path"] for c in profile["corrections"]],
                          [p.removeprefix("download/chromium/src/") for p in expected_paths])
         for index in range(len(expected_paths)):
@@ -560,7 +561,8 @@ class PaintHeaderTests(unittest.TestCase):
                               (repair.ACCESSIBILITY_SOURCE, Path("browser_accessibility.cc")),
                               (repair.WTF_STRING_HEADER, Path("wtf_string.h")),
                               (repair.INLINE_HEADER, Path("inline_node.h")),
-                              (repair.DOM_HEADER, Path("dom_builder.h"))):
+                              (repair.DOM_HEADER, Path("dom_builder.h")),
+                              (repair.INLINE_ITEMS_SOURCE, Path("inline_items_data.cc"))):
             path = self.work / relative
             fixed = path.read_bytes()
             path.write_bytes(public_input("include/v8-template.h")
@@ -711,6 +713,8 @@ def load_tests(loader, standard_tests, pattern):
     standard_tests.addTests(loader.loadTestsFromModule(test_cef_windows_inline_empty_repair))
     from tests import test_cef_windows_dom_memory_repair
     standard_tests.addTests(loader.loadTestsFromModule(test_cef_windows_dom_memory_repair))
+    from tests import test_cef_windows_inline_items_lifetime_repair
+    standard_tests.addTests(loader.loadTestsFromModule(test_cef_windows_inline_items_lifetime_repair))
     return standard_tests
 
 

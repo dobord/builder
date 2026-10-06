@@ -15,7 +15,7 @@
   },
   "source_repair": {
     "schema": 2,
-    "id": "windows-xml-dom-memory-v13",
+    "id": "windows-inline-items-offset-lifetime-v14",
     "chromium_commit": "79460ebecaa5625e57a5fb679a735659e73dc687",
     "v8_commit": "4323497a6a73839e6d5260f6acd7ec0212cb3321",
     "corrections": [
@@ -83,8 +83,13 @@
         "path": "services/data_decoder/xml/dom_builder.h",
         "before_sha256": "969acc87746001c86ef0d98eeb2a15de80e02e56b6a2727d0d3b7dc73cc37882",
         "after_sha256": "596393505d3d16f2ffe7bd3cd6b7c51c7c534d16896028739bcbd05c48bc0e4a"
+      },
+      {
+        "path": "third_party/blink/renderer/core/layout/inline/inline_items_data.cc",
+        "before_sha256": "efe6e5d17a2d676a4c7868ff496b95a90c11bb77aa964738a517e1329934661f",
+        "after_sha256": "f2c8be99df3cbd16e07e7b1d9a377570b1884b3e5debe081d97f444d3616dccb"
       }
     ],
-    "implementation_sha256": "6a922529c5c8399d114decaf8e7ea7ffeda686cc65116b5d8b45cbbb18fe4898"
+    "implementation_sha256": "70fa5a0db5c70e48b78f83c498d78db687f7cb76d0e1d1ddd3ee6b3b6f7e7703"
   }
 }
