@@ -184,52 +184,45 @@ class NativeWorkspacePolicyTests(unittest.TestCase):
             header = out / LONG_HEADER
             header.parent.mkdir(parents=True)
             header.write_text(
-                "#pragma once\\ninline int cef_path_probe() { return 7; }\\n",
+                "#pragma once\ninline int cef_path_probe() { return 7; }\n",
                 encoding="utf-8",
             )
             previous = Path.cwd()
             try:
                 os.chdir(out)
                 relative = LONG_HEADER.encode("ascii")
-                small = ctypes.create_string_buffer(260)
+                buffer = ctypes.create_string_buffer(32768)
                 ctypes.set_last_error(0)
-                small_result = full_path(relative, len(small), small, None)
-                small_error = ctypes.get_last_error()
-                large = ctypes.create_string_buffer(32768)
-                ctypes.set_last_error(0)
-                large_result = full_path(relative, len(large), large, None)
-                large_error = ctypes.get_last_error()
+                result = full_path(relative, len(buffer), buffer, None)
+                error = ctypes.get_last_error()
+                resolved = os.fsdecode(buffer.value) if result else ""
             finally:
                 os.chdir(previous)
-            self.assertGreater(large_result, 0)
-            self.assertEqual(large_error, 0)
-            resolved = os.fsdecode(large.value)
-            self.assertEqual(large_result, len(resolved))
-            self.assertEqual(
-                os.path.normcase(resolved), os.path.normcase(str(header.resolve()))
-            )
-            return small_result, small_error, resolved, header, out
+            return result, error, resolved, header, out
 
-        legacy_result, legacy_error, legacy_full, old_header, _ = api_probe(long_work)
+        legacy_result, legacy_error, _, old_header, _ = api_probe(long_work)
         short_result, short_error, short_full, new_header, short_out = api_probe(short_work)
+        legacy_full = str(old_header)
         self.assertGreaterEqual(len(legacy_full), 260)
-        self.assertLess(len(short_full), 260)
-        legacy_overflow = (
-            legacy_result >= 260 or (legacy_result == 0 and legacy_error == 206)
-        )
-        self.assertTrue(
-            legacy_overflow,
-            f"legacy GetFullPathNameA unexpectedly fit: result={legacy_result} "
-            f"error={legacy_error} path={legacy_full!r}",
-        )
+        self.assertLess(len(str(new_header)), 260)
+
+        # This is the exact Win32 boundary surfaced by production #55: the ANSI
+        # resolver rejects the legacy absolute path even with a large output
+        # buffer. A larger buffer must not be mistaken for a fix.
+        self.assertEqual(legacy_result, 0)
+        self.assertEqual(legacy_error, 206)  # ERROR_FILENAME_EXCED_RANGE
+
         self.assertGreater(short_result, 0)
-        self.assertLess(short_result, 260)
         self.assertEqual(short_error, 0)
+        self.assertLess(short_result, 260)
+        self.assertEqual(
+            os.path.normcase(short_full), os.path.normcase(str(new_header))
+        )
 
         source = short_out / "probe.cc"
         source.write_text(
-            '#include "' + LONG_HEADER.replace("\\\\", "/") +
-            '"\\nint main() { return cef_path_probe() == 7 ? 0 : 1; }\\n',
+            '#include "' + LONG_HEADER.replace("\\", "/") +
+            '"\nint main() { return cef_path_probe() == 7 ? 0 : 1; }\n',
             encoding="utf-8",
         )
         fixed = subprocess.run(
@@ -241,10 +234,11 @@ class NativeWorkspacePolicyTests(unittest.TestCase):
         self.assertEqual(fixed.returncode, 0, fixed.stdout + fixed.stderr)
         print(
             "CEF_WINDOWS_WORKSPACE_PATH_NATIVE "
-            f"old_len={len(legacy_full)} new_len={len(short_full)} "
+            f"old_len={len(legacy_full)} new_len={len(str(new_header))} "
             f"legacy_api_result={legacy_result} legacy_api_error={legacy_error} "
-            "legacy_max_path_overflow=true getfullpathname=true "
-            "short_resolves=true short_compiles=true codec_identity_preserved=true"
+            "legacy_max_path_overflow=true legacy_getfullpathname_error=206 "
+            "getfullpathname=true short_resolves=true short_compiles=true "
+            "codec_identity_preserved=true"
         )
 
 
