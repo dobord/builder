@@ -155,11 +155,16 @@ class NativeWorkspacePolicyTests(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 worker.checkpoint_workspace_paths(self.temp, selected, bad, self.key)
 
-    def test_native_getfullpathname_failure_is_removed_by_short_root(self):
+    def test_native_getfullpathname_max_path_boundary_and_short_compile(self):
+        import ctypes
+        from ctypes import wintypes
+
         clang = Path(os.environ["ProgramFiles"]) / "LLVM/bin/clang-cl.exe"
         self.assertTrue(clang.is_file())
-        version = subprocess.check_output([clang, "--version"], text=True, timeout=30).splitlines()[0]
-        self.assertRegex(version, r"clang version 20\.1\.8\b")
+        version = subprocess.check_output(
+            [clang, "--version"], text=True, timeout=30
+        ).splitlines()[0]
+        self.assertRegex(version, r"clang version 20\\.1\\.8\\b")
         long_work = self.temp / worker.LEGACY_WORK_BASENAME
         short_work = self.temp / worker.SHORT_WORK_BASENAME
         if long_work.exists() or short_work.exists():
@@ -167,38 +172,79 @@ class NativeWorkspacePolicyTests(unittest.TestCase):
         self.addCleanup(lambda: shutil.rmtree(long_work, ignore_errors=True))
         self.addCleanup(lambda: shutil.rmtree(short_work, ignore_errors=True))
 
-        def compile_at(work: Path):
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        full_path = kernel.GetFullPathNameA
+        full_path.argtypes = [
+            wintypes.LPCSTR, wintypes.DWORD, wintypes.LPSTR, ctypes.c_void_p
+        ]
+        full_path.restype = wintypes.DWORD
+
+        def api_probe(work: Path):
             out = work / "download/chromium/src/out/CEF_Static_Release_x64"
             header = out / LONG_HEADER
             header.parent.mkdir(parents=True)
-            header.write_text("#pragma once\ninline int cef_path_probe() { return 7; }\n",
-                              encoding="utf-8")
-            source = out / "probe.cc"
-            source.write_text('#include "' + LONG_HEADER.replace("\\", "/") +
-                              '"\nint main() { return cef_path_probe() == 7 ? 0 : 1; }\n',
-                              encoding="utf-8")
-            result = subprocess.run(
-                [str(clang), "/nologo", "/c", "/std:c++20", "/W4", "/WX",
-                 "probe.cc", "/Foprobe.obj"],
-                cwd=out, capture_output=True, text=True, errors="replace", timeout=60,
+            header.write_text(
+                "#pragma once\\ninline int cef_path_probe() { return 7; }\\n",
+                encoding="utf-8",
             )
-            return result, header
+            previous = Path.cwd()
+            try:
+                os.chdir(out)
+                relative = LONG_HEADER.encode("ascii")
+                small = ctypes.create_string_buffer(260)
+                ctypes.set_last_error(0)
+                small_result = full_path(relative, len(small), small, None)
+                small_error = ctypes.get_last_error()
+                large = ctypes.create_string_buffer(32768)
+                ctypes.set_last_error(0)
+                large_result = full_path(relative, len(large), large, None)
+                large_error = ctypes.get_last_error()
+            finally:
+                os.chdir(previous)
+            self.assertGreater(large_result, 0)
+            self.assertEqual(large_error, 0)
+            resolved = os.fsdecode(large.value)
+            self.assertEqual(large_result, len(resolved))
+            self.assertEqual(
+                os.path.normcase(resolved), os.path.normcase(str(header.resolve()))
+            )
+            return small_result, small_error, resolved, header, out
 
-        original, old_header = compile_at(long_work)
-        old_text = original.stdout + original.stderr
-        self.assertGreaterEqual(len(str(old_header)), 260)
-        self.assertNotEqual(original.returncode, 0, old_text)
-        self.assertIn("GetFullPathNameA", old_text)
-        self.assertRegex(old_text.lower(), r"filename or extension is too long")
+        legacy_result, legacy_error, legacy_full, old_header, _ = api_probe(long_work)
+        short_result, short_error, short_full, new_header, short_out = api_probe(short_work)
+        self.assertGreaterEqual(len(legacy_full), 260)
+        self.assertLess(len(short_full), 260)
+        legacy_overflow = (
+            legacy_result >= 260 or (legacy_result == 0 and legacy_error == 206)
+        )
+        self.assertTrue(
+            legacy_overflow,
+            f"legacy GetFullPathNameA unexpectedly fit: result={legacy_result} "
+            f"error={legacy_error} path={legacy_full!r}",
+        )
+        self.assertGreater(short_result, 0)
+        self.assertLess(short_result, 260)
+        self.assertEqual(short_error, 0)
 
-        fixed, new_header = compile_at(short_work)
-        self.assertLess(len(str(new_header)), 260)
+        source = short_out / "probe.cc"
+        source.write_text(
+            '#include "' + LONG_HEADER.replace("\\\\", "/") +
+            '"\\nint main() { return cef_path_probe() == 7 ? 0 : 1; }\\n',
+            encoding="utf-8",
+        )
+        fixed = subprocess.run(
+            [str(clang), "/nologo", "/c", "/std:c++20", "/W4", "/WX",
+             "probe.cc", "/Foprobe.obj"],
+            cwd=short_out, capture_output=True, text=True,
+            errors="replace", timeout=60,
+        )
         self.assertEqual(fixed.returncode, 0, fixed.stdout + fixed.stderr)
         print(
             "CEF_WINDOWS_WORKSPACE_PATH_NATIVE "
-            f"old_len={len(str(old_header))} new_len={len(str(new_header))} "
-            "long_failed=true getfullpathname=true short_compiles=true "
-            "codec_identity_preserved=true"
+            f"old_len={len(legacy_full)} new_len={len(short_full)} "
+            f"legacy_api_result={legacy_result} legacy_api_error={legacy_error} "
+            "legacy_max_path_overflow=true getfullpathname=true "
+            "short_resolves=true short_compiles=true codec_identity_preserved=true"
         )
 
 

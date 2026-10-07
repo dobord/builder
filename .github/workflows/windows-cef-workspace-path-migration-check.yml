@@ -133,8 +133,9 @@ jobs:
               if result.returncode != 0 or len(count) != 1:
                   raise RuntimeError('Required regression stage failed: ' + name)
               if os.environ['RUNNER_OS'] == 'Windows' and name == 'focused':
-                  required = ('long_failed=true', 'getfullpathname=true',
-                              'short_compiles=true', 'codec_identity_preserved=true')
+                  required = ('legacy_max_path_overflow=true', 'getfullpathname=true',
+                              'short_resolves=true', 'short_compiles=true',
+                              'codec_identity_preserved=true')
                   if len(proof) != 1 or not all(token in proof[0] for token in required):
                       raise RuntimeError('Missing exact Windows workspace path proof')
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
