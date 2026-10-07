@@ -108,9 +108,11 @@ jobs:
               Path('windows-image-ci-results.json').write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
               if result.returncode != 0 or len(count) != 1:
                   raise RuntimeError('Required regression stage failed: ' + name)
-              if os.environ['RUNNER_OS'] == 'Windows':
-                  if not proof or not all('fingerprint_verified=true' in line and 'codec_identity_preserved=true' in line for line in proof):
-                      raise RuntimeError('Missing reviewed Windows image migration proof: ' + name)
+              if os.environ['RUNNER_OS'] == 'Windows' and name == 'focused':
+                  required = ('actual_image=20261004.326.1', 'fingerprint_verified=true',
+                              'codec_identity_preserved=true', 'source_fresh=false')
+                  if len(proof) != 1 or not all(token in proof[0] for token in required):
+                      raise RuntimeError('Missing exact reviewed Windows image migration proof: focused')
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
