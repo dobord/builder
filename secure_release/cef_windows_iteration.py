@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import platform
 import re
 import shutil
 import stat
@@ -27,6 +28,189 @@ VCPKG = "39dccd415da14d8051559d66069019475d95787c"
 CEF = "03abd124ebe3b8a57fb78470a75b5aa3ce064e31"
 TRIPLET = "x64-windows-static-release"
 WORKFLOW = "cef-windows-engine-iteration.yml"
+
+# Hosted runner image labels roll independently of the pinned CEF source and
+# recipe. The private checkpoint codec intentionally binds ImageVersion. Permit
+# a legacy logical identity only after the current Windows host proves the exact
+# reviewed ABI/toolchain fingerprint; never edit the checkpoint manifest.
+LEGACY_CHECKPOINT_IMAGE_BY_RUN = {
+    37441180545: "20260927.320.1",
+}
+REVIEWED_LEGACY_IMAGE_MIGRATIONS = {
+    ("20260927.320.1", "20261004.326.1"): {
+        "schema": 1,
+        "os_build": "20348",
+        "ubr": 5622,
+        "machine": "amd64",
+        "python": "3.12.10",
+        "vc_tools": "14.44.35207",
+        "windows_sdk": "10.0.26100.0",
+        "ucrt": "10.0.26100.0",
+        "llvm": "20.1.8",
+    },
+}
+
+
+def _version_output(command: list[str], pattern: str) -> str:
+    output = subprocess.check_output(
+        command, text=True, stderr=subprocess.STDOUT, timeout=60
+    ).splitlines()
+    if not output:
+        raise ValueError("Critical Windows host tool returned no version")
+    match = re.search(pattern, output[0])
+    if not match:
+        raise ValueError("Critical Windows host tool version is unrecognized")
+    return match.group(1)
+
+
+def critical_windows_host_fingerprint() -> dict:
+    if os.name != "nt":
+        raise ValueError("Windows host fingerprint requires native Windows")
+    import winreg
+
+    with winreg.OpenKey(
+        winreg.HKEY_LOCAL_MACHINE,
+        r"SOFTWARE\Microsoft\Windows NT\CurrentVersion",
+    ) as key:
+        build = str(winreg.QueryValueEx(key, "CurrentBuildNumber")[0])
+        ubr = winreg.QueryValueEx(key, "UBR")[0]
+    if not re.fullmatch(r"[0-9]{4,6}", build) or type(ubr) is not int:
+        raise ValueError("Windows build identity is unrecognized")
+
+    program_files_x86 = Path(os.environ.get("ProgramFiles(x86)", ""))
+    if not program_files_x86.is_absolute():
+        raise ValueError("ProgramFiles(x86) is required for Windows host fingerprint")
+    vswhere = program_files_x86 / "Microsoft Visual Studio/Installer/vswhere.exe"
+    if not vswhere.is_file() or vswhere.is_symlink():
+        raise ValueError("Visual Studio discovery tool is missing")
+    installation = subprocess.check_output(
+        [
+            str(vswhere), "-latest", "-products", "*", "-version", "[17.0,18.0)",
+            "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+            "-property", "installationPath",
+        ],
+        text=True, timeout=60,
+    ).strip()
+    vs = Path(installation)
+    if not installation or not vs.is_absolute() or not vs.is_dir() or vs.is_symlink():
+        raise ValueError("Visual Studio installation is invalid")
+    vc_tools = (
+        vs / "VC/Auxiliary/Build/Microsoft.VCToolsVersion.default.txt"
+    ).read_text(encoding="utf-8-sig").strip()
+    if not re.fullmatch(r"14\.[0-9]+\.[0-9]+", vc_tools):
+        raise ValueError("MSVC toolset version is invalid")
+
+    vcvars = vs / "VC/Auxiliary/Build/vcvarsall.bat"
+    if not vcvars.is_file() or vcvars.is_symlink():
+        raise ValueError("vcvarsall.bat is missing")
+    with tempfile.TemporaryDirectory(prefix=".windows-host-fingerprint-") as folder:
+        batch = Path(folder) / "vcenv.cmd"
+        batch.write_text(
+            '@echo off\r\n'
+            f'call "{vcvars}" x64 >nul\r\n'
+            'if errorlevel 1 exit /b %errorlevel%\r\n'
+            'set\r\n',
+            encoding="utf-8",
+        )
+        environment_text = subprocess.check_output(
+            ["cmd.exe", "/d", "/c", str(batch)],
+            text=True, errors="replace", timeout=120,
+        )
+    vcenv = {}
+    for line in environment_text.splitlines():
+        if "=" in line:
+            key, value = line.split("=", 1)
+            vcenv[key.casefold()] = value.strip()
+    sdk = vcenv.get("windowssdkversion", "").rstrip("\\/")
+    ucrt = vcenv.get("ucrtversion", "").rstrip("\\/")
+    if (not re.fullmatch(r"10\.0\.[0-9]+\.0", sdk)
+            or not re.fullmatch(r"10\.0\.[0-9]+\.0", ucrt)
+            or vcenv.get("vctoolsversion") != vc_tools
+            or vcenv.get("vscmd_arg_tgt_arch", "").lower() != "x64"):
+        raise ValueError("Visual Studio x64 environment is inconsistent")
+
+    program_files = Path(os.environ.get("ProgramFiles", ""))
+    clang = program_files / "LLVM/bin/clang-cl.exe"
+    if not clang.is_file() or clang.is_symlink():
+        raise ValueError("Reviewed Windows LLVM installation is missing")
+    llvm = _version_output(
+        [str(clang), "--version"], r"clang version ([0-9]+\.[0-9]+\.[0-9]+)"
+    )
+    return {
+        "schema": 1,
+        "os_build": build,
+        "ubr": ubr,
+        "machine": platform.machine().lower(),
+        "python": platform.python_version(),
+        "vc_tools": vc_tools,
+        "windows_sdk": sdk,
+        "ucrt": ucrt,
+        "llvm": llvm,
+    }
+
+
+def _validate_windows_fingerprint(value: object) -> None:
+    fields = {
+        "schema", "os_build", "ubr", "machine", "python",
+        "vc_tools", "windows_sdk", "ucrt", "llvm",
+    }
+    if (not isinstance(value, dict) or set(value) != fields
+            or value.get("schema") != 1
+            or type(value.get("ubr")) is not int
+            or not 0 <= value["ubr"] < 100000
+            or not re.fullmatch(r"[0-9]{4,6}", str(value.get("os_build", "")))
+            or value.get("machine") != "amd64"):
+        raise ValueError("Invalid Windows checkpoint host fingerprint")
+    for key in ("python", "vc_tools", "windows_sdk", "ucrt", "llvm"):
+        item = value.get(key)
+        if not isinstance(item, str) or not re.fullmatch(r"[0-9]+(?:\.[0-9]+){2,3}", item):
+            raise ValueError("Invalid Windows checkpoint host fingerprint")
+
+
+def checkpoint_image_identity(selected: dict | None, producer_summary: dict | None,
+                              summary: dict) -> str:
+    actual = os.environ.get("ImageVersion")
+    if not actual or not re.fullmatch(r"[0-9.]{1,64}", actual):
+        raise ValueError("ImageVersion is required for Windows checkpoint qualification")
+    current = critical_windows_host_fingerprint()
+    _validate_windows_fingerprint(current)
+    summary["checkpoint_host_verified"] = False
+    if selected is None:
+        logical = actual
+    else:
+        logical = (
+            producer_summary.get("checkpoint_image_identity")
+            if isinstance(producer_summary, dict) else None
+        )
+        producer_fingerprint = (
+            producer_summary.get("critical_host_fingerprint")
+            if isinstance(producer_summary, dict) else None
+        )
+        if logical is None:
+            logical = LEGACY_CHECKPOINT_IMAGE_BY_RUN.get(selected["run"])
+        if not isinstance(logical, str) or not re.fullmatch(r"[0-9.]{1,64}", logical):
+            raise ValueError("Checkpoint producer image identity is unavailable")
+        if actual != logical:
+            if producer_fingerprint is not None:
+                _validate_windows_fingerprint(producer_fingerprint)
+                if producer_fingerprint != current:
+                    raise ValueError(
+                        "Critical Windows host fingerprint changed; refusing checkpoint reuse"
+                    )
+            else:
+                reviewed = REVIEWED_LEGACY_IMAGE_MIGRATIONS.get((logical, actual))
+                if reviewed != current:
+                    raise ValueError(
+                        "Windows runner image migration is not reviewed for this host fingerprint"
+                    )
+    summary.update({
+        "runner_image_actual": actual,
+        "checkpoint_image_identity": logical,
+        "critical_host_fingerprint": current,
+        "runner_image_migrated": actual != logical,
+        "checkpoint_host_verified": True,
+    })
+    return logical
 
 
 def git_head(path: Path) -> str:
@@ -352,8 +536,20 @@ def main() -> None:
         "CEF_STATIC_BUILD_TIMEOUT_SECONDS": "18000",
         "CEF_STATIC_JOBS": "4",
     })
-    stage = "restore"
+    stage = "checkpoint-host-identity"
     try:
+        producer_summary = None
+        if selected is not None:
+            token = os.environ.get("GITHUB_TOKEN")
+            if not token:
+                raise ValueError("GITHUB_TOKEN is required to review checkpoint host compatibility")
+            producer_summary = verify_producer_summary(Client(token), selected)
+        checkpoint_image = checkpoint_image_identity(selected, producer_summary, summary)
+        # Keep the real runner identity in this process and public summary. Only
+        # the unchanged private recipe child receives the reviewed logical image
+        # so its strict checkpoint identity comparison remains exact.
+        recipe_env["ImageVersion"] = checkpoint_image
+        stage = "restore"
         if selected is not None:
             restored = temp / "cef-windows-restored-checkpoint"
             restore_checkpoint(

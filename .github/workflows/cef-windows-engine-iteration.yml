@@ -52,6 +52,10 @@ jobs:
       - name: Validate Windows iteration worker syntax
         run: |
           python -m py_compile secure_release/cef_windows_iteration.py
+      - name: Test reviewed Windows checkpoint host migration
+        env:
+          CEF_REPAIR_RECIPE_DIR: ${{ github.workspace }}/private-cef
+        run: python -m unittest tests.test_cef_windows_runner_image_migration -v
       - name: Test reviewed Windows source repair and checkpoint transition
         env:
           CEF_REPAIR_RECIPE_DIR: ${{ github.workspace }}/private-cef

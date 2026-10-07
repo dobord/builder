@@ -428,11 +428,14 @@ class OrchestrationTests(unittest.TestCase):
                 return subprocess.CompletedProcess(args, 0)
             env = {"GITHUB_WORKSPACE": str(root), "RUNNER_TEMP": str(temp), "GITHUB_RUN_ID": "102",
                    "GITHUB_RUN_ATTEMPT": "1", "GITHUB_SHA": "b" * 40,
+                   "GITHUB_TOKEN": "synthetic-test-token", "ImageVersion": "20261004.326.1",
                    "BUILDER_INPUT_PRIVATE_KEY": "synthetic-not-a-key"}
             def head(path):
                 return worker.VCPKG if path.name == "private-vcpkg" else worker.CEF if path.name == "private-cef" else repair.CHROMIUM
             with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(worker.sys, "platform", "win32"), \
                     mock.patch.object(worker, "git_head", side_effect=head), \
+                    mock.patch.object(worker, "verify_producer_summary", return_value={}), \
+                    mock.patch.object(worker, "checkpoint_image_identity", return_value="20260927.320.1"), \
                     mock.patch.object(worker, "restore_checkpoint", side_effect=restore), \
                     mock.patch.object(worker, "run", side_effect=run), \
                     mock.patch.object(worker.crypto, "public_text", return_value="synthetic-public"), \
