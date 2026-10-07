@@ -103,10 +103,19 @@ def critical_windows_host_fingerprint() -> dict:
     vcvars = vs / "VC/Auxiliary/Build/vcvarsall.bat"
     if not vcvars.is_file() or vcvars.is_symlink():
         raise ValueError("vcvarsall.bat is missing")
-    environment_text = subprocess.check_output(
-        ["cmd.exe", "/d", "/s", "/c", f'call "{vcvars}" x64 >nul && set'],
-        text=True, errors="replace", timeout=120,
-    )
+    with tempfile.TemporaryDirectory(prefix=".windows-host-fingerprint-") as folder:
+        batch = Path(folder) / "vcenv.cmd"
+        batch.write_text(
+            '@echo off\r\n'
+            f'call "{vcvars}" x64 >nul\r\n'
+            'if errorlevel 1 exit /b %errorlevel%\r\n'
+            'set\r\n',
+            encoding="utf-8",
+        )
+        environment_text = subprocess.check_output(
+            ["cmd.exe", "/d", "/c", str(batch)],
+            text=True, errors="replace", timeout=120,
+        )
     vcenv = {}
     for line in environment_text.splitlines():
         if "=" in line:
