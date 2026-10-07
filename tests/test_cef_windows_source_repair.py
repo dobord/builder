@@ -436,6 +436,7 @@ class OrchestrationTests(unittest.TestCase):
                     mock.patch.object(worker, "git_head", side_effect=head), \
                     mock.patch.object(worker, "verify_producer_summary", return_value={}), \
                     mock.patch.object(worker, "checkpoint_image_identity", return_value="20260927.320.1"), \
+                    mock.patch.object(worker, "checkpoint_workspace_paths", return_value=(work, work)), \
                     mock.patch.object(worker, "restore_checkpoint", side_effect=restore), \
                     mock.patch.object(worker, "run", side_effect=run), \
                     mock.patch.object(worker.crypto, "public_text", return_value="synthetic-public"), \

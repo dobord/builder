@@ -51,6 +51,72 @@ REVIEWED_LEGACY_IMAGE_MIGRATIONS = {
 }
 
 
+# The unchanged private checkpoint codec binds the absolute work path. Exact #51
+# was authenticated and restored at this hosted-runner path. Compile at a much
+# shorter same-volume path so Win32 GetFullPathNameA can resolve Blink's longest
+# generated union headers without weakening compiler or warning policy.
+REVIEWED_WINDOWS_RUNNER_TEMP = r"D:\\a\\_temp"
+LEGACY_WORK_BASENAME = "cef-windows-engine-work"
+SHORT_WORK_BASENAME = "w"
+LEGACY_CHECKPOINT_WORK = REVIEWED_WINDOWS_RUNNER_TEMP + "\\\\" + LEGACY_WORK_BASENAME
+CURRENT_CHECKPOINT_WORK = REVIEWED_WINDOWS_RUNNER_TEMP + "\\\\" + SHORT_WORK_BASENAME
+
+
+def _safe_workspace_root(path: Path) -> object:
+    info = path.lstat()
+    if (not stat.S_ISDIR(info.st_mode) or path.is_symlink()
+            or getattr(info, "st_file_attributes", 0) & 0x400):
+        raise ValueError("Windows CEF workspace root is redirected")
+    return info
+
+
+def checkpoint_workspace_paths(
+    temp: Path, selected: dict | None, producer_summary: dict | None,
+    current_build_key: str,
+) -> tuple[Path, Path]:
+    if os.name != "nt" or sys.platform != "win32":
+        raise ValueError("Windows checkpoint workspace review requires native Windows")
+    temp = temp.resolve(strict=True)
+    _safe_workspace_root(temp)
+    if str(temp).casefold() != REVIEWED_WINDOWS_RUNNER_TEMP.casefold():
+        raise ValueError("Unreviewed Windows runner temp path; refusing checkpoint reuse")
+    legacy = (temp / LEGACY_WORK_BASENAME).resolve()
+    short = (temp / SHORT_WORK_BASENAME).resolve()
+    if (str(legacy).casefold() != LEGACY_CHECKPOINT_WORK.casefold()
+            or str(short).casefold() != CURRENT_CHECKPOINT_WORK.casefold()):
+        raise ValueError("Windows checkpoint workspace path review changed")
+    if selected is None:
+        return short, short
+    if crypto.canonical(selected) == crypto.canonical(source_repair.UPGRADE_V14):
+        # Exact authenticated #51 predates the public work-path summary fields.
+        return legacy, short
+    if selected.get("build_key") == current_build_key:
+        if (not isinstance(producer_summary, dict)
+                or producer_summary.get("workspace_path_verified") is not True
+                or producer_summary.get("checkpoint_work_identity") != str(short)):
+            raise ValueError("Current Windows checkpoint lacks exact short-workspace proof")
+        return short, short
+    raise ValueError("No reviewed Windows checkpoint workspace transition")
+
+
+def relocate_workspace(source: Path, target: Path) -> bool:
+    source = source.resolve(strict=True)
+    target = target.resolve()
+    if source == target:
+        return False
+    if source.parent != target.parent:
+        raise ValueError("Windows CEF workspace relocation must stay in one directory")
+    if os.path.lexists(target):
+        raise ValueError("Windows CEF short workspace already exists")
+    before = _safe_workspace_root(source)
+    source.rename(target)
+    after = _safe_workspace_root(target)
+    if (os.path.lexists(source)
+            or (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino)):
+        raise ValueError("Windows CEF workspace relocation changed filesystem identity")
+    return True
+
+
 def _version_output(command: list[str], pattern: str) -> str:
     output = subprocess.check_output(
         command, text=True, stderr=subprocess.STDOUT, timeout=60
@@ -494,13 +560,15 @@ def main() -> None:
     selected = lock["checkpoint"]
     input_build_key, repair_origin = source_repair.restore_contract(selected, base_build_key)
 
-    engine_work = temp / "cef-windows-engine-work"
+    legacy_engine_work = temp / LEGACY_WORK_BASENAME
+    short_engine_work = temp / SHORT_WORK_BASENAME
+    engine_work = legacy_engine_work
     engine_logs = temp / "cef-windows-engine-logs"
     checkpoint = temp / "cef-windows-engine-checkpoint"
     encrypted = temp / "cef-windows-engine-checkpoint-encrypted"
     summary_path = temp / "cef-windows-engine-summary.json"
-    for path in (engine_work, engine_logs, checkpoint, encrypted):
-        if path.exists():
+    for path in (legacy_engine_work, short_engine_work, engine_logs, checkpoint, encrypted):
+        if os.path.lexists(path):
             raise ValueError("Windows CEF iteration requires fresh runner paths")
 
     summary = {
@@ -549,6 +617,15 @@ def main() -> None:
         # the unchanged private recipe child receives the reviewed logical image
         # so its strict checkpoint identity comparison remains exact.
         recipe_env["ImageVersion"] = checkpoint_image
+        stage = "checkpoint-work-identity"
+        restore_work, engine_work = checkpoint_workspace_paths(
+            temp, selected, producer_summary, build_key
+        )
+        summary.update({
+            "checkpoint_work_identity": str(engine_work),
+            "workspace_path_migrated": False,
+            "workspace_path_verified": False,
+        })
         stage = "restore"
         if selected is not None:
             restored = temp / "cef-windows-restored-checkpoint"
@@ -559,7 +636,7 @@ def main() -> None:
             run(
                 [
                     sys.executable, recipe / "vcpkg/integration/driver.py", "restore",
-                    "--work", engine_work, "--logs", engine_logs,
+                    "--work", restore_work, "--logs", engine_logs,
                     "--contract", input_build_key,
                     "--state", temp / "cef-windows-restore.json",
                     "--checkpoint", restored,
@@ -568,8 +645,14 @@ def main() -> None:
                 log=temp / "cef-windows-restore.log", timeout=7200,
             )
             shutil.rmtree(restored)
+            if restore_work != engine_work:
+                if relocate_workspace(restore_work, engine_work) is not True:
+                    raise ValueError("Reviewed Windows workspace migration did not occur")
+                summary["workspace_path_migrated"] = True
+            summary["workspace_path_verified"] = True
             summary["mode"] = "checkpoint-resume"
         else:
+            summary["workspace_path_verified"] = True
             summary["mode"] = "source-fresh"
 
         stage = "source-prepare"
