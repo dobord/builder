@@ -34,6 +34,46 @@ jobs:
           ref: 03abd124ebe3b8a57fb78470a75b5aa3ce064e31
           path: private-cef
           persist-credentials: false
+      - name: Preserve exact public fixture newlines
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: v8/v8
+          ref: 4323497a6a73839e6d5260f6acd7ec0212cb3321
+          path: public-v8
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /include/
+            /src/torque/implementation-visitor.cc
+            /src/objects/map.h
+            /src/objects/object-macros.h
+            /src/objects/js-interceptor-map.h
+            /src/objects/map.tq
+            /src/objects/js-interceptor-map.tq
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: chromium/chromium
+          ref: 79460ebecaa5625e57a5fb679a735659e73dc687
+          path: public-chromium
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /third_party/rust/cxx/v1/cxx.h
+            /third_party/rust/chromium_crates_io/vendor/cxx-v1/include/cxx.h
+            /base/containers/adapters.h
+            /base/containers/adapters_internal.h
+            /ui/accessibility/ax_node.h
+            /ui/accessibility/platform/browser_accessibility.h
+            /ui/accessibility/platform/browser_accessibility.cc
+            /ui/accessibility/platform/child_iterator.h
+            /ui/accessibility/platform/browser_accessibility_manager.cc
+            /third_party/blink/renderer/platform/wtf/text/wtf_string.h
+            /third_party/blink/renderer/platform/wtf/text/code_point_iterator.h
+            /third_party/blink/renderer/core/layout/inline/inline_items_data.cc
+            /third_party/blink/renderer/platform/wtf/text/text_offset_map.h
+            /base/no_destructor.h
+            /google_apis/common/api_key_request_util.h
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
         with:
           python-version: '3.12'
@@ -46,6 +86,8 @@ jobs:
           $ErrorActionPreference = 'Stop'
           if ((git -C private-vcpkg rev-parse HEAD) -ne '39dccd415da14d8051559d66069019475d95787c') { throw 'vcpkg revision mismatch' }
           if ((git -C private-cef rev-parse HEAD) -ne '03abd124ebe3b8a57fb78470a75b5aa3ce064e31') { throw 'CEF revision mismatch' }
+          if ((git -C public-v8 rev-parse HEAD) -ne '4323497a6a73839e6d5260f6acd7ec0212cb3321') { throw 'V8 regression revision mismatch' }
+          if ((git -C public-chromium rev-parse HEAD) -ne '79460ebecaa5625e57a5fb679a735659e73dc687') { throw 'Chromium regression revision mismatch' }
           $drive = Get-PSDrive -Name C
           Write-Host ("CEF_WINDOWS_ITERATION_FREE_BYTES=" + $drive.Free)
           if ($drive.Free -lt 84825604096) { throw 'CEF_WINDOWS_ITERATION_CAPACITY_LT_79_GIB' }
@@ -59,6 +101,13 @@ jobs:
       - name: Test reviewed Windows source repair and checkpoint transition
         env:
           CEF_REPAIR_RECIPE_DIR: ${{ github.workspace }}/private-cef
+          CEF_WINDOWS_LAYOUT_SOURCE_ROOT: ${{ github.workspace }}/public-v8
+          CEF_WINDOWS_CFUNCTION_SOURCE_ROOT: ${{ github.workspace }}/public-v8
+          CEF_WINDOWS_ACCESSIBILITY_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_DOM_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_STRING_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_INLINE_ITEMS_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_API_KEY_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
         run: python -m unittest discover -s tests -p test_cef_windows_source_repair.py -v
       - name: Test bounded Windows diagnostics
         run: python -m unittest discover -s tests -p test_cef_windows_diagnostics.py -v
