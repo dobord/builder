@@ -55,7 +55,7 @@ REVIEWED_LEGACY_IMAGE_MIGRATIONS = {
 # was authenticated and restored at this hosted-runner path. Compile at a much
 # shorter same-volume path so Win32 GetFullPathNameA can resolve Blink's longest
 # generated union headers without weakening compiler or warning policy.
-REVIEWED_WINDOWS_RUNNER_TEMP = r"D:\\a\\_temp"
+REVIEWED_WINDOWS_RUNNER_TEMP = r"D:\a\_temp"
 LEGACY_WORK_BASENAME = "cef-windows-engine-work"
 SHORT_WORK_BASENAME = "w"
 LEGACY_CHECKPOINT_WORK = REVIEWED_WINDOWS_RUNNER_TEMP + "\\" + LEGACY_WORK_BASENAME

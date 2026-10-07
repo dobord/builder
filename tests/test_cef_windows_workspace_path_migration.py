@@ -164,7 +164,7 @@ class NativeWorkspacePolicyTests(unittest.TestCase):
         version = subprocess.check_output(
             [clang, "--version"], text=True, timeout=30
         ).splitlines()[0]
-        self.assertRegex(version, r"clang version 20\\.1\\.8\\b")
+        self.assertRegex(version, r"clang version 20\.1\.8\b")
         long_work = self.temp / worker.LEGACY_WORK_BASENAME
         short_work = self.temp / worker.SHORT_WORK_BASENAME
         if long_work.exists() or short_work.exists():
