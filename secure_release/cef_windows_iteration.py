@@ -445,6 +445,60 @@ def verify_producer_summary(api: Client, selected: dict) -> dict:
     return value
 
 
+CHECKPOINT_DOWNLOAD_ATTEMPTS = 2
+
+
+def _recheck_checkpoint_download(api: Client, selected: dict) -> None:
+    run_id, attempt, revision = (
+        selected["run"], selected["attempt"], selected["producer_sha"]
+    )
+    expected = f"cef-windows-engine-checkpoint-{run_id}-{attempt}"
+    matches = [
+        item for item in api.artifacts(BUILDER, run_id)
+        if item.get("id") == selected["artifact_id"]
+    ]
+    if len(matches) != 1:
+        raise ValueError("Selected Windows CEF checkpoint artifact changed during download")
+    artifact = matches[0]
+    if (artifact.get("name") != expected or artifact.get("expired") is not False
+            or artifact.get("digest") != "sha256:" + selected["artifact_sha256"]
+            or artifact.get("workflow_run", {}).get("id") != run_id
+            or artifact.get("workflow_run", {}).get("head_sha") != revision):
+        raise ValueError("Windows CEF checkpoint artifact changed during download")
+    current = api.get(f"/repos/{BUILDER}/actions/runs/{run_id}")
+    if (current.get("run_attempt") != attempt
+            or current.get("status") != "completed"
+            or current.get("conclusion") != "success"
+            or current.get("head_sha") != revision):
+        raise ValueError("Windows CEF checkpoint producer changed during download")
+
+
+def download_checkpoint_transport(
+    api: Client, selected: dict, target: Path
+) -> None:
+    endpoint = (
+        f"/repos/{BUILDER}/actions/artifacts/{selected['artifact_id']}/zip"
+    )
+    for index in range(CHECKPOINT_DOWNLOAD_ATTEMPTS):
+        try:
+            api.download(
+                endpoint, target, selected["artifact_sha256"],
+                max_size=cef_cache.MAX_TOTAL,
+            )
+            return
+        except ValueError as error:
+            if (str(error) != "download digest mismatch"
+                    or index + 1 >= CHECKPOINT_DOWNLOAD_ATTEMPTS):
+                raise
+            if os.path.lexists(target) or os.path.lexists(
+                    target.with_suffix(target.suffix + ".part")):
+                raise ValueError(
+                    "Failed Windows CEF checkpoint download published partial output"
+                ) from error
+            _recheck_checkpoint_download(api, selected)
+    raise AssertionError("unreachable")
+
+
 def restore_checkpoint(selected: dict, destination: Path, build_key: str,
                        private_key: str) -> dict:
     api = Client(os.environ["GITHUB_TOKEN"])
@@ -489,10 +543,7 @@ def restore_checkpoint(selected: dict, destination: Path, build_key: str,
             prefix=".windows-cef-fetch-", dir=destination.parent) as folder:
         root = Path(folder)
         archive = root / "artifact.zip"
-        api.download(
-            f"/repos/{BUILDER}/actions/artifacts/{artifact['id']}/zip",
-            archive, selected["artifact_sha256"], max_size=cef_cache.MAX_TOTAL,
-        )
+        download_checkpoint_transport(api, selected, archive)
         encrypted = root / "ciphertext"
         encrypted.mkdir()
         with zipfile.ZipFile(archive) as stream:
