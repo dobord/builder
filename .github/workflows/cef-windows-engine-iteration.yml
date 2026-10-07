@@ -98,6 +98,10 @@ jobs:
         env:
           CEF_REPAIR_RECIPE_DIR: ${{ github.workspace }}/private-cef
         run: python -m unittest tests.test_cef_windows_runner_image_migration -v
+      - name: Test reviewed Windows checkpoint workspace migration
+        env:
+          CEF_REPAIR_RECIPE_DIR: ${{ github.workspace }}/private-cef
+        run: python -m unittest tests.test_cef_windows_workspace_path_migration -v
       - name: Test reviewed Windows source repair and checkpoint transition
         env:
           CEF_REPAIR_RECIPE_DIR: ${{ github.workspace }}/private-cef
