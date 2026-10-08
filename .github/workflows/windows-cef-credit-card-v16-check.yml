@@ -1,0 +1,114 @@
+name: Windows CEF credit-card string V16 verification
+on:
+  push:
+    branches: [repair/windows-cef-60-credit-card-string-v16]
+permissions:
+  contents: read
+jobs:
+  tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    env:
+      CEF_REPAIR_RECIPE_DIR: ${{ github.workspace }}/private-cef
+      CEF_WINDOWS_LAYOUT_SOURCE_ROOT: ${{ github.workspace }}/public-v8
+      CEF_WINDOWS_CFUNCTION_SOURCE_ROOT: ${{ github.workspace }}/public-v8
+      CEF_WINDOWS_ACCESSIBILITY_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+      CEF_WINDOWS_DOM_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+      CEF_WINDOWS_STRING_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+      CEF_WINDOWS_INLINE_ITEMS_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+      CEF_WINDOWS_API_KEY_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+      CEF_WINDOWS_CREDIT_CARD_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+    steps:
+      - name: Preserve exact public fixture newlines
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with: {persist-credentials: false}
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: dobord/cef
+          ref: 03abd124ebe3b8a57fb78470a75b5aa3ce064e31
+          path: private-cef
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: v8/v8
+          ref: 4323497a6a73839e6d5260f6acd7ec0212cb3321
+          path: public-v8
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /include/
+            /src/torque/implementation-visitor.cc
+            /src/objects/map.h
+            /src/objects/object-macros.h
+            /src/objects/js-interceptor-map.h
+            /src/objects/map.tq
+            /src/objects/js-interceptor-map.tq
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: chromium/chromium
+          ref: 79460ebecaa5625e57a5fb679a735659e73dc687
+          path: public-chromium
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /third_party/rust/cxx/v1/cxx.h
+            /third_party/rust/chromium_crates_io/vendor/cxx-v1/include/cxx.h
+            /base/containers/adapters.h
+            /base/containers/adapters_internal.h
+            /ui/accessibility/ax_node.h
+            /ui/accessibility/platform/browser_accessibility.h
+            /ui/accessibility/platform/browser_accessibility.cc
+            /ui/accessibility/platform/child_iterator.h
+            /ui/accessibility/platform/browser_accessibility_manager.cc
+            /third_party/blink/renderer/platform/wtf/text/wtf_string.h
+            /third_party/blink/renderer/platform/wtf/text/code_point_iterator.h
+            /third_party/blink/renderer/core/layout/inline/inline_items_data.cc
+            /third_party/blink/renderer/platform/wtf/text/text_offset_map.h
+            /base/no_destructor.h
+            /google_apis/common/api_key_request_util.h
+            /components/autofill/core/common/credit_card_number_validation.h
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with: {python-version: '3.12'}
+      - name: Verify exact inputs and offline runtime
+        shell: python
+        run: |
+          import os, subprocess, sys
+          pins={'.':os.environ['GITHUB_SHA'],'private-cef':'03abd124ebe3b8a57fb78470a75b5aa3ce064e31','public-v8':'4323497a6a73839e6d5260f6acd7ec0212cb3321','public-chromium':'79460ebecaa5625e57a5fb679a735659e73dc687'}
+          for path,pin in pins.items():
+              if subprocess.check_output(['git','-C',path,'rev-parse','HEAD'],text=True).strip()!=pin: raise RuntimeError('Regression revision mismatch: '+path)
+          subprocess.run([sys.executable,'tools/verify_wheelhouse.py'],check=True)
+          subprocess.run([sys.executable,'-m','pip','install','--disable-pip-version-check','--no-index','--find-links','vendor/wheels','--require-hashes','--only-binary=:all:','-r','requirements.lock'],check=True)
+          subprocess.run([sys.executable,'tools/tink_offline.py','--version'],check=True)
+      - name: Verify syntax
+        run: python -m py_compile secure_release/cef_windows_source_repair.py secure_release/cef_windows_iteration.py tests/test_cef_windows_credit_card_string_repair.py
+      - name: V16 focused and complete regressions
+        shell: python
+        run: |
+          import hashlib,json,os,re,subprocess,sys
+          from pathlib import Path
+          stages={'focused':['tests.test_cef_windows_credit_card_string_repair','tests.test_cef_windows_workspace_path_migration','-v'],'repair':['discover','-s','tests','-p','test_cef_windows_source_repair.py','-v'],'full':['discover','-s','tests','-v']}
+          tested=('ci/cef-windows-engine-lock.json','.github/workflows/cef-windows-engine-iteration.yml','secure_release/cef_windows_iteration.py','secure_release/cef_windows_source_repair.py','tests/cef_windows_layout_inputs.py','tests/test_cef_windows_source_repair.py','tests/test_cef_windows_api_key_string_repair.py','tests/test_cef_windows_workspace_path_migration.py','tests/test_cef_windows_credit_card_string_repair.py','tests/fixtures/cef-windows/credit_card_number_validation.h')
+          report={'schema':1,'kind':'public-windows-credit-card-v16-test-results','sha':os.environ['GITHUB_SHA'],'run':int(os.environ['GITHUB_RUN_ID']),'attempt':int(os.environ['GITHUB_RUN_ATTEMPT']),'os':os.environ['RUNNER_OS'],'blobs':{p:hashlib.sha256(Path(p).read_bytes()).hexdigest() for p in tested},'stages':{}}
+          for name,args in stages.items():
+              r=subprocess.run([sys.executable,'-m','unittest',*args],stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,errors='replace',timeout=1800)
+              print(r.stdout)
+              count=re.findall(r'Ran (\d+) tests? in ([0-9.]+)s',r.stdout); skipped=re.findall(r'OK \(skipped=(\d+)\)',r.stdout)
+              proof=[line for line in r.stdout.splitlines() if line.startswith('CEF_CREDIT_CARD_STRING_NATIVE ')]
+              report['stages'][name]={'exit_code':r.returncode,'tests':int(count[-1][0]) if count else None,'skipped':int(skipped[-1]) if skipped else 0,'native_proof':proof}
+              Path('credit-card-v16-ci-results.json').write_text(json.dumps(report,indent=2)+'\n')
+              if r.returncode or len(count)!=1: raise RuntimeError('Required regression stage failed: '+name)
+              if os.environ['RUNNER_OS']=='Windows' and name=='focused':
+                  required=('original_failed=true','fixed_compiles=true','signatures=2','direct_string_include=true')
+                  if len(proof)!=1 or not all(x in proof[0] for x in required): raise RuntimeError('Missing exact Windows credit-card proof')
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: public-windows-credit-card-v16-tests-${{ runner.os }}-${{ github.run_id }}
+          path: credit-card-v16-ci-results.json
+          if-no-files-found: error
+          retention-days: 7

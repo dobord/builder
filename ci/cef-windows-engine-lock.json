@@ -15,7 +15,7 @@
   },
   "source_repair": {
     "schema": 2,
-    "id": "windows-api-key-string-include-v15",
+    "id": "windows-credit-card-number-string-include-v16",
     "chromium_commit": "79460ebecaa5625e57a5fb679a735659e73dc687",
     "v8_commit": "4323497a6a73839e6d5260f6acd7ec0212cb3321",
     "corrections": [
@@ -93,8 +93,13 @@
         "path": "google_apis/common/api_key_request_util.h",
         "before_sha256": "acccec39b6828f168e8f51c523cd8a07479094f46de3854c6fbf6697bc6bdfbc",
         "after_sha256": "02b32aaf140ccaa8feb78159aef9f8c2a199d91714aa8cd3a552731617838269"
+      },
+      {
+        "path": "components/autofill/core/common/credit_card_number_validation.h",
+        "before_sha256": "c53deafa5e5e2ec30949db20be0dec9f46493d49f9555a155a6c419bdb2607f4",
+        "after_sha256": "e11c6be830cbd52303ea11826a84bccf1838746276b25809bdf878c7aa7d3a50"
       }
     ],
-    "implementation_sha256": "8c133ac986230d3d5b18f08aa95ca9ab21adb6bdb9db4e8a0dbcf3c449872b8f"
+    "implementation_sha256": "7dfb7dc0621cb6b590d8e5af00d639560d748082c09435c76f6db5cf7208ac62"
   }
 }
