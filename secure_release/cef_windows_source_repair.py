@@ -3,7 +3,7 @@
 The baseline CEF checkout and native checkpoint codec stay unchanged. Only the
 exact reviewed producers below may cross into this profile, after authenticated
 restore under its OLD contract. New checkpoints carry the NEW contract and a
-verified source marker covering all fifteen files. Neither receipts nor fixtures
+verified source marker covering all sixteen files. Neither receipts nor fixtures
 constitute runtime proof.
 """
 from __future__ import annotations
@@ -518,7 +518,7 @@ def _upgrade_v11(work: Path, expected: bytes, inputs: list) -> str:
                     or (is_new and info.st_mtime_ns <= before.st_mtime_ns)):
                 raise ValueError("Windows v11 source changed during upgrade")
 
-    # Both new headers were validated before any write. After each replacement,
+    # All five later sources were validated before any write. After each replacement,
     # recheck the complete source set and old marker; a partial upgrade is fatal.
     for replaced, (relative, path, original, before, changed) in enumerate(inputs[11:]):
         fd, name = tempfile.mkstemp(prefix=".cef-header-", dir=path.parent)
@@ -554,7 +554,7 @@ def _upgrade_v11(work: Path, expected: bytes, inputs: list) -> str:
     _, data, _ = _read(work, MARKER, 8192)
     if canonical(parse(data)) != expected:
         raise ValueError("Windows upgraded marker verification failed")
-    verify_sources(replaced=4)
+    verify_sources(replaced=5)
     return "upgraded-v11"
 
 
@@ -609,7 +609,7 @@ def _upgrade_v13(work: Path, expected: bytes, inputs: list) -> str:
     _, data, _ = _read(work, MARKER, 8192)
     if canonical(parse(data)) != expected:
         raise ValueError("Windows upgraded marker verification failed")
-    verify_sources(replaced=2)
+    verify_sources(replaced=3)
     return "upgraded-v13"
 
 

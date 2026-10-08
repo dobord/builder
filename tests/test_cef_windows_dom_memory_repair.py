@@ -1,4 +1,4 @@
-"""Actual public XML/CXX headers and the exact two-header v11 upgrade.
+"""Actual public XML/CXX headers and the exact five-source v11-to-v16 upgrade.
 
 No std/rust/Node definitions are stubbed. The native test checks header
 self-containment and all six FFI declarations, not XML parsing or CEF runtime.
@@ -90,8 +90,8 @@ class DomMemoryTests(unittest.TestCase):
         self.assertEqual(self.fixed.count(b"#include <memory>"), 1)
         self.assertIn(b"class Node;", self.fixed)
         self.assertNotIn(b"#include <memory>", public_bytes("rust_cxx.h"))
-        self.assertEqual(repair.profile()["id"], "windows-api-key-string-include-v15")
-        self.assertEqual(len(repair.CORRECTIONS), 15)
+        self.assertEqual(repair.profile()["id"], "windows-credit-card-number-string-include-v16")
+        self.assertEqual(len(repair.CORRECTIONS), 16)
         self.assertEqual(tuple(row[0] for row in repair.CORRECTIONS[11:13]),
                          (repair.INLINE_HEADER, repair.DOM_HEADER))
 
@@ -169,21 +169,29 @@ class DomUpgradeTests(unittest.TestCase):
         populate_v11(self.work)
         self.dom = self.work / repair.DOM_HEADER
         self.inline = self.work / repair.INLINE_HEADER
-        self.marker = self.work / repair.MARKER
         self.inline_items = self.work / repair.INLINE_ITEMS_SOURCE
         self.api_key = self.work / repair.API_KEY_HEADER
+        self.credit_card = self.work / repair.CREDIT_CARD_HEADER
+        self.marker = self.work / repair.MARKER
         self.key = repair.build_key(repair.BASE_KEY)
 
     def apply(self):
         return repair.apply(self.work, self.key, "upgrade-v11")
 
-    def test_two_header_upgrade_preserves_all_other_bytes_and_clocks(self):
+    def test_five_source_upgrade_preserves_all_other_bytes_and_clocks(self):
         obj = self.work / "out/keep.obj"; obj.parent.mkdir(); obj.write_bytes(b"v11 object")
         before = {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in self.work.rglob("*") if p.is_file()}
         self.assertEqual(self.apply(), "upgraded-v11")
+        changed = {
+            self.inline: repair.INLINE_HEADER,
+            self.dom: repair.DOM_HEADER,
+            self.inline_items: repair.INLINE_ITEMS_SOURCE,
+            self.api_key: repair.API_KEY_HEADER,
+            self.credit_card: repair.CREDIT_CARD_HEADER,
+        }
         for path, snapshot in before.items():
-            if path in (self.dom, self.inline, self.inline_items, self.api_key):
-                self.assertEqual(path.read_bytes(), repair.transform(snapshot[0], str(path.relative_to(self.work)).replace("\\", "/")))
+            if path in changed:
+                self.assertEqual(path.read_bytes(), repair.transform(snapshot[0], changed[path]))
                 self.assertGreater(path.stat().st_mtime_ns, snapshot[1])
             elif path != self.marker:
                 self.assertEqual((path.read_bytes(), path.stat().st_mtime_ns), snapshot)
@@ -206,11 +214,18 @@ class DomUpgradeTests(unittest.TestCase):
             with self.assertRaises(ValueError): self.apply()
             replace.assert_not_called()
 
-    def test_each_partially_applied_new_header_fails_closed(self):
+    def test_each_partially_applied_new_source_fails_closed(self):
         old_marker = self.marker.read_bytes()
-        for path in (self.inline, self.dom):
+        changed = {
+            self.inline: repair.INLINE_HEADER,
+            self.dom: repair.DOM_HEADER,
+            self.inline_items: repair.INLINE_ITEMS_SOURCE,
+            self.api_key: repair.API_KEY_HEADER,
+            self.credit_card: repair.CREDIT_CARD_HEADER,
+        }
+        for path, relative in changed.items():
             raw = path.read_bytes()
-            path.write_bytes(repair.transform(raw, str(path.relative_to(self.work)).replace("\\", "/")))
+            path.write_bytes(repair.transform(raw, relative))
             with mock.patch.object(repair.os, "replace") as replace:
                 with self.assertRaises(ValueError): self.apply()
                 replace.assert_not_called()
