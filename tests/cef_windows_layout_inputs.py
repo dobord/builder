@@ -60,6 +60,7 @@ def fixture_bytes(name):
         "form_field_data.cc", "atomic_string.cc", "heap-object-header.h",
         "bind-internal.h", "function-ref.h", "inline_node.h", "dom_builder.h",
         "inline_items_data.cc", "api_key_request_util.h",
+        "credit_card_number_validation.h",
     }:
         raise ValueError("Unreviewed Windows repair fixture")
     return (FIXTURES/name).read_bytes()

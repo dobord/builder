@@ -1,4 +1,4 @@
-"""Pinned InlineItemsData empty OffsetMap lifetime regression and v13->v14 transition.
+"""Pinned InlineItemsData empty OffsetMap lifetime regression and v13->v16 transition.
 
 The native probe extracts InlineItemsData::OffsetMap verbatim from the pinned
 public Chromium source and uses actual TextOffsetMap/NoDestructor headers.
@@ -136,8 +136,8 @@ class InlineItemsLifetimeTests(unittest.TestCase):
         self.assertIn("return with_offset->offset_map;", method(self.fixed))
         self.assertIn("return *kEmpty;", method(self.fixed))
         self.assertNotIn(b"Wno-", self.fixed); self.assertNotIn(b"#pragma", self.fixed)
-        self.assertEqual(repair.profile()["id"], "windows-api-key-string-include-v15")
-        self.assertEqual(len(repair.CORRECTIONS), 15)
+        self.assertEqual(repair.profile()["id"], "windows-credit-card-number-string-include-v16")
+        self.assertEqual(len(repair.CORRECTIONS), 16)
 
     def test_idempotence_newlines_and_unreviewed_sources(self):
         for nl in (b"\n", b"\r\n"):
@@ -209,10 +209,11 @@ class InlineItemsLifetimeTests(unittest.TestCase):
 
 class V13TransitionTests(unittest.TestCase):
     def setUp(self):
-        folder = tempfile.TemporaryDirectory(prefix="v13 to v14 transition "); self.addCleanup(folder.cleanup)
+        folder = tempfile.TemporaryDirectory(prefix="v13 to v16 transition "); self.addCleanup(folder.cleanup)
         self.work = Path(folder.name).resolve() / "work"; populate_v13(self.work)
         self.path = self.work / repair.INLINE_ITEMS_SOURCE
         self.api_key = self.work / repair.API_KEY_HEADER
+        self.credit_card = self.work / repair.CREDIT_CARD_HEADER
         self.marker = self.work / repair.MARKER
         self.key = repair.build_key(repair.BASE_KEY)
     def apply(self): return repair.apply(self.work, self.key, "upgrade-v13")
@@ -240,11 +241,14 @@ class V13TransitionTests(unittest.TestCase):
         obj = self.work / "out/keep.obj"; obj.parent.mkdir(); obj.write_bytes(b"compiled-v13")
         before = {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in self.work.rglob("*") if p.is_file()}
         self.assertEqual(self.apply(), "upgraded-v13")
+        changed = {
+            self.path: repair.INLINE_ITEMS_SOURCE,
+            self.api_key: repair.API_KEY_HEADER,
+            self.credit_card: repair.CREDIT_CARD_HEADER,
+        }
         for path, snapshot in before.items():
-            if path in (self.path, self.api_key):
-                relative = (repair.INLINE_ITEMS_SOURCE if path == self.path
-                            else repair.API_KEY_HEADER)
-                self.assertEqual(path.read_bytes(), repair.transform(snapshot[0], relative))
+            if path in changed:
+                self.assertEqual(path.read_bytes(), repair.transform(snapshot[0], changed[path]))
                 self.assertGreater(path.stat().st_mtime_ns, snapshot[1])
             elif path != self.marker:
                 self.assertEqual((path.read_bytes(), path.stat().st_mtime_ns), snapshot)
@@ -279,7 +283,7 @@ class V13TransitionTests(unittest.TestCase):
             with self.assertRaises(ValueError): self.apply()
         self.assertEqual(self.marker.read_bytes(), old_marker)
 
-    def test_native_checkpoint_v13_to_v14_and_current_roundtrip(self):
+    def test_native_checkpoint_v13_to_v16_and_current_roundtrip(self):
         location = os.environ.get("CEF_REPAIR_RECIPE_DIR")
         if not location: self.skipTest("Pinned native checkpoint recipe not supplied")
         path = Path(location) / "vcpkg/static/checkpoint.py"
