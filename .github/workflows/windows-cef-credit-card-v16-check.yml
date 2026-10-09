@@ -82,7 +82,8 @@ jobs:
           import os, subprocess, sys
           pins={'.':os.environ['GITHUB_SHA'],'private-cef':'03abd124ebe3b8a57fb78470a75b5aa3ce064e31','public-v8':'4323497a6a73839e6d5260f6acd7ec0212cb3321','public-chromium':'79460ebecaa5625e57a5fb679a735659e73dc687'}
           for path,pin in pins.items():
-              if subprocess.check_output(['git','-C',path,'rev-parse','HEAD'],text=True).strip()!=pin: raise RuntimeError('Regression revision mismatch: '+path)
+              if subprocess.check_output(['git','-C',path,'rev-parse','HEAD'],text=True).strip()!=pin:
+                  raise RuntimeError('Regression revision mismatch: '+path)
           subprocess.run([sys.executable,'tools/verify_wheelhouse.py'],check=True)
           subprocess.run([sys.executable,'-m','pip','install','--disable-pip-version-check','--no-index','--find-links','vendor/wheels','--require-hashes','--only-binary=:all:','-r','requirements.lock'],check=True)
           subprocess.run([sys.executable,'tools/tink_offline.py','--version'],check=True)
@@ -91,38 +92,46 @@ jobs:
         run: |
           import hashlib, json, os, re, shutil, subprocess, tempfile
           from pathlib import Path
+          output=Path('frame-tree-iterator-diagnostic-results.json')
+          report={'schema':1,'kind':'public-windows-frame-tree-iterator-diagnostic-results','sha':os.environ['GITHUB_SHA'],'run':int(os.environ['GITHUB_RUN_ID']),'attempt':int(os.environ['GITHUB_RUN_ATTEMPT']),'os':os.environ['RUNNER_OS'],'proof':{},'blobs':{},'stages':{}}
+          def save(): output.write_bytes((json.dumps(report,sort_keys=True,indent=2)+'\n').encode())
+          save()
           source=Path('public-chromium/content/browser/renderer_host/frame_tree.h')
           raw=source.read_bytes()
           git_blob=lambda data: hashlib.sha1(b'blob '+str(len(data)).encode()+b'\0'+data).hexdigest()
           if git_blob(raw)!='2259ef06982e610888fcf35a5dd293bdfa38f5fe' or b'\r' in raw:
               raise RuntimeError('Pinned public frame_tree.h identity mismatch')
           edits=(
-              (b'    NodeIterator(const NodeIterator& other);\n    ~NodeIterator();\n',
-               b'    NodeIterator(const NodeIterator& other);\n    NodeIterator& operator=(const NodeIterator&) = default;\n    ~NodeIterator();\n'),
-              (b'    RAW_PTR_EXCLUSION const FrameTreeNode* const root_of_subtree_to_skip_;\n\n    const bool should_descend_into_inner_trees_;\n    const bool include_delegate_nodes_for_inner_frame_trees_;\n',
-               b'    RAW_PTR_EXCLUSION const FrameTreeNode* root_of_subtree_to_skip_;\n\n    bool should_descend_into_inner_trees_;\n    bool include_delegate_nodes_for_inner_frame_trees_;\n'),
+              (b'    NodeIterator(const NodeIterator& other);\n    ~NodeIterator();\n',b'    NodeIterator(const NodeIterator& other);\n    NodeIterator& operator=(const NodeIterator&) = default;\n    ~NodeIterator();\n'),
+              (b'    RAW_PTR_EXCLUSION const FrameTreeNode* const root_of_subtree_to_skip_;\n\n    const bool should_descend_into_inner_trees_;\n    const bool include_delegate_nodes_for_inner_frame_trees_;\n',b'    RAW_PTR_EXCLUSION const FrameTreeNode* root_of_subtree_to_skip_;\n\n    bool should_descend_into_inner_trees_;\n    bool include_delegate_nodes_for_inner_frame_trees_;\n'),
           )
           fixed=raw
           for anchor,replacement in edits:
               if fixed.count(anchor)!=1: raise RuntimeError('Frame-tree repair anchor mismatch')
               fixed=fixed.replace(anchor,replacement,1)
-          if fixed.count(b'NodeIterator& operator=(const NodeIterator&) = default;')!=1:
-              raise RuntimeError('Frame-tree assignment declaration mismatch')
-          before=hashlib.sha256(raw).hexdigest(); after=hashlib.sha256(fixed).hexdigest()
+          def iterator_block(data):
+              begin=data.index(b'  class CONTENT_EXPORT NodeIterator {\n')
+              end=data.index(b'\n  class CONTENT_EXPORT NodeRange {',begin)
+              return data[begin:end]
           def state(data):
-              assignment=b'NodeIterator& operator=(const NodeIterator&) = default;' in data
-              root_const=b'const FrameTreeNode* const root_of_subtree_to_skip_;' in data
-              bool_const=(b'const bool should_descend_into_inner_trees_;' in data and b'const bool include_delegate_nodes_for_inner_frame_trees_;' in data)
-              return assignment,root_const,bool_const
-          if state(raw)!=(False,True,True) or state(fixed)!=(True,False,False):
-              raise RuntimeError('Unexpected frame-tree iterator declaration state')
-          def probe(data, use_find):
-              assignment,root_const,bool_const=state(data)
-              assign='  NodeIterator& operator=(const NodeIterator&) = default;\n' if assignment else ''
-              root='const FrameTreeNode* const' if root_const else 'const FrameTreeNode*'
-              flag='const bool' if bool_const else 'bool'
-              find='''  auto found=std::find_if(begin,end,[](FrameTreeNode* n){return n->value==2;});
-          return found==end || (*found)->value!=2;
+              block=iterator_block(data)
+              assignment=block.count(b'NodeIterator& operator=(const NodeIterator&) = default;')==1
+              root_const=block.count(b'const FrameTreeNode* const root_of_subtree_to_skip_;')==1
+              root_mutable=block.count(b'const FrameTreeNode* root_of_subtree_to_skip_;')==1
+              const_flags=(block.count(b'const bool should_descend_into_inner_trees_;')==1 and block.count(b'const bool include_delegate_nodes_for_inner_frame_trees_;')==1)
+              mutable_flags=(block.count(b'bool should_descend_into_inner_trees_;')==1 and block.count(b'bool include_delegate_nodes_for_inner_frame_trees_;')==1)
+              return assignment,root_const,root_mutable,const_flags,mutable_flags
+          if state(raw)!=(False,True,False,True,False) or state(fixed)!=(True,False,True,False,True):
+              raise RuntimeError('Unexpected NodeIterator declaration state')
+          before=hashlib.sha256(raw).hexdigest(); after=hashlib.sha256(fixed).hexdigest()
+          report['proof']={'schema':1,'kind':'public-windows-frame-tree-iterator-proof','public_git_blob':'2259ef06982e610888fcf35a5dd293bdfa38f5fe','before_sha256':before,'after_sha256':after,'semantic_edits':4,'original_copy_assignable':False,'windows_find_if_failed':False,'fixed_copy_assignable':True,'fixed_find_if_runs':False}
+          save()
+          def probe(assignable,use_find):
+              assignment='  NodeIterator& operator=(const NodeIterator&) = default;\n' if assignable else ''
+              root='const FrameTreeNode*' if assignable else 'const FrameTreeNode* const'
+              flag='bool' if assignable else 'const bool'
+              body='''  auto found=std::find_if(begin,end,[](FrameTreeNode* n){return n->value==2;});
+            return found==end || (*found)->value!=2;
           ''' if use_find else '''  return std::is_copy_assignable_v<NodeIterator> ? 7 : 0;
           '''
               return f'''#include <algorithm>
@@ -142,7 +151,7 @@ jobs:
             NodeIterator(std::initializer_list<FrameTreeNode*> nodes,const FrameTreeNode* root,bool descend,bool include)
                 : current_node_(nullptr),root_of_subtree_to_skip_(root),should_descend_into_inner_trees_(descend),include_delegate_nodes_for_inner_frame_trees_(include),queue_(nodes) {{ Advance(); }}
             NodeIterator(const NodeIterator&)=default;
-          {assign}  ~NodeIterator()=default;
+          {assignment}  ~NodeIterator()=default;
             NodeIterator& operator++() {{ Advance(); return *this; }}
             bool operator==(const NodeIterator& rhs) const {{ return current_node_==rhs.current_node_; }}
             FrameTreeNode* operator*() {{ return current_node_; }}
@@ -156,15 +165,15 @@ jobs:
             std::deque<FrameTreeNode*> queue_;
           }};
           static_assert(std::is_copy_constructible_v<NodeIterator>);
-          static_assert(std::is_copy_assignable_v<NodeIterator>=={str(assignment).lower()});
+          static_assert(std::is_copy_assignable_v<NodeIterator>=={str(assignable).lower()});
           int main() {{ FrameTreeNode a{{1}},b{{2}}; NodeIterator begin({{&a,&b}},nullptr,true,true),end({{}},nullptr,true,true); if(!begin.policy()) return 5;
-          {find}}}
+          {body}}}
           '''
           with tempfile.TemporaryDirectory(prefix='frame-tree-iterator-') as folder:
               root=Path(folder)
-              original_traits=root/'original_traits.cc'; original_traits.write_text(probe(raw,False),encoding='utf-8')
-              original_find=root/'original_find.cc'; original_find.write_text(probe(raw,True),encoding='utf-8')
-              fixed_find=root/'fixed_find.cc'; fixed_find.write_text(probe(fixed,True),encoding='utf-8')
+              original_traits=root/'original_traits.cc'; original_traits.write_text(probe(False,False),encoding='utf-8')
+              original_find=root/'original_find.cc'; original_find.write_text(probe(False,True),encoding='utf-8')
+              fixed_find=root/'fixed_find.cc'; fixed_find.write_text(probe(True,True),encoding='utf-8')
               def command(src,out):
                   if os.name=='nt':
                       where=Path(os.environ.get('ProgramFiles(x86)','C:/Program Files (x86)'))/'Microsoft Visual Studio/Installer/vswhere.exe'
@@ -175,40 +184,39 @@ jobs:
                       clang_version=subprocess.check_output([str(clang),'--version'],text=True).splitlines()[0]
                       if not version.startswith('14.44.') or re.search(r'clang version 20\.1\.8\b',clang_version) is None: raise RuntimeError('Reviewed Windows toolchain changed')
                       batch=root/(src.stem+'.cmd')
-                      batch.write_bytes(('@echo off\r\ncall "'+str(vs)+'/VC/Auxiliary/Build/vcvarsall.bat" x64 >nul\r\nif errorlevel 1 exit /b 90\r\n"'+str(clang)+'" /nologo /std:c++23preview /EHsc /W4 /WX "'+str(src)+'" /Fe:"'+str(out)+'"\r\n').encode())
+                      batch.write_bytes(('@echo off\r\ncall "'+str(vs)+'/VC/Auxiliary/Build/vcvarsall.bat" x64 >nul\r\nif errorlevel 1 exit /b 90\r\n"'+str(clang)+'" /nologo /std:c++20 /EHsc /W4 /WX "'+str(src)+'" /Fe:"'+str(out)+'"\r\n').encode())
                       return ['cmd.exe','/d','/c',str(batch)]
                   clang=shutil.which('clang++')
                   if not clang: raise RuntimeError('Native Clang required')
-                  return [clang,'-std=c++23','-Wall','-Wextra','-Werror',str(src),'-o',str(out)]
+                  return [clang,'-std=c++20','-Wall','-Wextra','-Werror',str(src),'-o',str(out)]
               def build(src,label):
                   out=root/(label+('.exe' if os.name=='nt' else ''))
-                  result=subprocess.run(command(src,out),capture_output=True,text=True,errors='replace',timeout=90)
-                  return result,out
+                  return subprocess.run(command(src,out),capture_output=True,text=True,errors='replace',timeout=90),out
               traits,traits_bin=build(original_traits,'original_traits')
               if traits.returncode: raise RuntimeError('Original iterator trait probe failed unexpectedly: '+(traits.stdout+traits.stderr)[-2000:])
               subprocess.run([str(traits_bin)],check=True,capture_output=True,timeout=15)
-              old,old_bin=build(original_find,'original_find')
+              old,_=build(original_find,'original_find')
               if os.name=='nt':
                   evidence=old.stdout+old.stderr
-                  if old.returncode==0 or old.returncode==90 or 'copy assignment operator is implicitly deleted' not in evidence or 'root_of_subtree_to_skip_' not in evidence:
-                      raise RuntimeError('Exact Windows std::find_if failure was not reproduced')
+                  if old.returncode in (0,90) or 'copy assignment operator is implicitly deleted' not in evidence or 'root_of_subtree_to_skip_' not in evidence:
+                      raise RuntimeError('Exact Windows std::find_if failure was not reproduced: '+evidence[-2000:])
+                  report['proof']['windows_find_if_failed']=True
               fixed_result,fixed_bin=build(fixed_find,'fixed_find')
               if fixed_result.returncode: raise RuntimeError('Fixed iterator probe failed: '+(fixed_result.stdout+fixed_result.stderr)[-2000:])
               subprocess.run([str(fixed_bin)],check=True,capture_output=True,timeout=15)
-          proof={'schema':1,'kind':'public-windows-frame-tree-iterator-proof','public_git_blob':'2259ef06982e610888fcf35a5dd293bdfa38f5fe','before_sha256':before,'after_sha256':after,'changed_lines':4,'original_copy_assignable':False,'windows_find_if_failed':bool(os.name=='nt'),'fixed_copy_assignable':True,'fixed_find_if_runs':True}
-          Path('frame-tree-iterator-proof.json').write_bytes((json.dumps(proof,sort_keys=True,indent=2)+'\n').encode())
-          print('CEF_FRAME_TREE_ITERATOR_NATIVE original_nonassignable=true windows_find_if_failed='+str(bool(os.name=='nt')).lower()+' fixed_assignable=true fixed_find_if_runs=true public_blob=true edits=4 before_sha256='+before+' after_sha256='+after)
+              report['proof']['fixed_find_if_runs']=True
+          save()
+          print('CEF_FRAME_TREE_ITERATOR_NATIVE original_nonassignable=true windows_find_if_failed='+str(report['proof']['windows_find_if_failed']).lower()+' fixed_assignable=true fixed_find_if_runs=true public_blob=true edits=4 before_sha256='+before+' after_sha256='+after)
       - name: Existing V16 focused and complete regressions
         shell: python
         run: |
           import hashlib,json,os,re,subprocess,sys
           from pathlib import Path
-          stages={'focused':['tests.test_cef_windows_credit_card_string_repair','tests.test_cef_windows_workspace_path_migration','-v'],'repair':['discover','-s','tests','-p','test_cef_windows_source_repair.py','-v'],'full':['discover','-s','tests','-v']}
-          tested=('ci/cef-windows-engine-lock.json','.github/workflows/cef-windows-engine-iteration.yml','secure_release/cef_windows_iteration.py','secure_release/cef_windows_source_repair.py','tests/cef_windows_layout_inputs.py','tests/cef_windows_source_repair_base.py','tests/test_cef_windows_source_repair.py','tests/cef_windows_tail_size_repair_base.py','tests/test_cef_windows_tail_size_repair.py','tests/cef_windows_callable_repair_base.py','tests/test_cef_windows_callable_repair.py','tests/test_cef_windows_accessibility_iterator_repair.py','tests/test_cef_windows_string_iterator_repair.py','tests/test_cef_windows_inline_empty_repair.py','tests/test_cef_windows_dom_memory_repair.py','tests/test_cef_windows_inline_items_lifetime_repair.py','tests/test_cef_windows_api_key_string_repair.py','tests/test_cef_windows_workspace_path_migration.py','tests/test_cef_windows_credit_card_string_repair.py','tests/fixtures/cef-windows/credit_card_number_validation.h','.github/workflows/windows-cef-credit-card-v16-check.yml')
-          proof=json.loads(Path('frame-tree-iterator-proof.json').read_text(encoding='utf-8'))
-          report={'schema':1,'kind':'public-windows-frame-tree-iterator-diagnostic-results','sha':os.environ['GITHUB_SHA'],'run':int(os.environ['GITHUB_RUN_ID']),'attempt':int(os.environ['GITHUB_RUN_ATTEMPT']),'os':os.environ['RUNNER_OS'],'proof':proof,'blobs':{p:hashlib.sha256(Path(p).read_bytes()).hexdigest() for p in tested},'stages':{}}
           output=Path('frame-tree-iterator-diagnostic-results.json')
-          output.write_bytes((json.dumps(report,sort_keys=True,indent=2)+'\n').encode())
+          report=json.loads(output.read_text(encoding='utf-8'))
+          tested=('ci/cef-windows-engine-lock.json','.github/workflows/cef-windows-engine-iteration.yml','secure_release/cef_windows_iteration.py','secure_release/cef_windows_source_repair.py','tests/cef_windows_layout_inputs.py','tests/cef_windows_source_repair_base.py','tests/test_cef_windows_source_repair.py','tests/cef_windows_tail_size_repair_base.py','tests/test_cef_windows_tail_size_repair.py','tests/cef_windows_callable_repair_base.py','tests/test_cef_windows_callable_repair.py','tests/test_cef_windows_accessibility_iterator_repair.py','tests/test_cef_windows_string_iterator_repair.py','tests/test_cef_windows_inline_empty_repair.py','tests/test_cef_windows_dom_memory_repair.py','tests/test_cef_windows_inline_items_lifetime_repair.py','tests/test_cef_windows_api_key_string_repair.py','tests/test_cef_windows_workspace_path_migration.py','tests/test_cef_windows_credit_card_string_repair.py','tests/fixtures/cef-windows/credit_card_number_validation.h','.github/workflows/windows-cef-credit-card-v16-check.yml')
+          report['blobs']={p:hashlib.sha256(Path(p).read_bytes()).hexdigest() for p in tested}
+          stages={'focused':['tests.test_cef_windows_credit_card_string_repair','tests.test_cef_windows_workspace_path_migration','-v'],'repair':['discover','-s','tests','-p','test_cef_windows_source_repair.py','-v'],'full':['discover','-s','tests','-v']}
           for name,args in stages.items():
               r=subprocess.run([sys.executable,'-m','unittest',*args],stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,errors='replace',timeout=1800)
               print(r.stdout)
