@@ -1,4 +1,4 @@
-name: Windows CEF frame-tree iterator diagnostic
+name: Windows CEF frame-tree V17 verification
 on:
   push:
     branches: [repair/windows-cef-60-credit-card-string-v16]
@@ -507,137 +507,134 @@ jobs:
               + ' after_sha256='
               + after
           )
-      - name: Existing V16 focused and complete regressions
+      - name: Bind exact V17 implementation digest
         shell: python
         run: |
-          import hashlib
-          import json
-          import os
-          import re
-          import subprocess
-          import sys
+          import copy, hashlib, json
           from pathlib import Path
-
-          output = Path('frame-tree-iterator-diagnostic-results.json')
-          report = json.loads(output.read_text(encoding='utf-8'))
-          tested = (
-              'ci/cef-windows-engine-lock.json',
-              '.github/workflows/cef-windows-engine-iteration.yml',
-              'secure_release/cef_windows_iteration.py',
-              'secure_release/cef_windows_source_repair.py',
-              'tests/cef_windows_layout_inputs.py',
-              'tests/cef_windows_source_repair_base.py',
-              'tests/test_cef_windows_source_repair.py',
-              'tests/cef_windows_tail_size_repair_base.py',
-              'tests/test_cef_windows_tail_size_repair.py',
-              'tests/cef_windows_callable_repair_base.py',
-              'tests/test_cef_windows_callable_repair.py',
-              'tests/test_cef_windows_accessibility_iterator_repair.py',
-              'tests/test_cef_windows_string_iterator_repair.py',
-              'tests/test_cef_windows_inline_empty_repair.py',
-              'tests/test_cef_windows_dom_memory_repair.py',
-              'tests/test_cef_windows_inline_items_lifetime_repair.py',
-              'tests/test_cef_windows_api_key_string_repair.py',
-              'tests/test_cef_windows_workspace_path_migration.py',
-              'tests/test_cef_windows_credit_card_string_repair.py',
-              'tests/fixtures/cef-windows/credit_card_number_validation.h',
-              '.github/workflows/windows-cef-credit-card-v16-check.yml',
-          )
-          report['blobs'] = {
-              path: hashlib.sha256(Path(path).read_bytes()).hexdigest()
-              for path in tested
+          from secure_release import cef_windows_source_repair as repair
+          from secure_release import cef_windows_iteration as worker
+          from secure_release.crypto import canonical, parse
+          path = Path('ci/cef-windows-engine-lock.json')
+          raw = path.read_bytes()
+          value = parse(raw)
+          digest = hashlib.sha256(Path('secure_release/cef_windows_source_repair.py').read_bytes()).hexdigest()
+          current = repair.profile()
+          if current['id'] != 'windows-frame-tree-node-iterator-assignment-v17' or len(current['corrections']) != 17:
+              raise RuntimeError('Not the reviewed V17 source profile')
+          if current['implementation_sha256'] != digest:
+              raise RuntimeError('Source implementation digest mismatch')
+          if (value.get('schema') != 2 or value.get('platform') != 'windows'
+                  or value.get('vcpkg_commit') != worker.VCPKG
+                  or value.get('cef_recipe_commit') != worker.CEF
+                  or canonical(value.get('checkpoint')) != canonical(repair.UPGRADE_V16)):
+              raise RuntimeError('V17 candidate changed exact V16 checkpoint input or source pins')
+          branch_digest = value.get('source_repair', {}).get('implementation_sha256')
+          if branch_digest not in ('0' * 64, digest):
+              raise RuntimeError('Unreviewed implementation binding; only explicit bootstrap or exact lock permitted')
+          expected_branch = copy.deepcopy(current)
+          expected_branch['implementation_sha256'] = branch_digest
+          if canonical(value.get('source_repair')) != canonical(expected_branch):
+              raise RuntimeError('V17 correction/profile mismatch')
+          original = copy.deepcopy(value)
+          matched = branch_digest == digest
+          if not matched:
+              value['source_repair']['implementation_sha256'] = digest
+              reverted = copy.deepcopy(value)
+              reverted['source_repair']['implementation_sha256'] = branch_digest
+              if canonical(reverted) != canonical(original):
+                  raise RuntimeError('Binding changed more than the implementation digest')
+              path.write_bytes((json.dumps(value, indent=2) + '\n').encode('utf-8'))
+          binding = {
+              'schema': 1, 'kind': 'public-windows-frame-tree-v17-lock-binding',
+              'branch_lock_matched': matched,
+              'branch_implementation_sha256': branch_digest,
+              'implementation_sha256': digest,
+              'branch_lock_sha256': hashlib.sha256(raw).hexdigest(),
+              'effective_lock_sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
           }
+          Path('frame-tree-v17-lock-binding.json').write_bytes((json.dumps(binding, indent=2) + '\n').encode())
+          print('CEF_FRAME_TREE_V17_LOCK_BINDING branch_lock_matched=' + str(matched).lower() + ' implementation_sha256=' + digest)
+      - name: V17 focused and complete regressions
+        shell: python
+        run: |
+          import ast, hashlib, json, os, re, subprocess, sys
+          from pathlib import Path
+          from secure_release.crypto import parse
+          tested = ('.github/workflows/cef-windows-engine-iteration.yml', '.github/workflows/windows-cef-credit-card-v16-check.yml', 'ci/cef-windows-engine-lock.json', 'secure_release/cef_windows_iteration.py', 'secure_release/cef_windows_source_repair.py', 'tests/cef_windows_callable_repair_base.py', 'tests/cef_windows_layout_inputs.py', 'tests/cef_windows_source_repair_base.py', 'tests/cef_windows_tail_size_repair_base.py', 'tests/fixtures/cef-windows/credit_card_number_validation.h', 'tests/fixtures/cef-windows/frame_tree.h', 'tests/test_cef_windows_accessibility_iterator_repair.py', 'tests/test_cef_windows_api_key_string_repair.py', 'tests/test_cef_windows_callable_repair.py', 'tests/test_cef_windows_credit_card_string_repair.py', 'tests/test_cef_windows_dom_memory_repair.py', 'tests/test_cef_windows_frame_tree_iterator_repair.py', 'tests/test_cef_windows_inline_empty_repair.py', 'tests/test_cef_windows_inline_items_lifetime_repair.py', 'tests/test_cef_windows_source_repair.py', 'tests/test_cef_windows_string_iterator_repair.py', 'tests/test_cef_windows_tail_size_repair.py', 'tests/test_cef_windows_workspace_path_migration.py')
+          for path in tested:
+              if path.endswith('.py'):
+                  ast.parse(Path(path).read_bytes(), filename=path)
+          binding = parse(Path('frame-tree-v17-lock-binding.json').read_bytes())
+          diagnostic = parse(Path('frame-tree-iterator-diagnostic-results.json').read_bytes())
+          if (diagnostic.get('sha') != os.environ['GITHUB_SHA']
+                  or diagnostic.get('run') != int(os.environ['GITHUB_RUN_ID'])
+                  or diagnostic.get('attempt') != 1
+                  or diagnostic.get('proof', {}).get('fixed_find_if_runs') is not True):
+              raise RuntimeError('Original exact native diagnostic missing')
           stages = {
-              'focused': [
-                  'tests.test_cef_windows_credit_card_string_repair',
-                  'tests.test_cef_windows_workspace_path_migration',
-                  '-v',
-              ],
-              'repair': [
-                  'discover',
-                  '-s',
-                  'tests',
-                  '-p',
-                  'test_cef_windows_source_repair.py',
-                  '-v',
-              ],
+              'focused': ['tests.test_cef_windows_frame_tree_iterator_repair',
+                          'tests.test_cef_windows_workspace_path_migration',
+                          'tests.test_cef_windows_credit_card_string_repair', '-v'],
+              'repair': ['discover', '-s', 'tests', '-p', 'test_cef_windows_source_repair.py', '-v'],
               'full': ['discover', '-s', 'tests', '-v'],
           }
+          report = {
+              'schema': 1, 'kind': 'public-windows-frame-tree-v17-test-results',
+              'sha': os.environ['GITHUB_SHA'], 'run': int(os.environ['GITHUB_RUN_ID']),
+              'attempt': int(os.environ['GITHUB_RUN_ATTEMPT']), 'os': os.environ['RUNNER_OS'],
+              'binding': binding, 'diagnostic_proof': diagnostic['proof'],
+              'blobs': {p: hashlib.sha256(Path(p).read_bytes()).hexdigest() for p in tested},
+              'stages': {},
+          }
+          output = Path('frame-tree-v17-ci-results.json')
+          def save():
+              output.write_bytes((json.dumps(report, sort_keys=True, indent=2) + '\n').encode())
+          save()
           for name, args in stages.items():
-              result = subprocess.run(
-                  [sys.executable, '-m', 'unittest', *args],
-                  stdout=subprocess.PIPE,
-                  stderr=subprocess.STDOUT,
-                  text=True,
-                  errors='replace',
-                  timeout=1800,
-              )
+              result = subprocess.run([sys.executable, '-m', 'unittest', *args],
+                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                  errors='replace', timeout=1800)
               print(result.stdout)
-              count = re.findall(
-                  r'Ran (\d+) tests? in ([0-9.]+)s', result.stdout
-              )
-              skipped = re.findall(
-                  r'OK \(skipped=(\d+)\)', result.stdout
-              )
-              credit = [
-                  line
-                  for line in result.stdout.splitlines()
-                  if line.startswith('CEF_CREDIT_CARD_STRING_NATIVE ')
-              ]
-              workspace = [
-                  line
-                  for line in result.stdout.splitlines()
-                  if line.startswith('CEF_WINDOWS_WORKSPACE_PATH_NATIVE ')
-              ]
+              count = re.findall(r'Ran (\d+) tests? in ([0-9.]+)s', result.stdout)
+              skips = re.findall(r'OK \(skipped=(\d+)\)', result.stdout)
+              def proofs(prefix):
+                  return [line for line in result.stdout.splitlines() if line.startswith(prefix + ' ')]
               report['stages'][name] = {
                   'exit_code': result.returncode,
-                  'tests': int(count[-1][0]) if count else None,
-                  'skipped': int(skipped[-1]) if skipped else 0,
-                  'credit_proof': credit,
-                  'workspace_proof': workspace,
+                  'tests': int(count[-1][0]) if len(count) == 1 else None,
+                  'skipped': int(skips[-1]) if skips else 0,
+                  'frame_proof': proofs('CEF_FRAME_TREE_V17_NATIVE'),
+                  'credit_proof': proofs('CEF_CREDIT_CARD_STRING_NATIVE'),
+                  'workspace_proof': proofs('CEF_WINDOWS_WORKSPACE_PATH_NATIVE'),
               }
-              output.write_bytes(
-                  (json.dumps(report, sort_keys=True, indent=2) + '\n').encode()
-              )
+              save()
               if result.returncode or len(count) != 1:
-                  raise RuntimeError(
-                      'Required regression stage failed: ' + name
-                  )
-              if os.environ['RUNNER_OS'] == 'Windows' and name == 'focused':
-                  credit_required = (
-                      'original_failed=true',
-                      'fixed_compiles=true',
-                      'signatures=2',
-                      'direct_string_include=true',
-                  )
-                  if (
-                      len(credit) != 1
-                      or not all(item in credit[0] for item in credit_required)
-                  ):
-                      raise RuntimeError(
-                          'Missing exact Windows credit-card proof'
-                      )
-                  workspace_required = (
-                      'legacy_max_path_overflow=true',
-                      'getfullpathname=true',
-                      'short_resolves=true',
-                      'short_compiles=true',
-                      'codec_identity_preserved=true',
-                  )
-                  if (
-                      len(workspace) != 1
-                      or not all(
-                          item in workspace[0]
-                          for item in workspace_required
-                      )
-                  ):
-                      raise RuntimeError(
-                          'Missing exact Windows short-workspace proof'
-                      )
+                  raise RuntimeError('Required V17 regression failed: ' + name)
+              if name == 'focused':
+                  frame = report['stages'][name]['frame_proof']
+                  required = ('original_nonassignable=true', 'fixed_assignable=true', 'fixed_find_if_runs=true',
+                      'policy_copied=true', 'independent_queue=true', 'node_range_unchanged=true', 'public_blob=true', 'edits=4',
+                      'before_sha256=6dff457016eb06cc710a53012c80884d089665bbf1346cf8933b4535c060b17f',
+                      'after_sha256=968192391f2275c7732e37b1547261e01a424df9633db7e1993d1ff899ecbd77')
+                  if len(frame) != 1 or not all(x in frame[0].split() for x in required):
+                      raise RuntimeError('Missing exact V17 native proof')
+                  if os.environ['RUNNER_OS'] == 'Windows':
+                      if 'windows_find_if_failed=true' not in frame[0].split():
+                          raise RuntimeError('Original Windows STL failure not reproduced')
+                      credit = report['stages'][name]['credit_proof']
+                      workspace = report['stages'][name]['workspace_proof']
+                      if len(credit) != 1 or not all(x in credit[0].split() for x in (
+                          'original_failed=true', 'fixed_compiles=true', 'signatures=2', 'direct_string_include=true')):
+                          raise RuntimeError('Missing original credit-card native proof')
+                      if len(workspace) != 1 or not all(x in workspace[0].split() for x in (
+                          'legacy_max_path_overflow=true', 'getfullpathname=true', 'short_resolves=true',
+                          'short_compiles=true', 'codec_identity_preserved=true')):
+                          raise RuntimeError('Missing original short-workspace native proof')
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
-          name: public-windows-frame-tree-iterator-diagnostic-${{ runner.os }}-${{ github.run_id }}
-          path: frame-tree-iterator-diagnostic-results.json
+          name: public-windows-frame-tree-v17-tests-${{ runner.os }}-${{ github.run_id }}
+          path: frame-tree-v17-ci-results.json
           if-no-files-found: error
           retention-days: 7

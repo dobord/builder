@@ -146,6 +146,17 @@ class NativeWorkspacePolicyTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             worker.checkpoint_workspace_paths(self.temp, repair.UPGRADE_V15, {}, self.key)
 
+    def test_exact_v16_upgrade_keeps_authenticated_short_path(self):
+        short = (self.temp / worker.SHORT_WORK_BASENAME).resolve()
+        proof = {"checkpoint_work_identity": str(short), "workspace_path_verified": True}
+        restore, compile_work = worker.checkpoint_workspace_paths(
+            self.temp, repair.UPGRADE_V16, proof, self.key
+        )
+        self.assertEqual((restore, compile_work), (short, short))
+        with self.assertRaises(ValueError):
+            worker.checkpoint_workspace_paths(self.temp, repair.UPGRADE_V16, {}, self.key)
+
+
     def test_current_checkpoint_requires_authenticated_short_path_proof(self):
         selected = copy.deepcopy(repair.UPGRADE_V14)
         selected["run"] = 999999

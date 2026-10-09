@@ -43,7 +43,8 @@ def populate(work):
                               (repair.DOM_HEADER, Path("dom_builder.h")),
                               (repair.INLINE_ITEMS_SOURCE, Path("inline_items_data.cc")),
                               (repair.API_KEY_HEADER, Path("api_key_request_util.h")),
-                              (repair.CREDIT_CARD_HEADER, Path("credit_card_number_validation.h"))):
+                              (repair.CREDIT_CARD_HEADER, Path("credit_card_number_validation.h")),
+                              (repair.FRAME_TREE_HEADER, Path("frame_tree.h"))):
         path = work / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(public_input("include/v8-template.h")
