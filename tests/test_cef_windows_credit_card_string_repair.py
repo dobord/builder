@@ -68,9 +68,9 @@ class CreditCardStringRepairTests(unittest.TestCase):
         self.assertEqual(hashlib.sha256(self.fixed).hexdigest(), repair.CREDIT_CARD_AFTER)
         self.assertEqual(self.fixed.replace(b"#include <string>\n", b"", 1), self.old)
         self.assertEqual(self.fixed.count(b"#include <string>\n"), 1)
-        self.assertEqual(repair.CORRECTIONS[-1][0], repair.CREDIT_CARD_HEADER)
-        self.assertEqual(repair.profile()["id"], "windows-credit-card-number-string-include-v16")
-        self.assertEqual(len(repair.CORRECTIONS), 16)
+        self.assertEqual(repair.CORRECTIONS[15][0], repair.CREDIT_CARD_HEADER)
+        self.assertEqual(repair.profile()["id"], "windows-frame-tree-node-iterator-assignment-v17")
+        self.assertEqual(len(repair.CORRECTIONS), 17)
 
     def test_newlines_idempotence_and_unreviewed_inputs(self):
         for nl in (b"\n", b"\r\n"):
@@ -183,9 +183,9 @@ class V15TransitionTests(unittest.TestCase):
                   for p in self.work.rglob("*") if p.is_file()}
         self.assertEqual(self.apply(), "upgraded-v15")
         for path, snapshot in before.items():
-            if path == self.path:
+            if path in (self.path, self.work / repair.FRAME_TREE_HEADER):
                 self.assertEqual(path.read_bytes(),
-                                 repair.transform(snapshot[0], repair.CREDIT_CARD_HEADER))
+                                 repair.transform(snapshot[0], path.relative_to(self.work).as_posix()))
                 self.assertGreater(path.stat().st_mtime_ns, snapshot[1])
             elif path != self.marker:
                 self.assertEqual((path.read_bytes(), path.stat().st_mtime_ns), snapshot)

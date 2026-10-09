@@ -136,8 +136,8 @@ class InlineItemsLifetimeTests(unittest.TestCase):
         self.assertIn("return with_offset->offset_map;", method(self.fixed))
         self.assertIn("return *kEmpty;", method(self.fixed))
         self.assertNotIn(b"Wno-", self.fixed); self.assertNotIn(b"#pragma", self.fixed)
-        self.assertEqual(repair.profile()["id"], "windows-credit-card-number-string-include-v16")
-        self.assertEqual(len(repair.CORRECTIONS), 16)
+        self.assertEqual(repair.profile()["id"], "windows-frame-tree-node-iterator-assignment-v17")
+        self.assertEqual(len(repair.CORRECTIONS), 17)
 
     def test_idempotence_newlines_and_unreviewed_sources(self):
         for nl in (b"\n", b"\r\n"):
@@ -245,6 +245,7 @@ class V13TransitionTests(unittest.TestCase):
             self.path: repair.INLINE_ITEMS_SOURCE,
             self.api_key: repair.API_KEY_HEADER,
             self.credit_card: repair.CREDIT_CARD_HEADER,
+            self.work / repair.FRAME_TREE_HEADER: repair.FRAME_TREE_HEADER,
         }
         for path, snapshot in before.items():
             if path in changed:
