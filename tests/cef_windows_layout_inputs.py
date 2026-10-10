@@ -51,6 +51,8 @@ _GENERATOR = public_input("src/torque/implementation-visitor.cc")
 
 
 def fixture_bytes(name):
+    if name in {"settings.h", "watermark_settings.h"}:
+        return (FIXTURES / "watermark_settings.h").read_bytes()
     if name == "permission_request_manager.h":
         return PERMISSION_MANAGER_HEADER
     if name == "password_store_backend_error.h":

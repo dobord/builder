@@ -1,4 +1,4 @@
-"""Current V21 profile expectations over the preserved Torque regression suite."""
+"""Current V22 profile expectations over the preserved Torque regression suite."""
 from __future__ import annotations
 
 from secure_release import cef_windows_source_repair as repair
@@ -9,9 +9,9 @@ class TorqueTailSizeTests(base.TorqueTailSizeTests):
     def test_exact_profile_keeps_source_set_and_rejects_v6(self):
         self.assertEqual(
             repair.profile()["id"],
-            "windows-permission-source-const-key-v21",
+            "windows-watermark-string-include-v22",
         )
-        self.assertEqual(len(repair.CORRECTIONS), 22)
+        self.assertEqual(len(repair.CORRECTIONS), 23)
         self.assertEqual(
             repair.profile()["v8_commit"],
             "4323497a6a73839e6d5260f6acd7ec0212cb3321",

@@ -15,7 +15,7 @@
   },
   "source_repair": {
     "schema": 2,
-    "id": "windows-permission-source-const-key-v21",
+    "id": "windows-watermark-string-include-v22",
     "chromium_commit": "79460ebecaa5625e57a5fb679a735659e73dc687",
     "v8_commit": "4323497a6a73839e6d5260f6acd7ec0212cb3321",
     "corrections": [
@@ -128,8 +128,13 @@
         "path": "components/permissions/permission_request_manager.h",
         "before_sha256": "bc14a8e3f644138477b2450cafa2931061f583dcdf244e644546e1e913018289",
         "after_sha256": "a021f5322a869f393d2077313e8ef26f3167b9677efc7e92596ec71227b4c570"
+      },
+      {
+        "path": "chrome/browser/enterprise/watermark/settings.h",
+        "before_sha256": "d7a0cd34ef3fc8bd33a1d13c88699d5ec5a31ee614c12dedc1b72a08cd9c3233",
+        "after_sha256": "2810e40f606ff37a20ebccfa00610b2fae1d5377fcea20c08d2b7be39e8676a8"
       }
     ],
-    "implementation_sha256": "6a10914d5d6222c2ff34aa46ab7af5d193c75a88beeaddeeb27c882c14e6ae39"
+    "implementation_sha256": "5d8a168e286c4fe6fa13653582b4b5e2c69c6962f9f9cf481a4582171ce61daf"
   }
 }

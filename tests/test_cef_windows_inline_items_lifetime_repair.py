@@ -136,8 +136,8 @@ class InlineItemsLifetimeTests(unittest.TestCase):
         self.assertIn("return with_offset->offset_map;", method(self.fixed))
         self.assertIn("return *kEmpty;", method(self.fixed))
         self.assertNotIn(b"Wno-", self.fixed); self.assertNotIn(b"#pragma", self.fixed)
-        self.assertEqual(repair.profile()["id"], "windows-permission-source-const-key-v21")
-        self.assertEqual(len(repair.CORRECTIONS), 22)
+        self.assertEqual(repair.profile()["id"], "windows-watermark-string-include-v22")
+        self.assertEqual(len(repair.CORRECTIONS), 23)
 
     def test_idempotence_newlines_and_unreviewed_sources(self):
         for nl in (b"\n", b"\r\n"):
@@ -251,6 +251,7 @@ class V13TransitionTests(unittest.TestCase):
             self.work / repair.BACKEND_ERROR_HEADER: repair.BACKEND_ERROR_HEADER,
             self.work / repair.BACKEND_ERROR_SOURCE: repair.BACKEND_ERROR_SOURCE,
             self.work / repair.PERMISSION_MANAGER_HEADER: repair.PERMISSION_MANAGER_HEADER,
+            self.work / repair.WATERMARK_HEADER: repair.WATERMARK_HEADER,
         }
         for path, snapshot in before.items():
             if path in changed:
