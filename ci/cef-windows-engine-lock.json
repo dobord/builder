@@ -15,7 +15,7 @@
   },
   "source_repair": {
     "schema": 2,
-    "id": "windows-password-backend-error-nothrow-v20",
+    "id": "windows-permission-source-const-key-v21",
     "chromium_commit": "79460ebecaa5625e57a5fb679a735659e73dc687",
     "v8_commit": "4323497a6a73839e6d5260f6acd7ec0212cb3321",
     "corrections": [
@@ -123,8 +123,13 @@
         "path": "components/password_manager/core/browser/password_store/password_store_backend_error.cc",
         "before_sha256": "4b19a74de291fd09caf9e516033114f5ae8348fdd69e81eecbacacd4658b6cdf",
         "after_sha256": "8b99f25b7c099934136e7d337c2ba8b4420ecb92fca5d52ba7762896c5ef3833"
+      },
+      {
+        "path": "components/permissions/permission_request_manager.h",
+        "before_sha256": "bc14a8e3f644138477b2450cafa2931061f583dcdf244e644546e1e913018289",
+        "after_sha256": "a021f5322a869f393d2077313e8ef26f3167b9677efc7e92596ec71227b4c570"
       }
     ],
-    "implementation_sha256": "44b746ab5314826099ffaebab342858b8fbaeb178460c78189cffb0f2676c519"
+    "implementation_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
   }
 }

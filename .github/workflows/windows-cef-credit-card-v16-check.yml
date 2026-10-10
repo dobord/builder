@@ -1,4 +1,4 @@
-name: Windows CEF backend-error V20 verification
+name: Windows CEF permission-source V21 verification
 on:
   push:
     branches: [repair/windows-cef-60-credit-card-string-v16]
@@ -26,6 +26,7 @@ jobs:
       CEF_WINDOWS_LOCK_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
       CEF_WINDOWS_AFFILIATED_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
       CEF_WINDOWS_BACKEND_ERROR_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+      CEF_WINDOWS_PERMISSION_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
     steps:
       - name: Preserve exact public source newlines
         run: git config --global core.autocrlf false
@@ -83,6 +84,9 @@ jobs:
             /base/functional/bind_internal.h
             /components/password_manager/core/browser/password_store/password_store_backend_error.h
             /components/password_manager/core/browser/password_store/password_store_backend_error.cc
+            /components/permissions/permission_request_manager.h
+            /components/permissions/permission_request_manager.cc
+            /base/allocator/partition_allocator/src/partition_alloc/pointers/raw_ref.h
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
         with: {python-version: '3.12'}
       - name: Verify exact inputs and offline runtime
@@ -516,7 +520,7 @@ jobs:
               + ' after_sha256='
               + after
           )
-      - name: Bind exact V20 implementation digest
+      - name: Bind exact V21 implementation digest
         shell: python
         run: |
           import copy, hashlib, json, os, sys
@@ -533,22 +537,22 @@ jobs:
           value = parse(raw)
           digest = hashlib.sha256(Path('secure_release/cef_windows_source_repair.py').read_bytes()).hexdigest()
           current = repair.profile()
-          if current['id'] != 'windows-password-backend-error-nothrow-v20' or len(current['corrections']) != 21:
-              raise RuntimeError('Not the reviewed V20 source profile')
+          if current['id'] != 'windows-permission-source-const-key-v21' or len(current['corrections']) != 22:
+              raise RuntimeError('Not the reviewed V21 source profile')
           if current['implementation_sha256'] != digest:
               raise RuntimeError('Source implementation digest mismatch')
           if (value.get('schema') != 2 or value.get('platform') != 'windows'
                   or value.get('vcpkg_commit') != worker.VCPKG
                   or value.get('cef_recipe_commit') != worker.CEF
                   or canonical(value.get('checkpoint')) != canonical(repair.UPGRADE_V19)):
-              raise RuntimeError('V20 candidate changed exact V19 checkpoint input or source pins')
+              raise RuntimeError('V21 candidate changed exact V19 checkpoint input or source pins')
           branch_digest = value.get('source_repair', {}).get('implementation_sha256')
           if branch_digest not in ('0' * 64, digest):
               raise RuntimeError('Unreviewed implementation binding; only explicit bootstrap or exact lock permitted')
           expected_branch = copy.deepcopy(current)
           expected_branch['implementation_sha256'] = branch_digest
           if canonical(value.get('source_repair')) != canonical(expected_branch):
-              raise RuntimeError('V20 correction/profile mismatch')
+              raise RuntimeError('V21 correction/profile mismatch')
           original = copy.deepcopy(value)
           matched = branch_digest == digest
           if not matched:
@@ -559,16 +563,16 @@ jobs:
                   raise RuntimeError('Binding changed more than the implementation digest')
               path.write_bytes((json.dumps(value, indent=2) + '\n').encode('utf-8'))
           binding = {
-              'schema': 1, 'kind': 'public-windows-backend-error-v20-lock-binding',
+              'schema': 1, 'kind': 'public-windows-permission-source-v21-lock-binding',
               'branch_lock_matched': matched,
               'branch_implementation_sha256': branch_digest,
               'implementation_sha256': digest,
               'branch_lock_sha256': hashlib.sha256(raw).hexdigest(),
               'effective_lock_sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
           }
-          Path('backend-error-v20-lock-binding.json').write_bytes((json.dumps(binding, indent=2) + '\n').encode())
-          print('CEF_BACKEND_ERROR_V20_LOCK_BINDING branch_lock_matched=' + str(matched).lower() + ' implementation_sha256=' + digest)
-      - name: V20 focused and complete regressions
+          Path('permission-source-v21-lock-binding.json').write_bytes((json.dumps(binding, indent=2) + '\n').encode())
+          print('CEF_PERMISSION_SOURCE_V21_LOCK_BINDING branch_lock_matched=' + str(matched).lower() + ' implementation_sha256=' + digest)
+      - name: V21 focused and complete regressions
         shell: python
         run: |
           import ast, hashlib, json, os, re, subprocess, sys
@@ -578,11 +582,11 @@ jobs:
               raise RuntimeError('Helper step must run in the exact checkout')
           sys.path.insert(0, str(workspace))
           from secure_release.crypto import parse
-          tested = ('.github/workflows/cef-windows-engine-iteration.yml', '.github/workflows/windows-cef-credit-card-v16-check.yml', 'ci/cef-windows-engine-lock.json', 'secure_release/cef_windows_iteration.py', 'secure_release/cef_windows_source_repair.py', 'tests/cef_windows_affiliated_inputs.py', 'tests/cef_windows_backend_error_inputs.py', 'tests/cef_windows_callable_repair_base.py', 'tests/cef_windows_layout_inputs.py', 'tests/cef_windows_lock_inputs.py', 'tests/cef_windows_source_repair_base.py', 'tests/cef_windows_tail_size_repair_base.py', 'tests/fixtures/cef-windows/credit_card_number_validation.h', 'tests/fixtures/cef-windows/frame_tree.h', 'tests/test_cef_windows_accessibility_iterator_repair.py', 'tests/test_cef_windows_affiliated_result_repair.py', 'tests/test_cef_windows_api_key_string_repair.py', 'tests/test_cef_windows_backend_error_repair.py', 'tests/test_cef_windows_callable_repair.py', 'tests/test_cef_windows_credit_card_string_repair.py', 'tests/test_cef_windows_dom_memory_repair.py', 'tests/test_cef_windows_frame_tree_iterator_repair.py', 'tests/test_cef_windows_inline_empty_repair.py', 'tests/test_cef_windows_inline_items_lifetime_repair.py', 'tests/test_cef_windows_lock_manager_repair.py', 'tests/test_cef_windows_source_repair.py', 'tests/test_cef_windows_string_iterator_repair.py', 'tests/test_cef_windows_tail_size_repair.py', 'tests/test_cef_windows_workspace_path_migration.py')
+          tested = ('.github/workflows/cef-windows-engine-iteration.yml', '.github/workflows/windows-cef-credit-card-v16-check.yml', 'ci/cef-windows-engine-lock.json', 'secure_release/cef_windows_iteration.py', 'secure_release/cef_windows_source_repair.py', 'tests/cef_windows_affiliated_inputs.py', 'tests/cef_windows_backend_error_inputs.py', 'tests/cef_windows_callable_repair_base.py', 'tests/cef_windows_layout_inputs.py', 'tests/cef_windows_lock_inputs.py', 'tests/cef_windows_permission_inputs.py', 'tests/cef_windows_source_repair_base.py', 'tests/cef_windows_tail_size_repair_base.py', 'tests/fixtures/cef-windows/credit_card_number_validation.h', 'tests/fixtures/cef-windows/frame_tree.h', 'tests/test_cef_windows_accessibility_iterator_repair.py', 'tests/test_cef_windows_affiliated_result_repair.py', 'tests/test_cef_windows_api_key_string_repair.py', 'tests/test_cef_windows_backend_error_repair.py', 'tests/test_cef_windows_callable_repair.py', 'tests/test_cef_windows_credit_card_string_repair.py', 'tests/test_cef_windows_dom_memory_repair.py', 'tests/test_cef_windows_frame_tree_iterator_repair.py', 'tests/test_cef_windows_inline_empty_repair.py', 'tests/test_cef_windows_inline_items_lifetime_repair.py', 'tests/test_cef_windows_lock_manager_repair.py', 'tests/test_cef_windows_permission_source_repair.py', 'tests/test_cef_windows_source_repair.py', 'tests/test_cef_windows_string_iterator_repair.py', 'tests/test_cef_windows_tail_size_repair.py', 'tests/test_cef_windows_workspace_path_migration.py')
           for path in tested:
               if path.endswith('.py'):
                   ast.parse(Path(path).read_bytes(), filename=path)
-          binding = parse(Path('backend-error-v20-lock-binding.json').read_bytes())
+          binding = parse(Path('permission-source-v21-lock-binding.json').read_bytes())
           diagnostic = parse(Path('frame-tree-iterator-diagnostic-results.json').read_bytes())
           if (diagnostic.get('sha') != os.environ['GITHUB_SHA']
                   or diagnostic.get('run') != int(os.environ['GITHUB_RUN_ID'])
@@ -590,7 +594,8 @@ jobs:
                   or diagnostic.get('proof', {}).get('fixed_find_if_runs') is not True):
               raise RuntimeError('Original exact native diagnostic missing')
           stages = {
-              'focused': ['tests.test_cef_windows_backend_error_repair',
+              'focused': ['tests.test_cef_windows_permission_source_repair',
+                          'tests.test_cef_windows_backend_error_repair',
                           'tests.test_cef_windows_affiliated_result_repair',
                           'tests.test_cef_windows_lock_manager_repair',
                           'tests.test_cef_windows_frame_tree_iterator_repair',
@@ -600,14 +605,14 @@ jobs:
               'full': ['discover', '-s', 'tests', '-v'],
           }
           report = {
-              'schema': 1, 'kind': 'public-windows-backend-error-v20-test-results',
+              'schema': 1, 'kind': 'public-windows-permission-source-v21-test-results',
               'sha': os.environ['GITHUB_SHA'], 'run': int(os.environ['GITHUB_RUN_ID']),
               'attempt': int(os.environ['GITHUB_RUN_ATTEMPT']), 'os': os.environ['RUNNER_OS'],
               'binding': binding, 'diagnostic_proof': diagnostic['proof'],
               'blobs': {p: hashlib.sha256(Path(p).read_bytes()).hexdigest() for p in tested},
               'stages': {},
           }
-          output = Path('backend-error-v20-ci-results.json')
+          output = Path('permission-source-v21-ci-results.json')
           def save():
               output.write_bytes((json.dumps(report, sort_keys=True, indent=2) + '\n').encode())
           save()
@@ -628,13 +633,22 @@ jobs:
                   'lock_proof': proofs('CEF_LOCK_MANAGER_V18_NATIVE'),
                   'affiliated_proof': proofs('CEF_AFFILIATED_RESULT_V19_NATIVE'),
                   'backend_proof': proofs('CEF_BACKEND_ERROR_V20_NATIVE'),
+                  'permission_proof': proofs('CEF_PERMISSION_SOURCE_V21_NATIVE'),
                   'credit_proof': proofs('CEF_CREDIT_CARD_STRING_NATIVE'),
                   'workspace_proof': proofs('CEF_WINDOWS_WORKSPACE_PATH_NATIVE'),
               }
               save()
               if result.returncode or len(count) != 1:
-                  raise RuntimeError('Required V20 regression failed: ' + name)
+                  raise RuntimeError('Required V21 regression failed: ' + name)
               if name == 'focused':
+                  permission = report['stages'][name]['permission_proof']
+                  required_permission = ('original_failed=true', 'fixed_runs=true', 'const_lookup=true',
+                      'address_identity=true', 'mutable_erasure=true', 'mutable_request_refs=true',
+                      'comparator_verbatim=true', 'edits=1', 'public_blob=true',
+                      'before_sha256=bc14a8e3f644138477b2450cafa2931061f583dcdf244e644546e1e913018289',
+                      'after_sha256=a021f5322a869f393d2077313e8ef26f3167b9677efc7e92596ec71227b4c570')
+                  if len(permission) != 1 or not all(x in permission[0].split() for x in required_permission):
+                      raise RuntimeError('Missing exact V21 native permission-source proof')
                   backend = report['stages'][name]['backend_proof']
                   required_backend = ('original_failed=true', 'fixed_runs=true', 'nothrow_moves=true',
                       'vector_variant=true', 'stable_payloads=true', 'error_values=true', 'android_optional=true',
@@ -685,7 +699,7 @@ jobs:
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
-          name: public-windows-backend-error-v20-tests-${{ runner.os }}-${{ github.run_id }}
-          path: backend-error-v20-ci-results.json
+          name: public-windows-permission-source-v21-tests-${{ runner.os }}-${{ github.run_id }}
+          path: permission-source-v21-ci-results.json
           if-no-files-found: error
           retention-days: 7

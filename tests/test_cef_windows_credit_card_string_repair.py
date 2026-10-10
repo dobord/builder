@@ -69,8 +69,8 @@ class CreditCardStringRepairTests(unittest.TestCase):
         self.assertEqual(self.fixed.replace(b"#include <string>\n", b"", 1), self.old)
         self.assertEqual(self.fixed.count(b"#include <string>\n"), 1)
         self.assertEqual(repair.CORRECTIONS[15][0], repair.CREDIT_CARD_HEADER)
-        self.assertEqual(repair.profile()["id"], "windows-password-backend-error-nothrow-v20")
-        self.assertEqual(len(repair.CORRECTIONS), 21)
+        self.assertEqual(repair.profile()["id"], "windows-permission-source-const-key-v21")
+        self.assertEqual(len(repair.CORRECTIONS), 22)
 
     def test_newlines_idempotence_and_unreviewed_inputs(self):
         for nl in (b"\n", b"\r\n"):
@@ -187,7 +187,8 @@ class V15TransitionTests(unittest.TestCase):
                         self.work / repair.LOCK_MANAGER_HEADER,
                         self.work / repair.AFFILIATED_MATCH_SOURCE,
                         self.work / repair.BACKEND_ERROR_HEADER,
-                        self.work / repair.BACKEND_ERROR_SOURCE):
+                        self.work / repair.BACKEND_ERROR_SOURCE,
+                        self.work / repair.PERMISSION_MANAGER_HEADER):
                 self.assertEqual(path.read_bytes(),
                                  repair.transform(snapshot[0], path.relative_to(self.work).as_posix()))
                 self.assertGreater(path.stat().st_mtime_ns, snapshot[1])

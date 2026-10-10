@@ -195,7 +195,7 @@ class V19ToV20TransitionTests(unittest.TestCase):
         before = {p: snapshot(p) for p in self.work.rglob('*') if p.is_file()}
         self.assertEqual(self.apply(), 'upgraded-v19')
         for path, saved in before.items():
-            if path in (self.header, self.source):
+            if path in (self.header, self.source, self.work / repair.PERMISSION_MANAGER_HEADER):
                 self.assertEqual(path.read_bytes(), repair.transform(saved[0], path.relative_to(self.work).as_posix()))
                 self.assertGreater(path.stat().st_mtime_ns, saved[1])
             elif path != self.marker:

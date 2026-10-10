@@ -1,4 +1,4 @@
-"""Current V20 source-repair regressions over the preserved historical suite.
+"""Current V21 source-repair regressions over the preserved historical suite.
 
 The implementation-heavy tests remain in cef_windows_source_repair_base so
 profile migrations can update current expectations without rewriting their
@@ -47,10 +47,11 @@ class PaintHeaderTests(base.PaintHeaderTests):
             repair.AFFILIATED_MATCH_SOURCE,
             repair.BACKEND_ERROR_HEADER,
             repair.BACKEND_ERROR_SOURCE,
+            repair.PERMISSION_MANAGER_HEADER,
         ]
         profile = repair.profile()
         self.assertEqual(profile["schema"], 2)
-        self.assertEqual(profile["id"], "windows-password-backend-error-nothrow-v20")
+        self.assertEqual(profile["id"], "windows-permission-source-const-key-v21")
         self.assertEqual(
             [correction["path"] for correction in profile["corrections"]],
             [path.removeprefix("download/chromium/src/") for path in expected_paths],
@@ -96,6 +97,7 @@ class PaintHeaderTests(base.PaintHeaderTests):
             (repair.AFFILIATED_MATCH_SOURCE, Path("affiliated_match_helper.cc")),
             (repair.BACKEND_ERROR_HEADER, Path("password_store_backend_error.h")),
             (repair.BACKEND_ERROR_SOURCE, Path("password_store_backend_error.cc")),
+            (repair.PERMISSION_MANAGER_HEADER, Path("permission_request_manager.h")),
         )
         for relative, fixture in sources:
             path = self.work / relative
