@@ -1,9 +1,9 @@
-"""Seventeen reviewed Windows source corrections, bound to a new build contract.
+"""Eighteen reviewed Windows source corrections, bound to a new build contract.
 
 The baseline CEF checkout and native checkpoint codec stay unchanged. Only the
 exact reviewed producers below may cross into this profile, after authenticated
 restore under its OLD contract. New checkpoints carry the NEW contract and a
-verified source marker covering all seventeen files. Neither receipts nor fixtures
+verified source marker covering all eighteen files. Neither receipts nor fixtures
 constitute runtime proof.
 """
 from __future__ import annotations
@@ -71,6 +71,9 @@ CREDIT_CARD_AFTER = "e11c6be830cbd52303ea11826a84bccf1838746276b25809bdf878c7aa7
 FRAME_TREE_HEADER = "download/chromium/src/content/browser/renderer_host/frame_tree.h"
 FRAME_TREE_BEFORE = "6dff457016eb06cc710a53012c80884d089665bbf1346cf8933b4535c060b17f"
 FRAME_TREE_AFTER = "968192391f2275c7732e37b1547261e01a424df9633db7e1993d1ff899ecbd77"
+LOCK_MANAGER_HEADER = "download/chromium/src/content/browser/locks/lock_manager.h"
+LOCK_MANAGER_BEFORE = "5da1667d945bccc542dcef1268139f1c923dae0d1d2cd6559840055d1c78a2fd"
+LOCK_MANAGER_AFTER = "e5bc278ffcaf644f3741e7d6d7102d50b533a1c6eede695647b9010524a4f6f0"
 # Ordered, closed set of corrections; no caller-selected paths or patches.
 CORRECTIONS = (
     (HEADER, BEFORE, AFTER, (
@@ -171,6 +174,10 @@ CORRECTIONS = (
          b'    RAW_PTR_EXCLUSION const FrameTreeNode* root_of_subtree_to_skip_;\n\n'
          b'    bool should_descend_into_inner_trees_;\n'
          b'    bool include_delegate_nodes_for_inner_frame_trees_;\n'),
+    )),
+    (LOCK_MANAGER_HEADER, LOCK_MANAGER_BEFORE, LOCK_MANAGER_AFTER, (
+        (b'  base::flat_map<std::string, std::list<Lock>> resource_names_to_requests_;\n',
+         b'  std::map<std::string, std::list<Lock>> resource_names_to_requests_;\n'),
     )),
 )
 BASE_KEY = "60a369f6b051ba651cb301af299e7dadcc99608d0db6894bccab87b953817602"
@@ -338,7 +345,7 @@ def v16_profile() -> dict:
 
 def profile() -> dict:
     return {
-        "schema": 2, "id": "windows-frame-tree-node-iterator-assignment-v17",
+        "schema": 2, "id": "windows-lock-manager-node-map-v18",
         "chromium_commit": CHROMIUM,
         "v8_commit": V8,
         "corrections": [
@@ -552,8 +559,8 @@ def _upgrade_v11(work: Path, expected: bytes, inputs: list) -> str:
     marker, marker_data, marker_before = _read(work, MARKER, 8192)
     previous = canonical({"schema": 1, "kind": "cef-windows-source-repair",
                           "build_key": V11_KEY, "source_repair": v11_profile()})
-    if (canonical(parse(marker_data)) != previous or len(inputs) != 17
-            or tuple(item[0] for item in inputs[11:]) != (INLINE_HEADER, DOM_HEADER, INLINE_ITEMS_SOURCE, API_KEY_HEADER, CREDIT_CARD_HEADER, FRAME_TREE_HEADER)
+    if (canonical(parse(marker_data)) != previous or len(inputs) != 18
+            or tuple(item[0] for item in inputs[11:]) != (INLINE_HEADER, DOM_HEADER, INLINE_ITEMS_SOURCE, API_KEY_HEADER, CREDIT_CARD_HEADER, FRAME_TREE_HEADER, LOCK_MANAGER_HEADER)
             or any(original != changed for _, _, original, _, changed in inputs[:11])
             or any(original == changed for _, _, original, _, changed in inputs[11:])):
         raise ValueError("Windows v11 source/marker transition mismatch")
@@ -573,7 +580,7 @@ def _upgrade_v11(work: Path, expected: bytes, inputs: list) -> str:
                     or (is_new and info.st_mtime_ns <= before.st_mtime_ns)):
                 raise ValueError("Windows v11 source changed during upgrade")
 
-    # All six later sources were validated before any write. After each replacement,
+    # All seven later sources were validated before any write. After each replacement,
     # recheck the complete source set and old marker; a partial upgrade is fatal.
     for replaced, (relative, path, original, before, changed) in enumerate(inputs[11:]):
         fd, name = tempfile.mkstemp(prefix=".cef-header-", dir=path.parent)
@@ -601,7 +608,7 @@ def _upgrade_v11(work: Path, expected: bytes, inputs: list) -> str:
             stream.flush()
             os.fsync(stream.fileno())
         temporary.chmod(stat.S_IMODE(marker_before.st_mode))
-        verify_sources(replaced=6)
+        verify_sources(replaced=7)
         verify_marker()
         os.replace(temporary, marker)
     finally:
@@ -609,7 +616,7 @@ def _upgrade_v11(work: Path, expected: bytes, inputs: list) -> str:
     _, data, _ = _read(work, MARKER, 8192)
     if canonical(parse(data)) != expected:
         raise ValueError("Windows upgraded marker verification failed")
-    verify_sources(replaced=6)
+    verify_sources(replaced=7)
     return "upgraded-v11"
 
 
@@ -618,8 +625,8 @@ def _upgrade_v13(work: Path, expected: bytes, inputs: list) -> str:
     marker, marker_data, marker_before = _read(work, MARKER, 8192)
     previous = canonical({"schema": 1, "kind": "cef-windows-source-repair",
                           "build_key": V13_KEY, "source_repair": v13_profile()})
-    if (canonical(parse(marker_data)) != previous or len(inputs) != 17
-            or tuple(item[0] for item in inputs[13:]) != (INLINE_ITEMS_SOURCE, API_KEY_HEADER, CREDIT_CARD_HEADER, FRAME_TREE_HEADER)
+    if (canonical(parse(marker_data)) != previous or len(inputs) != 18
+            or tuple(item[0] for item in inputs[13:]) != (INLINE_ITEMS_SOURCE, API_KEY_HEADER, CREDIT_CARD_HEADER, FRAME_TREE_HEADER, LOCK_MANAGER_HEADER)
             or any(original != changed for _, _, original, _, changed in inputs[:13])
             or any(original == changed for _, _, original, _, changed in inputs[13:])):
         raise ValueError("Windows v13 source/marker transition mismatch")
@@ -658,23 +665,23 @@ def _upgrade_v13(work: Path, expected: bytes, inputs: list) -> str:
         with os.fdopen(fd, "wb") as stream:
             stream.write(expected + b"\n"); stream.flush(); os.fsync(stream.fileno())
         temporary.chmod(stat.S_IMODE(marker_before.st_mode))
-        verify_sources(replaced=4); verify_marker(); os.replace(temporary, marker)
+        verify_sources(replaced=5); verify_marker(); os.replace(temporary, marker)
     finally:
         temporary.unlink(missing_ok=True)
     _, data, _ = _read(work, MARKER, 8192)
     if canonical(parse(data)) != expected:
         raise ValueError("Windows upgraded marker verification failed")
-    verify_sources(replaced=4)
+    verify_sources(replaced=5)
     return "upgraded-v13"
 
 
 def _upgrade_v14(work: Path, expected: bytes, inputs: list) -> str:
-    """Upgrade exact authenticated v14 state through its three later corrections."""
+    """Upgrade exact authenticated v14 state through its four later corrections."""
     marker, marker_data, marker_before = _read(work, MARKER, 8192)
     previous = canonical({"schema": 1, "kind": "cef-windows-source-repair",
                           "build_key": V14_KEY, "source_repair": prior_profile()})
-    if (canonical(parse(marker_data)) != previous or len(inputs) != 17
-            or tuple(item[0] for item in inputs[14:]) != (API_KEY_HEADER, CREDIT_CARD_HEADER, FRAME_TREE_HEADER)
+    if (canonical(parse(marker_data)) != previous or len(inputs) != 18
+            or tuple(item[0] for item in inputs[14:]) != (API_KEY_HEADER, CREDIT_CARD_HEADER, FRAME_TREE_HEADER, LOCK_MANAGER_HEADER)
             or any(original != changed for _, _, original, _, changed in inputs[:14])
             or any(original == changed for _, _, original, _, changed in inputs[14:])):
         raise ValueError("Windows v14 source/marker transition mismatch")
@@ -709,23 +716,23 @@ def _upgrade_v14(work: Path, expected: bytes, inputs: list) -> str:
         with os.fdopen(fd, "wb") as stream:
             stream.write(expected + b"\n"); stream.flush(); os.fsync(stream.fileno())
         temporary.chmod(stat.S_IMODE(marker_before.st_mode))
-        verify_sources(replaced=3); verify_marker(); os.replace(temporary, marker)
+        verify_sources(replaced=4); verify_marker(); os.replace(temporary, marker)
     finally:
         temporary.unlink(missing_ok=True)
     _, data, _ = _read(work, MARKER, 8192)
     if canonical(parse(data)) != expected:
         raise ValueError("Windows upgraded marker verification failed")
-    verify_sources(replaced=3)
+    verify_sources(replaced=4)
     return "upgraded-v14"
 
 
 def _upgrade_v15(work: Path, expected: bytes, inputs: list) -> str:
-    """Upgrade exact authenticated v15 state through credit-card and frame-tree repairs."""
+    """Upgrade exact authenticated v15 state through its three later corrections."""
     marker, marker_data, marker_before = _read(work, MARKER, 8192)
     previous = canonical({"schema": 1, "kind": "cef-windows-source-repair",
                           "build_key": V15_KEY, "source_repair": v15_profile()})
-    if (canonical(parse(marker_data)) != previous or len(inputs) != 17
-            or tuple(item[0] for item in inputs[15:]) != (CREDIT_CARD_HEADER, FRAME_TREE_HEADER)
+    if (canonical(parse(marker_data)) != previous or len(inputs) != 18
+            or tuple(item[0] for item in inputs[15:]) != (CREDIT_CARD_HEADER, FRAME_TREE_HEADER, LOCK_MANAGER_HEADER)
             or any(original != changed for _, _, original, _, changed in inputs[:15])
             or any(original == changed for _, _, original, _, changed in inputs[15:])):
         raise ValueError("Windows v15 source/marker transition mismatch")
@@ -760,6 +767,57 @@ def _upgrade_v15(work: Path, expected: bytes, inputs: list) -> str:
         with os.fdopen(fd, "wb") as stream:
             stream.write(expected + b"\n"); stream.flush(); os.fsync(stream.fileno())
         temporary.chmod(stat.S_IMODE(marker_before.st_mode))
+        verify_sources(replaced=3); verify_marker(); os.replace(temporary, marker)
+    finally:
+        temporary.unlink(missing_ok=True)
+    _, data, _ = _read(work, MARKER, 8192)
+    if canonical(parse(data)) != expected:
+        raise ValueError("Windows upgraded marker verification failed")
+    verify_sources(replaced=3)
+    return "upgraded-v15"
+
+
+def _upgrade_v16(work: Path, expected: bytes, inputs: list) -> str:
+    """Upgrade exact authenticated V16 state through frame-tree and lock-map repairs."""
+    marker, marker_data, marker_before = _read(work, MARKER, 8192)
+    previous = canonical({"schema": 1, "kind": "cef-windows-source-repair",
+                          "build_key": V16_KEY, "source_repair": v16_profile()})
+    if (canonical(parse(marker_data)) != previous or len(inputs) != 18
+            or tuple(item[0] for item in inputs[16:]) != (FRAME_TREE_HEADER, LOCK_MANAGER_HEADER)
+            or any(original != changed for _, _, original, _, changed in inputs[:16])
+            or any(original == changed for _, _, original, _, changed in inputs[16:])):
+        raise ValueError("Windows v16 source/marker transition mismatch")
+    def verify_marker():
+        path, data, info = _read(work, MARKER, 8192)
+        if path != marker or data != marker_data or _snapshot(info) != _snapshot(marker_before):
+            raise ValueError("Windows v16 marker changed during upgrade")
+    def verify_sources(replaced=0):
+        for index, (relative, path, original, before, changed) in enumerate(inputs):
+            current, data, info = _read(work, relative, source_limit(relative))
+            is_new = 16 <= index < 16 + replaced
+            if (current != path or data != (changed if is_new else original)
+                    or (not is_new and _snapshot(info) != _snapshot(before))
+                    or (is_new and info.st_mtime_ns <= before.st_mtime_ns)):
+                raise ValueError("Windows v16 source changed during upgrade")
+    for replaced, (relative, path, original, before, changed) in enumerate(inputs[16:]):
+        fd, name = tempfile.mkstemp(prefix=".cef-header-", dir=path.parent)
+        temporary = Path(name)
+        try:
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(changed); stream.flush(); os.fsync(stream.fileno())
+            temporary.chmod(stat.S_IMODE(before.st_mode))
+            new_time = max(time.time_ns(), before.st_mtime_ns + 1_000_000)
+            os.utime(temporary, ns=(new_time, new_time))
+            verify_sources(replaced); verify_marker(); os.replace(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)
+        verify_sources(replaced + 1); verify_marker()
+    fd, name = tempfile.mkstemp(prefix=".cef-marker-", dir=work)
+    temporary = Path(name)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(expected + b"\n"); stream.flush(); os.fsync(stream.fileno())
+        temporary.chmod(stat.S_IMODE(marker_before.st_mode))
         verify_sources(replaced=2); verify_marker(); os.replace(temporary, marker)
     finally:
         temporary.unlink(missing_ok=True)
@@ -767,55 +825,4 @@ def _upgrade_v15(work: Path, expected: bytes, inputs: list) -> str:
     if canonical(parse(data)) != expected:
         raise ValueError("Windows upgraded marker verification failed")
     verify_sources(replaced=2)
-    return "upgraded-v15"
-
-
-def _upgrade_v16(work: Path, expected: bytes, inputs: list) -> str:
-    """Upgrade exact authenticated V16 state by repairing only frame-tree iterator assignment."""
-    marker, marker_data, marker_before = _read(work, MARKER, 8192)
-    previous = canonical({"schema": 1, "kind": "cef-windows-source-repair",
-                          "build_key": V16_KEY, "source_repair": v16_profile()})
-    if (canonical(parse(marker_data)) != previous or len(inputs) != 17
-            or inputs[-1][0] != FRAME_TREE_HEADER
-            or any(original != changed for _, _, original, _, changed in inputs[:16])
-            or inputs[-1][2] == inputs[-1][4]):
-        raise ValueError("Windows v16 source/marker transition mismatch")
-    def verify_marker():
-        path, data, info = _read(work, MARKER, 8192)
-        if path != marker or data != marker_data or _snapshot(info) != _snapshot(marker_before):
-            raise ValueError("Windows v16 marker changed during upgrade")
-    def verify_sources(replaced=False):
-        for index, (relative, path, original, before, changed) in enumerate(inputs):
-            current, data, info = _read(work, relative, source_limit(relative))
-            is_new = replaced and index == 16
-            if (current != path or data != (changed if is_new else original)
-                    or (not is_new and _snapshot(info) != _snapshot(before))
-                    or (is_new and info.st_mtime_ns <= before.st_mtime_ns)):
-                raise ValueError("Windows v16 source changed during upgrade")
-    relative, path, original, before, changed = inputs[-1]
-    fd, name = tempfile.mkstemp(prefix=".cef-header-", dir=path.parent)
-    temporary = Path(name)
-    try:
-        with os.fdopen(fd, "wb") as stream:
-            stream.write(changed); stream.flush(); os.fsync(stream.fileno())
-        temporary.chmod(stat.S_IMODE(before.st_mode))
-        new_time = max(time.time_ns(), before.st_mtime_ns + 1_000_000)
-        os.utime(temporary, ns=(new_time, new_time))
-        verify_sources(); verify_marker(); os.replace(temporary, path)
-    finally:
-        temporary.unlink(missing_ok=True)
-    verify_sources(replaced=True); verify_marker()
-    fd, name = tempfile.mkstemp(prefix=".cef-marker-", dir=work)
-    temporary = Path(name)
-    try:
-        with os.fdopen(fd, "wb") as stream:
-            stream.write(expected + b"\n"); stream.flush(); os.fsync(stream.fileno())
-        temporary.chmod(stat.S_IMODE(marker_before.st_mode))
-        verify_sources(replaced=True); verify_marker(); os.replace(temporary, marker)
-    finally:
-        temporary.unlink(missing_ok=True)
-    _, data, _ = _read(work, MARKER, 8192)
-    if canonical(parse(data)) != expected:
-        raise ValueError("Windows upgraded marker verification failed")
-    verify_sources(replaced=True)
     return "upgraded-v16"

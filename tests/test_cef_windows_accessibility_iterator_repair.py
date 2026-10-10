@@ -141,8 +141,8 @@ class AccessibilityIteratorTests(unittest.TestCase):
 
     def test_new_profile_and_repository_lock_reject_v9_and_failed44(self):
         profile = repair.profile()
-        self.assertEqual(profile['id'], 'windows-frame-tree-node-iterator-assignment-v17')
-        self.assertEqual(len(profile['corrections']), 17)
+        self.assertEqual(profile['id'], 'windows-lock-manager-node-map-v18')
+        self.assertEqual(len(profile['corrections']), 18)
         self.assertEqual(worker.qualification_lock(ROOT)['source_repair'], profile)
         selected = worker.qualification_lock(ROOT)['checkpoint']
         self.assertIn(repair.restore_contract(selected, repair.BASE_KEY)[1],

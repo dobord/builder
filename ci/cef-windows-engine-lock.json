@@ -15,7 +15,7 @@
   },
   "source_repair": {
     "schema": 2,
-    "id": "windows-frame-tree-node-iterator-assignment-v17",
+    "id": "windows-lock-manager-node-map-v18",
     "chromium_commit": "79460ebecaa5625e57a5fb679a735659e73dc687",
     "v8_commit": "4323497a6a73839e6d5260f6acd7ec0212cb3321",
     "corrections": [
@@ -103,8 +103,13 @@
         "path": "content/browser/renderer_host/frame_tree.h",
         "before_sha256": "6dff457016eb06cc710a53012c80884d089665bbf1346cf8933b4535c060b17f",
         "after_sha256": "968192391f2275c7732e37b1547261e01a424df9633db7e1993d1ff899ecbd77"
+      },
+      {
+        "path": "content/browser/locks/lock_manager.h",
+        "before_sha256": "5da1667d945bccc542dcef1268139f1c923dae0d1d2cd6559840055d1c78a2fd",
+        "after_sha256": "e5bc278ffcaf644f3741e7d6d7102d50b533a1c6eede695647b9010524a4f6f0"
       }
     ],
-    "implementation_sha256": "767183c0edae60e1a6e4a01483d009daead330093da3efc75afd3d6bf4dec4c2"
+    "implementation_sha256": "5056903bb9e0d92f18414f99b3ad5817f6c6e0643b58b36ab9198d17a4165c00"
   }
 }
