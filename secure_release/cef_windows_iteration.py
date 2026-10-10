@@ -743,7 +743,9 @@ def main() -> None:
                 "--work", engine_work, "--logs", engine_logs,
                 "--contract", build_key, "--state", state,
                 "--checkpoint", checkpoint,
-                "--seconds", "9000", "--jobs", "4",
+                # Publish a safe progress checkpoint before another long slice
+                # can lose all outputs to a later compiler failure.
+                "--seconds", "6000", "--jobs", "4",
             ],
             cwd=recipe, env=recipe_env,
             log=temp / "cef-windows-engine-slice.log",

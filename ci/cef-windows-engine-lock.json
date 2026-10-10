@@ -15,7 +15,7 @@
   },
   "source_repair": {
     "schema": 2,
-    "id": "windows-lock-manager-node-map-v18",
+    "id": "windows-affiliated-result-in-place-v19",
     "chromium_commit": "79460ebecaa5625e57a5fb679a735659e73dc687",
     "v8_commit": "4323497a6a73839e6d5260f6acd7ec0212cb3321",
     "corrections": [
@@ -108,8 +108,13 @@
         "path": "content/browser/locks/lock_manager.h",
         "before_sha256": "5da1667d945bccc542dcef1268139f1c923dae0d1d2cd6559840055d1c78a2fd",
         "after_sha256": "e5bc278ffcaf644f3741e7d6d7102d50b533a1c6eede695647b9010524a4f6f0"
+      },
+      {
+        "path": "components/password_manager/core/browser/affiliation/affiliated_match_helper.cc",
+        "before_sha256": "efeb49da7d34594d877dad553efab6a14aef33e209b0aa48780e810785e1301b",
+        "after_sha256": "ce5b8a9575fd441afef0b6416af40596d3d0e040d40b28457a031831870d03f7"
       }
     ],
-    "implementation_sha256": "5056903bb9e0d92f18414f99b3ad5817f6c6e0643b58b36ab9198d17a4165c00"
+    "implementation_sha256": "7d161a04fdb755642b1530a98c64e2c53247384b48f3e0a92d71d04253cd3f65"
   }
 }
