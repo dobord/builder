@@ -136,8 +136,8 @@ class InlineItemsLifetimeTests(unittest.TestCase):
         self.assertIn("return with_offset->offset_map;", method(self.fixed))
         self.assertIn("return *kEmpty;", method(self.fixed))
         self.assertNotIn(b"Wno-", self.fixed); self.assertNotIn(b"#pragma", self.fixed)
-        self.assertEqual(repair.profile()["id"], "windows-lock-manager-node-map-v18")
-        self.assertEqual(len(repair.CORRECTIONS), 18)
+        self.assertEqual(repair.profile()["id"], "windows-affiliated-result-in-place-v19")
+        self.assertEqual(len(repair.CORRECTIONS), 19)
 
     def test_idempotence_newlines_and_unreviewed_sources(self):
         for nl in (b"\n", b"\r\n"):
@@ -247,6 +247,7 @@ class V13TransitionTests(unittest.TestCase):
             self.credit_card: repair.CREDIT_CARD_HEADER,
             self.work / repair.FRAME_TREE_HEADER: repair.FRAME_TREE_HEADER,
             self.work / repair.LOCK_MANAGER_HEADER: repair.LOCK_MANAGER_HEADER,
+            self.work / repair.AFFILIATED_MATCH_SOURCE: repair.AFFILIATED_MATCH_SOURCE,
         }
         for path, snapshot in before.items():
             if path in changed:

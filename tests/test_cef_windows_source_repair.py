@@ -1,4 +1,4 @@
-"""Current V18 source-repair regressions over the preserved historical suite.
+"""Current V19 source-repair regressions over the preserved historical suite.
 
 The implementation-heavy tests remain in cef_windows_source_repair_base so
 profile migrations can update current expectations without rewriting their
@@ -44,10 +44,11 @@ class PaintHeaderTests(base.PaintHeaderTests):
             repair.CREDIT_CARD_HEADER,
             repair.FRAME_TREE_HEADER,
             repair.LOCK_MANAGER_HEADER,
+            repair.AFFILIATED_MATCH_SOURCE,
         ]
         profile = repair.profile()
         self.assertEqual(profile["schema"], 2)
-        self.assertEqual(profile["id"], "windows-lock-manager-node-map-v18")
+        self.assertEqual(profile["id"], "windows-affiliated-result-in-place-v19")
         self.assertEqual(
             [correction["path"] for correction in profile["corrections"]],
             [path.removeprefix("download/chromium/src/") for path in expected_paths],
@@ -90,6 +91,7 @@ class PaintHeaderTests(base.PaintHeaderTests):
             (repair.CREDIT_CARD_HEADER, Path("credit_card_number_validation.h")),
             (repair.FRAME_TREE_HEADER, Path("frame_tree.h")),
             (repair.LOCK_MANAGER_HEADER, Path("lock_manager.h")),
+            (repair.AFFILIATED_MATCH_SOURCE, Path("affiliated_match_helper.cc")),
         )
         for relative, fixture in sources:
             path = self.work / relative

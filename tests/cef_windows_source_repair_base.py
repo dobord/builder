@@ -45,7 +45,8 @@ def populate(work):
                               (repair.API_KEY_HEADER, Path("api_key_request_util.h")),
                               (repair.CREDIT_CARD_HEADER, Path("credit_card_number_validation.h")),
                               (repair.FRAME_TREE_HEADER, Path("frame_tree.h")),
-                              (repair.LOCK_MANAGER_HEADER, Path("lock_manager.h"))):
+                              (repair.LOCK_MANAGER_HEADER, Path("lock_manager.h")),
+                              (repair.AFFILIATED_MATCH_SOURCE, Path("affiliated_match_helper.cc"))):
         path = work / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(public_input("include/v8-template.h")
