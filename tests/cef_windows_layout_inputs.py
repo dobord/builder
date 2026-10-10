@@ -14,6 +14,7 @@ from tests.cef_windows_string_inputs import fixture_bytes as string_fixture
 from tests.cef_windows_lock_inputs import LOCK_MANAGER
 from tests.cef_windows_affiliated_inputs import AFFILIATED_MATCH
 from tests.cef_windows_backend_error_inputs import HEADER as BACKEND_ERROR_HEADER, SOURCE as BACKEND_ERROR_SOURCE
+from tests.cef_windows_permission_inputs import HEADER as PERMISSION_MANAGER_HEADER
 
 V8 = "4323497a6a73839e6d5260f6acd7ec0212cb3321"
 SOURCE_ROOT = os.environ.get("CEF_WINDOWS_LAYOUT_SOURCE_ROOT")
@@ -50,6 +51,8 @@ _GENERATOR = public_input("src/torque/implementation-visitor.cc")
 
 
 def fixture_bytes(name):
+    if name == "permission_request_manager.h":
+        return PERMISSION_MANAGER_HEADER
     if name == "password_store_backend_error.h":
         return BACKEND_ERROR_HEADER
     if name == "password_store_backend_error.cc":

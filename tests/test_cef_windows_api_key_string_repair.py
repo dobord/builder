@@ -83,8 +83,8 @@ class ApiKeyStringRepairTests(unittest.TestCase):
         self.assertIn(b"std::optional<std::string> GetAPIKey", self.fixed)
         self.assertEqual(repair.CORRECTIONS[14][0], repair.API_KEY_HEADER)
         self.assertEqual(repair.v15_profile()["id"], "windows-api-key-string-include-v15")
-        self.assertEqual(repair.profile()["id"], "windows-password-backend-error-nothrow-v20")
-        self.assertEqual(len(repair.CORRECTIONS), 21)
+        self.assertEqual(repair.profile()["id"], "windows-permission-source-const-key-v21")
+        self.assertEqual(len(repair.CORRECTIONS), 22)
 
     def test_newlines_idempotence_and_unreviewed_inputs(self):
         for nl in (b"\n", b"\r\n"):
@@ -221,7 +221,8 @@ class V14TransitionTests(unittest.TestCase):
                         self.work / repair.LOCK_MANAGER_HEADER,
                         self.work / repair.AFFILIATED_MATCH_SOURCE,
                         self.work / repair.BACKEND_ERROR_HEADER,
-                        self.work / repair.BACKEND_ERROR_SOURCE}:
+                        self.work / repair.BACKEND_ERROR_SOURCE,
+                        self.work / repair.PERMISSION_MANAGER_HEADER}:
                 relative = path.relative_to(self.work).as_posix()
                 self.assertEqual(path.read_bytes(), repair.transform(snapshot[0], relative))
                 self.assertGreater(path.stat().st_mtime_ns, snapshot[1])

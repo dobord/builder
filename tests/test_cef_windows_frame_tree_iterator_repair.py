@@ -155,9 +155,9 @@ class FrameTreeRepairTests(unittest.TestCase):
     def test_exact_blob_digests_and_only_four_source_edits(self):
         self.assertEqual(hashlib.sha256(self.fixed).hexdigest(), AFTER)
         self.assertEqual((repair.FRAME_TREE_BEFORE, repair.FRAME_TREE_AFTER), (BEFORE, AFTER))
-        self.assertEqual(len(repair.CORRECTIONS), 21)
+        self.assertEqual(len(repair.CORRECTIONS), 22)
         self.assertEqual(repair.CORRECTIONS[16][0], repair.FRAME_TREE_HEADER)
-        self.assertEqual(repair.profile()['id'], 'windows-password-backend-error-nothrow-v20')
+        self.assertEqual(repair.profile()['id'], 'windows-permission-source-const-key-v21')
         reverted = self.fixed
         for before, after in reversed(repair.CORRECTIONS[16][3]):
             self.assertEqual(reverted.count(after), 1)
@@ -305,7 +305,8 @@ class V16TransitionTests(unittest.TestCase):
             if p in (self.path, self.work / repair.LOCK_MANAGER_HEADER,
                      self.work / repair.AFFILIATED_MATCH_SOURCE,
                      self.work / repair.BACKEND_ERROR_HEADER,
-                     self.work / repair.BACKEND_ERROR_SOURCE):
+                     self.work / repair.BACKEND_ERROR_SOURCE,
+                     self.work / repair.PERMISSION_MANAGER_HEADER):
                 self.assertEqual(p.read_bytes(), repair.transform(saved[0], p.relative_to(self.work).as_posix()))
                 self.assertGreater(p.stat().st_mtime_ns, saved[1])
             elif p != self.marker:

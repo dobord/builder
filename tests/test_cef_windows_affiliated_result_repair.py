@@ -134,7 +134,7 @@ class AffiliatedResultRepairTests(unittest.TestCase):
         self.assertEqual(hashlib.sha256(fixed).hexdigest(), repair.AFFILIATED_MATCH_AFTER)
         old, new = repair.CORRECTIONS[18][3][0]
         self.assertEqual(fixed.replace(new, old, 1), AFFILIATED_MATCH)
-        self.assertEqual(len(repair.CORRECTIONS), 21)
+        self.assertEqual(len(repair.CORRECTIONS), 22)
         self.assertIn(b'#include <variant>\n', AFFILIATED_MATCH)
         self.assertIn(b'StoredCredential(const StoredCredential&) = delete;', public_input(CREDENTIAL))
         self.assertEqual(repair.profile()['corrections'][:16], repair.v16_profile()['corrections'])

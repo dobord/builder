@@ -177,7 +177,7 @@ class LockManagerRepairTests(unittest.TestCase):
         self.assertEqual(hashlib.sha256(fixed).hexdigest(), repair.LOCK_MANAGER_AFTER)
         old, new = repair.CORRECTIONS[17][3][0]
         self.assertEqual(fixed.replace(new, old, 1), LOCK_MANAGER)
-        self.assertEqual(len(repair.CORRECTIONS), 21)
+        self.assertEqual(len(repair.CORRECTIONS), 22)
         self.assertEqual(repair.profile()['corrections'][:16], repair.v16_profile()['corrections'])
         self.assertIn(b'#include <map>\n', LOCK_MANAGER)
         # Other flat maps, Lock ownership and all grant/release methods remain exact.
