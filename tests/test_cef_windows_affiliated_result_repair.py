@@ -13,7 +13,7 @@ import unittest
 from unittest import mock
 
 from secure_release import cef_windows_source_repair as repair
-from tests.cef_windows_affiliated_inputs import AFFILIATED_MATCH, CREDENTIAL, public_input
+from tests.cef_windows_affiliated_inputs import AFFILIATED_MATCH, BIND_INTERNAL, CREDENTIAL, public_input
 from tests.test_cef_windows_frame_tree_iterator_repair import populate_v16
 
 
@@ -29,8 +29,15 @@ def native_probe(raw):
     if credential.count(first) != 1 or credential.count(last) != 1:
         raise ValueError('Unexpected exact public credential constructors')
     declarations = credential[credential.index(first):credential.index(last) + len(last)].decode()
+    bind = public_input(BIND_INTERNAL)
+    begin_trait = b'template <int i>\nstruct BindArgument {\n'
+    end_trait = b'\n// Helper to assert that parameter `i` of type `Arg` can be bound'
+    if bind.count(begin_trait) != 1 or bind.count(end_trait) != 1:
+        raise ValueError('Unexpected pinned BindArgument trait boundaries')
+    traits = bind[bind.index(begin_trait):bind.index(end_trait)].decode()
     prefix = r'''
 #include <cassert>
+#include <concepts>
 #include <functional>
 #include <memory>
 #include <type_traits>
@@ -56,6 +63,13 @@ using LoginsResult = std::vector<StoredCredential>;
 struct PasswordStoreBackendError { int code; };
 using LoginsResultOrError = std::variant<LoginsResult,PasswordStoreBackendError>;
 namespace base {
+template<class T> inline constexpr bool IsRawPtr=false;
+template<class T> inline constexpr bool IsRawPtrMayDangle=false;
+template<class T> inline constexpr bool IsUnretainedMayDangle=false;
+template<class T,class U> inline constexpr bool UnretainedAndRawPtrHaveCompatibleTraits=false;
+'''
+    prefix += traits
+    prefix += r'''
 template<class Signature> using OnceCallback = std::function<Signature>;
 struct OnceClosure {
   struct State {
@@ -74,9 +88,12 @@ struct OnceClosure {
   }
 };
 template<class Arg> OnceClosure BindOnce(OnceCallback<void(LoginsResultOrError)> callback,Arg value) {
-  // Chromium BindImplWouldSucceed validates construction of the callback
-  // parameter from its bound argument. Exercise the native variant resolver.
-  static_assert(std::is_constructible_v<LoginsResultOrError,Arg>);
+  // Instantiate the verbatim pinned Chromium forwarding diagnostics, including
+  // the lvalue convertibility control that triggers MSVC's variant resolver.
+  using Forwarded=typename BindArgument<0>::template ForwardedAs<Arg&&>::template ToParamWithType<LoginsResultOrError>;
+  static_assert(Forwarded::kCanBeForwardedToBoundFunctor);
+  static_assert(!Forwarded::kIsUnwrappedForwardableNonConstReference);
+  static_assert(Forwarded::kWouldBeForwardableWithPassed);
   return OnceClosure(std::move(callback),LoginsResultOrError(std::move(value)));
 }
 }
@@ -143,7 +160,7 @@ class AffiliatedResultRepairTests(unittest.TestCase):
                 source.write_text(native_probe(raw), encoding='utf-8')
                 result = subprocess.run(helper.command(source, exe), cwd=root,
                     capture_output=True, text=True, errors='replace', timeout=90)
-                if label == 'original' and os.name == 'nt':
+                if label == 'original':
                     self.assertNotIn(result.returncode, (0, 90))
                     self.assertIn('construct_at', result.stdout + result.stderr)
                     self.assertIn('StoredCredential', result.stdout + result.stderr)
@@ -152,7 +169,7 @@ class AffiliatedResultRepairTests(unittest.TestCase):
                     self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                     subprocess.run([str(exe)], check=True, capture_output=True, timeout=20)
         print('CEF_AFFILIATED_RESULT_V19_NATIVE windows_variant_failed=' + str(os.name == 'nt').lower()
-              + ' fixed_runs=true in_place=true move_only=true stable_form_pointers=true once=true'
+              + ' original_variant_failed=true fixed_runs=true in_place=true move_only=true stable_form_pointers=true once=true'
                 ' no_element_moves=true no_leaks=true public_blob=true edits=1'
                 ' before_sha256=' + repair.AFFILIATED_MATCH_BEFORE + ' after_sha256=' + repair.AFFILIATED_MATCH_AFTER)
 

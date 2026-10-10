@@ -79,6 +79,7 @@ jobs:
             /content/browser/locks/lock_manager.h
             /components/password_manager/core/browser/affiliation/affiliated_match_helper.cc
             /components/password_manager/core/browser/password_store/stored_credential.h
+            /base/functional/bind_internal.h
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
         with:
           python-version: '3.12'
