@@ -141,12 +141,12 @@ class AccessibilityIteratorTests(unittest.TestCase):
 
     def test_new_profile_and_repository_lock_reject_v9_and_failed44(self):
         profile = repair.profile()
-        self.assertEqual(profile['id'], 'windows-permission-source-const-key-v21')
-        self.assertEqual(len(profile['corrections']), 22)
+        self.assertEqual(profile['id'], 'windows-watermark-string-include-v22')
+        self.assertEqual(len(profile['corrections']), 23)
         self.assertEqual(worker.qualification_lock(ROOT)['source_repair'], profile)
         selected = worker.qualification_lock(ROOT)['checkpoint']
         self.assertIn(repair.restore_contract(selected, repair.BASE_KEY)[1],
-                      ('legacy', 'resume', 'upgrade-v14', 'upgrade-v15', 'upgrade-v16', 'upgrade-v19'))
+                      ('legacy', 'resume', 'upgrade-v14', 'upgrade-v15', 'upgrade-v16', 'upgrade-v19', 'upgrade-v21'))
         self.assertEqual(repair.restore_contract(repair.LEGACY, repair.BASE_KEY), (repair.BASE_KEY, 'legacy'))
         for old in (dict(repair.LEGACY, build_key=V9_KEY),
                     dict(repair.LEGACY, run=37207948153)):

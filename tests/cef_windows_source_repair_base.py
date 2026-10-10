@@ -49,7 +49,8 @@ def populate(work):
                               (repair.AFFILIATED_MATCH_SOURCE, Path("affiliated_match_helper.cc")),
                               (repair.BACKEND_ERROR_HEADER, Path("password_store_backend_error.h")),
                               (repair.BACKEND_ERROR_SOURCE, Path("password_store_backend_error.cc")),
-                              (repair.PERMISSION_MANAGER_HEADER, Path("permission_request_manager.h"))):
+                              (repair.PERMISSION_MANAGER_HEADER, Path("permission_request_manager.h")),
+                              (repair.WATERMARK_HEADER, Path("watermark_settings.h"))):
         path = work / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(public_input("include/v8-template.h")

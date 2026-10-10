@@ -85,6 +85,7 @@ jobs:
             /components/permissions/permission_request_manager.h
             /components/permissions/permission_request_manager.cc
             /base/allocator/partition_allocator/src/partition_alloc/pointers/raw_ref.h
+            /chrome/browser/enterprise/watermark/settings.h
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
         with:
           python-version: '3.12'
@@ -131,7 +132,20 @@ jobs:
           CEF_WINDOWS_AFFILIATED_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
           CEF_WINDOWS_BACKEND_ERROR_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
           CEF_WINDOWS_PERMISSION_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_WATERMARK_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
         run: python -m unittest discover -s tests -p test_cef_windows_source_repair.py -v
+      - name: Test reviewed Windows watermark string V22 repair
+        env:
+          CEF_REPAIR_RECIPE_DIR: ${{ github.workspace }}/private-cef
+          CEF_WINDOWS_LAYOUT_SOURCE_ROOT: ${{ github.workspace }}/public-v8
+          CEF_WINDOWS_ACCESSIBILITY_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_STRING_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_LOCK_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_AFFILIATED_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_BACKEND_ERROR_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_PERMISSION_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_WATERMARK_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+        run: python -m unittest tests.test_cef_windows_watermark_string_repair -v
       - name: Test reviewed Windows credit-card string repair
         env:
           CEF_REPAIR_RECIPE_DIR: ${{ github.workspace }}/private-cef

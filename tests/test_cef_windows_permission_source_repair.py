@@ -116,7 +116,7 @@ class PermissionSourceRepairTests(unittest.TestCase):
         old, new = repair.CORRECTIONS[21][3][0]
         self.assertEqual(fixed.replace(new, old, 1), HEADER)
         self.assertIn(b'std::vector<base::raw_ref<PermissionRequest>> validated_requests_;', fixed)
-        self.assertEqual(len(repair.CORRECTIONS), 22)
+        self.assertEqual(len(repair.CORRECTIONS), 23)
         self.assertEqual(repair.profile()['corrections'][:19], repair.v19_profile()['corrections'])
 
     def test_native_original_const_lookup_failure_and_fixed_identity_erasure(self):

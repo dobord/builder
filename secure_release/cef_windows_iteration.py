@@ -90,6 +90,12 @@ def checkpoint_workspace_paths(
     if crypto.canonical(selected) == crypto.canonical(source_repair.UPGRADE_V14):
         # Exact authenticated #51 predates the public work-path summary fields.
         return legacy, short
+    if crypto.canonical(selected) == crypto.canonical(source_repair.UPGRADE_V21):
+        if (not isinstance(producer_summary, dict)
+                or producer_summary.get("workspace_path_verified") is not True
+                or producer_summary.get("checkpoint_work_identity") != str(short)):
+            raise ValueError("Reviewed V21 checkpoint lacks exact short-workspace proof")
+        return short, short
     if crypto.canonical(selected) == crypto.canonical(source_repair.UPGRADE_V19):
         if (not isinstance(producer_summary, dict)
                 or producer_summary.get("workspace_path_verified") is not True
