@@ -80,6 +80,8 @@ jobs:
             /components/password_manager/core/browser/affiliation/affiliated_match_helper.cc
             /components/password_manager/core/browser/password_store/stored_credential.h
             /base/functional/bind_internal.h
+            /components/password_manager/core/browser/password_store/password_store_backend_error.h
+            /components/password_manager/core/browser/password_store/password_store_backend_error.cc
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
         with:
           python-version: '3.12'
@@ -124,6 +126,7 @@ jobs:
           CEF_WINDOWS_FRAME_TREE_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
           CEF_WINDOWS_LOCK_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
           CEF_WINDOWS_AFFILIATED_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_BACKEND_ERROR_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
         run: python -m unittest discover -s tests -p test_cef_windows_source_repair.py -v
       - name: Test reviewed Windows credit-card string repair
         env:
@@ -139,6 +142,7 @@ jobs:
           CEF_WINDOWS_FRAME_TREE_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
           CEF_WINDOWS_LOCK_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
           CEF_WINDOWS_AFFILIATED_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_BACKEND_ERROR_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
         run: python -m unittest tests.test_cef_windows_frame_tree_iterator_repair -v
       - name: Test reviewed Windows lock-manager V18 repair
         env:
@@ -148,6 +152,7 @@ jobs:
           CEF_WINDOWS_STRING_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
           CEF_WINDOWS_LOCK_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
           CEF_WINDOWS_AFFILIATED_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_BACKEND_ERROR_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
         run: python -m unittest tests.test_cef_windows_lock_manager_repair -v
       - name: Test reviewed Windows affiliated-result V19 repair
         env:
@@ -157,7 +162,18 @@ jobs:
           CEF_WINDOWS_STRING_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
           CEF_WINDOWS_LOCK_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
           CEF_WINDOWS_AFFILIATED_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_BACKEND_ERROR_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
         run: python -m unittest tests.test_cef_windows_affiliated_result_repair -v
+      - name: Test reviewed Windows backend-error V20 repair
+        env:
+          CEF_REPAIR_RECIPE_DIR: ${{ github.workspace }}/private-cef
+          CEF_WINDOWS_LAYOUT_SOURCE_ROOT: ${{ github.workspace }}/public-v8
+          CEF_WINDOWS_ACCESSIBILITY_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_STRING_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_LOCK_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_AFFILIATED_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_BACKEND_ERROR_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+        run: python -m unittest tests.test_cef_windows_backend_error_repair -v
       - name: Test bounded Windows diagnostics
         run: python -m unittest discover -s tests -p test_cef_windows_diagnostics.py -v
       - name: Test authenticated ciphertext-only diagnostic transport

@@ -83,8 +83,8 @@ class ApiKeyStringRepairTests(unittest.TestCase):
         self.assertIn(b"std::optional<std::string> GetAPIKey", self.fixed)
         self.assertEqual(repair.CORRECTIONS[14][0], repair.API_KEY_HEADER)
         self.assertEqual(repair.v15_profile()["id"], "windows-api-key-string-include-v15")
-        self.assertEqual(repair.profile()["id"], "windows-affiliated-result-in-place-v19")
-        self.assertEqual(len(repair.CORRECTIONS), 19)
+        self.assertEqual(repair.profile()["id"], "windows-password-backend-error-nothrow-v20")
+        self.assertEqual(len(repair.CORRECTIONS), 21)
 
     def test_newlines_idempotence_and_unreviewed_inputs(self):
         for nl in (b"\n", b"\r\n"):
@@ -219,7 +219,9 @@ class V14TransitionTests(unittest.TestCase):
         for path, snapshot in before.items():
             if path in {self.path, self.credit_card, self.work / repair.FRAME_TREE_HEADER,
                         self.work / repair.LOCK_MANAGER_HEADER,
-                        self.work / repair.AFFILIATED_MATCH_SOURCE}:
+                        self.work / repair.AFFILIATED_MATCH_SOURCE,
+                        self.work / repair.BACKEND_ERROR_HEADER,
+                        self.work / repair.BACKEND_ERROR_SOURCE}:
                 relative = path.relative_to(self.work).as_posix()
                 self.assertEqual(path.read_bytes(), repair.transform(snapshot[0], relative))
                 self.assertGreater(path.stat().st_mtime_ns, snapshot[1])

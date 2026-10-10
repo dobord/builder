@@ -279,7 +279,9 @@ class V11TransitionTests(unittest.TestCase):
                             self.work / repair.CREDIT_CARD_HEADER,
                             self.work / repair.FRAME_TREE_HEADER,
                             self.work / repair.LOCK_MANAGER_HEADER,
-                            self.work / repair.AFFILIATED_MATCH_SOURCE, self.marker):
+                            self.work / repair.AFFILIATED_MATCH_SOURCE,
+                            self.work / repair.BACKEND_ERROR_HEADER,
+                            self.work / repair.BACKEND_ERROR_SOURCE, self.marker):
                 self.assertEqual((path.read_bytes(), path.stat().st_mtime_ns), snap)
         self.assertGreater(self.path.stat().st_mtime_ns, before[self.path][1])
         self.assertEqual(parse(self.marker.read_bytes())["build_key"], self.key)

@@ -136,8 +136,8 @@ class InlineItemsLifetimeTests(unittest.TestCase):
         self.assertIn("return with_offset->offset_map;", method(self.fixed))
         self.assertIn("return *kEmpty;", method(self.fixed))
         self.assertNotIn(b"Wno-", self.fixed); self.assertNotIn(b"#pragma", self.fixed)
-        self.assertEqual(repair.profile()["id"], "windows-affiliated-result-in-place-v19")
-        self.assertEqual(len(repair.CORRECTIONS), 19)
+        self.assertEqual(repair.profile()["id"], "windows-password-backend-error-nothrow-v20")
+        self.assertEqual(len(repair.CORRECTIONS), 21)
 
     def test_idempotence_newlines_and_unreviewed_sources(self):
         for nl in (b"\n", b"\r\n"):
@@ -248,6 +248,8 @@ class V13TransitionTests(unittest.TestCase):
             self.work / repair.FRAME_TREE_HEADER: repair.FRAME_TREE_HEADER,
             self.work / repair.LOCK_MANAGER_HEADER: repair.LOCK_MANAGER_HEADER,
             self.work / repair.AFFILIATED_MATCH_SOURCE: repair.AFFILIATED_MATCH_SOURCE,
+            self.work / repair.BACKEND_ERROR_HEADER: repair.BACKEND_ERROR_HEADER,
+            self.work / repair.BACKEND_ERROR_SOURCE: repair.BACKEND_ERROR_SOURCE,
         }
         for path, snapshot in before.items():
             if path in changed:

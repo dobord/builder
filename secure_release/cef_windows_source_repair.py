@@ -1,9 +1,9 @@
-"""Nineteen reviewed Windows source corrections, bound to a new build contract.
+"""Twenty-one reviewed Windows source corrections, bound to a new build contract.
 
 The baseline CEF checkout and native checkpoint codec stay unchanged. Only the
 exact reviewed producers below may cross into this profile, after authenticated
 restore under its OLD contract. New checkpoints carry the NEW contract and a
-verified source marker covering all nineteen files. Neither receipts nor fixtures
+verified source marker covering all twenty-one files. Neither receipts nor fixtures
 constitute runtime proof.
 """
 from __future__ import annotations
@@ -77,6 +77,12 @@ LOCK_MANAGER_AFTER = "e5bc278ffcaf644f3741e7d6d7102d50b533a1c6eede695647b9010524
 AFFILIATED_MATCH_SOURCE = "download/chromium/src/components/password_manager/core/browser/affiliation/affiliated_match_helper.cc"
 AFFILIATED_MATCH_BEFORE = "efeb49da7d34594d877dad553efab6a14aef33e209b0aa48780e810785e1301b"
 AFFILIATED_MATCH_AFTER = "ce5b8a9575fd441afef0b6416af40596d3d0e040d40b28457a031831870d03f7"
+BACKEND_ERROR_HEADER = "download/chromium/src/components/password_manager/core/browser/password_store/password_store_backend_error.h"
+BACKEND_ERROR_SOURCE = "download/chromium/src/components/password_manager/core/browser/password_store/password_store_backend_error.cc"
+BACKEND_ERROR_HEADER_BEFORE = "670caf88a0a98fc25d516d672ca7d3a28d56f9d414580efa9bd057d1e239f291"
+BACKEND_ERROR_HEADER_AFTER = "61f89eaf1043c024a3605ee38a33fa67e7a95f60b479129edeb26db293235ad2"
+BACKEND_ERROR_SOURCE_BEFORE = "4b19a74de291fd09caf9e516033114f5ae8348fdd69e81eecbacacd4658b6cdf"
+BACKEND_ERROR_SOURCE_AFTER = "8b99f25b7c099934136e7d337c2ba8b4420ecb92fca5d52ba7762896c5ef3833"
 # Ordered, closed set of corrections; no caller-selected paths or patches.
 CORRECTIONS = (
     (HEADER, BEFORE, AFTER, (
@@ -188,6 +194,22 @@ CORRECTIONS = (
          b'                     LoginsResultOrError(std::in_place_type<LoginsResult>,\n'
          b'                                         std::move(forms))));\n'),
     )),
+    (BACKEND_ERROR_HEADER, BACKEND_ERROR_HEADER_BEFORE, BACKEND_ERROR_HEADER_AFTER, (
+        (b'  PasswordStoreBackendError(PasswordStoreBackendError&& rhs);\n',
+         b'  PasswordStoreBackendError(PasswordStoreBackendError&& rhs) noexcept;\n'),
+        (b'  PasswordStoreBackendError& operator=(PasswordStoreBackendError&& rhs);\n',
+         b'  PasswordStoreBackendError& operator=(PasswordStoreBackendError&& rhs) noexcept;\n'),
+    )),
+    (BACKEND_ERROR_SOURCE, BACKEND_ERROR_SOURCE_BEFORE, BACKEND_ERROR_SOURCE_AFTER, (
+        (b'PasswordStoreBackendError::PasswordStoreBackendError(\n'
+         b'    PasswordStoreBackendError&& rhs) = default;\n',
+         b'PasswordStoreBackendError::PasswordStoreBackendError(\n'
+         b'    PasswordStoreBackendError&& rhs) noexcept = default;\n'),
+        (b'PasswordStoreBackendError& PasswordStoreBackendError::operator=(\n'
+         b'    PasswordStoreBackendError&& rhs) = default;\n',
+         b'PasswordStoreBackendError& PasswordStoreBackendError::operator=(\n'
+         b'    PasswordStoreBackendError&& rhs) noexcept = default;\n'),
+    )),
 )
 BASE_KEY = "60a369f6b051ba651cb301af299e7dadcc99608d0db6894bccab87b953817602"
 LEGACY = {
@@ -260,6 +282,18 @@ UPGRADE_V16 = {
     "build_key": "a82f375c37244173719bea5cec2324bf8e1e48dca684cc41710689db6078e0b5"
 }
 
+
+
+V19_KEY = "1c37bef0e74b261ca8520fa2c98413f13d905c894afcd97558c95d3aec41bb69"
+UPGRADE_V19 = {
+    "run": 38044124418, "attempt": 1,
+    "producer_sha": "8e3a700e34fd004bf1a3effcbe52049455f7ba8e",
+    "artifact_id": 11670614648,
+    "artifact_sha256": "c28ed4ac43e47adf182a6a2335d1ede7fb07a47b2c71a14b6a766258505c0460",
+    "summary_artifact_id": 11670574716,
+    "summary_artifact_sha256": "8dc30b29490833852363800faa4371cbe6ae4c824c5fb5d79377aa6c3e81539d",
+    "build_key": V19_KEY,
+}
 
 
 def v11_profile() -> dict:
@@ -352,9 +386,29 @@ def v16_profile() -> dict:
     return value
 
 
+def v19_profile() -> dict:
+    """Immutable, independently hash-bound source profile of qualified V19 checkpoint."""
+    value = {
+        "schema": 2, "id": "windows-affiliated-result-in-place-v19",
+        "chromium_commit": CHROMIUM, "v8_commit": V8,
+        "corrections": [
+            {"path": path.removeprefix("download/chromium/src/"),
+             "before_sha256": before, "after_sha256": after}
+            for path, before, after, _ in CORRECTIONS[:19]
+        ],
+        "implementation_sha256": "7d161a04fdb755642b1530a98c64e2c53247384b48f3e0a92d71d04253cd3f65",
+    }
+    digest = hashlib.sha256(canonical({
+        "schema": 2, "base_build_key": BASE_KEY, "source_repair": value,
+    })).hexdigest()
+    if digest != V19_KEY:
+        raise ValueError("Previous Windows v19 source profile changed")
+    return value
+
+
 def profile() -> dict:
     return {
-        "schema": 2, "id": "windows-affiliated-result-in-place-v19",
+        "schema": 2, "id": "windows-password-backend-error-nothrow-v20",
         "chromium_commit": CHROMIUM,
         "v8_commit": V8,
         "corrections": [
@@ -381,6 +435,9 @@ def restore_contract(selected: dict | None, base_key: str) -> tuple[str, str]:
     if not isinstance(selected, dict):
         raise ValueError("Invalid Windows source repair checkpoint")
     # Canonical comparison distinguishes booleans from integer identifiers.
+    if canonical(selected) == canonical(UPGRADE_V19):
+        v19_profile()
+        return V19_KEY, "upgrade-v19"
     if canonical(selected) == canonical(UPGRADE_V16):
         v16_profile()
         return V16_KEY, "upgrade-v16"
@@ -404,7 +461,8 @@ def verify_summary(value: dict, selected: dict) -> None:
             raise ValueError("Legacy Windows checkpoint claims a repaired profile")
         return
     expected_profile = (
-        v16_profile() if origin == "upgrade-v16"
+        v19_profile() if origin == "upgrade-v19"
+        else v16_profile() if origin == "upgrade-v16"
         else v15_profile() if origin == "upgrade-v15"
         else prior_profile() if origin == "upgrade-v14"
         else profile()
@@ -498,7 +556,7 @@ def source_limit(relative: str) -> int:
 
 
 def apply(work: Path, contract: str, origin: str) -> str:
-    if origin not in {"fresh", "legacy", "resume", "upgrade-v11", "upgrade-v13", "upgrade-v14", "upgrade-v15", "upgrade-v16"} or contract != build_key(BASE_KEY):
+    if origin not in {"fresh", "legacy", "resume", "upgrade-v11", "upgrade-v13", "upgrade-v14", "upgrade-v15", "upgrade-v16", "upgrade-v19"} or contract != build_key(BASE_KEY):
         raise ValueError("Invalid Windows source repair invocation")
     if not work.is_absolute() or work != work.resolve(strict=True):
         raise ValueError("Noncanonical Windows source repair workspace")
@@ -511,6 +569,8 @@ def apply(work: Path, contract: str, origin: str) -> str:
     for relative, _, _, _ in CORRECTIONS:
         path, original, before = _read(work, relative, source_limit(relative))
         inputs.append((relative, path, original, before, transform(original, relative)))
+    if origin == "upgrade-v19":
+        return _upgrade_v19(work, expected, inputs)
     if origin == "upgrade-v16":
         return _upgrade_v16(work, expected, inputs)
     if origin == "upgrade-v15":
@@ -568,8 +628,8 @@ def _upgrade_v11(work: Path, expected: bytes, inputs: list) -> str:
     marker, marker_data, marker_before = _read(work, MARKER, 8192)
     previous = canonical({"schema": 1, "kind": "cef-windows-source-repair",
                           "build_key": V11_KEY, "source_repair": v11_profile()})
-    if (canonical(parse(marker_data)) != previous or len(inputs) != 19
-            or tuple(item[0] for item in inputs[11:]) != (INLINE_HEADER, DOM_HEADER, INLINE_ITEMS_SOURCE, API_KEY_HEADER, CREDIT_CARD_HEADER, FRAME_TREE_HEADER, LOCK_MANAGER_HEADER, AFFILIATED_MATCH_SOURCE)
+    if (canonical(parse(marker_data)) != previous or len(inputs) != 21
+            or tuple(item[0] for item in inputs[11:]) != (INLINE_HEADER, DOM_HEADER, INLINE_ITEMS_SOURCE, API_KEY_HEADER, CREDIT_CARD_HEADER, FRAME_TREE_HEADER, LOCK_MANAGER_HEADER, AFFILIATED_MATCH_SOURCE, BACKEND_ERROR_HEADER, BACKEND_ERROR_SOURCE)
             or any(original != changed for _, _, original, _, changed in inputs[:11])
             or any(original == changed for _, _, original, _, changed in inputs[11:])):
         raise ValueError("Windows v11 source/marker transition mismatch")
@@ -589,7 +649,7 @@ def _upgrade_v11(work: Path, expected: bytes, inputs: list) -> str:
                     or (is_new and info.st_mtime_ns <= before.st_mtime_ns)):
                 raise ValueError("Windows v11 source changed during upgrade")
 
-    # All eight later sources were validated before any write. After each replacement,
+    # All ten later sources were validated before any write. After each replacement,
     # recheck the complete source set and old marker; a partial upgrade is fatal.
     for replaced, (relative, path, original, before, changed) in enumerate(inputs[11:]):
         fd, name = tempfile.mkstemp(prefix=".cef-header-", dir=path.parent)
@@ -617,7 +677,7 @@ def _upgrade_v11(work: Path, expected: bytes, inputs: list) -> str:
             stream.flush()
             os.fsync(stream.fileno())
         temporary.chmod(stat.S_IMODE(marker_before.st_mode))
-        verify_sources(replaced=8)
+        verify_sources(replaced=10)
         verify_marker()
         os.replace(temporary, marker)
     finally:
@@ -625,7 +685,7 @@ def _upgrade_v11(work: Path, expected: bytes, inputs: list) -> str:
     _, data, _ = _read(work, MARKER, 8192)
     if canonical(parse(data)) != expected:
         raise ValueError("Windows upgraded marker verification failed")
-    verify_sources(replaced=8)
+    verify_sources(replaced=10)
     return "upgraded-v11"
 
 
@@ -634,8 +694,8 @@ def _upgrade_v13(work: Path, expected: bytes, inputs: list) -> str:
     marker, marker_data, marker_before = _read(work, MARKER, 8192)
     previous = canonical({"schema": 1, "kind": "cef-windows-source-repair",
                           "build_key": V13_KEY, "source_repair": v13_profile()})
-    if (canonical(parse(marker_data)) != previous or len(inputs) != 19
-            or tuple(item[0] for item in inputs[13:]) != (INLINE_ITEMS_SOURCE, API_KEY_HEADER, CREDIT_CARD_HEADER, FRAME_TREE_HEADER, LOCK_MANAGER_HEADER, AFFILIATED_MATCH_SOURCE)
+    if (canonical(parse(marker_data)) != previous or len(inputs) != 21
+            or tuple(item[0] for item in inputs[13:]) != (INLINE_ITEMS_SOURCE, API_KEY_HEADER, CREDIT_CARD_HEADER, FRAME_TREE_HEADER, LOCK_MANAGER_HEADER, AFFILIATED_MATCH_SOURCE, BACKEND_ERROR_HEADER, BACKEND_ERROR_SOURCE)
             or any(original != changed for _, _, original, _, changed in inputs[:13])
             or any(original == changed for _, _, original, _, changed in inputs[13:])):
         raise ValueError("Windows v13 source/marker transition mismatch")
@@ -674,23 +734,23 @@ def _upgrade_v13(work: Path, expected: bytes, inputs: list) -> str:
         with os.fdopen(fd, "wb") as stream:
             stream.write(expected + b"\n"); stream.flush(); os.fsync(stream.fileno())
         temporary.chmod(stat.S_IMODE(marker_before.st_mode))
-        verify_sources(replaced=6); verify_marker(); os.replace(temporary, marker)
+        verify_sources(replaced=8); verify_marker(); os.replace(temporary, marker)
     finally:
         temporary.unlink(missing_ok=True)
     _, data, _ = _read(work, MARKER, 8192)
     if canonical(parse(data)) != expected:
         raise ValueError("Windows upgraded marker verification failed")
-    verify_sources(replaced=6)
+    verify_sources(replaced=8)
     return "upgraded-v13"
 
 
 def _upgrade_v14(work: Path, expected: bytes, inputs: list) -> str:
-    """Upgrade exact authenticated v14 state through its five later corrections."""
+    """Upgrade exact authenticated v14 state through its seven later corrections."""
     marker, marker_data, marker_before = _read(work, MARKER, 8192)
     previous = canonical({"schema": 1, "kind": "cef-windows-source-repair",
                           "build_key": V14_KEY, "source_repair": prior_profile()})
-    if (canonical(parse(marker_data)) != previous or len(inputs) != 19
-            or tuple(item[0] for item in inputs[14:]) != (API_KEY_HEADER, CREDIT_CARD_HEADER, FRAME_TREE_HEADER, LOCK_MANAGER_HEADER, AFFILIATED_MATCH_SOURCE)
+    if (canonical(parse(marker_data)) != previous or len(inputs) != 21
+            or tuple(item[0] for item in inputs[14:]) != (API_KEY_HEADER, CREDIT_CARD_HEADER, FRAME_TREE_HEADER, LOCK_MANAGER_HEADER, AFFILIATED_MATCH_SOURCE, BACKEND_ERROR_HEADER, BACKEND_ERROR_SOURCE)
             or any(original != changed for _, _, original, _, changed in inputs[:14])
             or any(original == changed for _, _, original, _, changed in inputs[14:])):
         raise ValueError("Windows v14 source/marker transition mismatch")
@@ -725,23 +785,23 @@ def _upgrade_v14(work: Path, expected: bytes, inputs: list) -> str:
         with os.fdopen(fd, "wb") as stream:
             stream.write(expected + b"\n"); stream.flush(); os.fsync(stream.fileno())
         temporary.chmod(stat.S_IMODE(marker_before.st_mode))
-        verify_sources(replaced=5); verify_marker(); os.replace(temporary, marker)
+        verify_sources(replaced=7); verify_marker(); os.replace(temporary, marker)
     finally:
         temporary.unlink(missing_ok=True)
     _, data, _ = _read(work, MARKER, 8192)
     if canonical(parse(data)) != expected:
         raise ValueError("Windows upgraded marker verification failed")
-    verify_sources(replaced=5)
+    verify_sources(replaced=7)
     return "upgraded-v14"
 
 
 def _upgrade_v15(work: Path, expected: bytes, inputs: list) -> str:
-    """Upgrade exact authenticated v15 state through its four later corrections."""
+    """Upgrade exact authenticated v15 state through its six later corrections."""
     marker, marker_data, marker_before = _read(work, MARKER, 8192)
     previous = canonical({"schema": 1, "kind": "cef-windows-source-repair",
                           "build_key": V15_KEY, "source_repair": v15_profile()})
-    if (canonical(parse(marker_data)) != previous or len(inputs) != 19
-            or tuple(item[0] for item in inputs[15:]) != (CREDIT_CARD_HEADER, FRAME_TREE_HEADER, LOCK_MANAGER_HEADER, AFFILIATED_MATCH_SOURCE)
+    if (canonical(parse(marker_data)) != previous or len(inputs) != 21
+            or tuple(item[0] for item in inputs[15:]) != (CREDIT_CARD_HEADER, FRAME_TREE_HEADER, LOCK_MANAGER_HEADER, AFFILIATED_MATCH_SOURCE, BACKEND_ERROR_HEADER, BACKEND_ERROR_SOURCE)
             or any(original != changed for _, _, original, _, changed in inputs[:15])
             or any(original == changed for _, _, original, _, changed in inputs[15:])):
         raise ValueError("Windows v15 source/marker transition mismatch")
@@ -776,23 +836,23 @@ def _upgrade_v15(work: Path, expected: bytes, inputs: list) -> str:
         with os.fdopen(fd, "wb") as stream:
             stream.write(expected + b"\n"); stream.flush(); os.fsync(stream.fileno())
         temporary.chmod(stat.S_IMODE(marker_before.st_mode))
-        verify_sources(replaced=4); verify_marker(); os.replace(temporary, marker)
+        verify_sources(replaced=6); verify_marker(); os.replace(temporary, marker)
     finally:
         temporary.unlink(missing_ok=True)
     _, data, _ = _read(work, MARKER, 8192)
     if canonical(parse(data)) != expected:
         raise ValueError("Windows upgraded marker verification failed")
-    verify_sources(replaced=4)
+    verify_sources(replaced=6)
     return "upgraded-v15"
 
 
 def _upgrade_v16(work: Path, expected: bytes, inputs: list) -> str:
-    """Upgrade exact authenticated V16 state through its three later corrections."""
+    """Upgrade exact authenticated V16 state through its five later corrections."""
     marker, marker_data, marker_before = _read(work, MARKER, 8192)
     previous = canonical({"schema": 1, "kind": "cef-windows-source-repair",
                           "build_key": V16_KEY, "source_repair": v16_profile()})
-    if (canonical(parse(marker_data)) != previous or len(inputs) != 19
-            or tuple(item[0] for item in inputs[16:]) != (FRAME_TREE_HEADER, LOCK_MANAGER_HEADER, AFFILIATED_MATCH_SOURCE)
+    if (canonical(parse(marker_data)) != previous or len(inputs) != 21
+            or tuple(item[0] for item in inputs[16:]) != (FRAME_TREE_HEADER, LOCK_MANAGER_HEADER, AFFILIATED_MATCH_SOURCE, BACKEND_ERROR_HEADER, BACKEND_ERROR_SOURCE)
             or any(original != changed for _, _, original, _, changed in inputs[:16])
             or any(original == changed for _, _, original, _, changed in inputs[16:])):
         raise ValueError("Windows v16 source/marker transition mismatch")
@@ -827,11 +887,62 @@ def _upgrade_v16(work: Path, expected: bytes, inputs: list) -> str:
         with os.fdopen(fd, "wb") as stream:
             stream.write(expected + b"\n"); stream.flush(); os.fsync(stream.fileno())
         temporary.chmod(stat.S_IMODE(marker_before.st_mode))
-        verify_sources(replaced=3); verify_marker(); os.replace(temporary, marker)
+        verify_sources(replaced=5); verify_marker(); os.replace(temporary, marker)
     finally:
         temporary.unlink(missing_ok=True)
     _, data, _ = _read(work, MARKER, 8192)
     if canonical(parse(data)) != expected:
         raise ValueError("Windows upgraded marker verification failed")
-    verify_sources(replaced=3)
+    verify_sources(replaced=5)
     return "upgraded-v16"
+
+
+def _upgrade_v19(work: Path, expected: bytes, inputs: list) -> str:
+    """Upgrade qualified V19 state by making the two error move operations nothrow."""
+    marker, marker_data, marker_before = _read(work, MARKER, 8192)
+    previous = canonical({"schema": 1, "kind": "cef-windows-source-repair",
+                          "build_key": V19_KEY, "source_repair": v19_profile()})
+    if (canonical(parse(marker_data)) != previous or len(inputs) != 21
+            or tuple(item[0] for item in inputs[19:]) != (BACKEND_ERROR_HEADER, BACKEND_ERROR_SOURCE)
+            or any(original != changed for _, _, original, _, changed in inputs[:19])
+            or any(original == changed for _, _, original, _, changed in inputs[19:])):
+        raise ValueError("Windows v19 source/marker transition mismatch")
+    def verify_marker():
+        path, data, info = _read(work, MARKER, 8192)
+        if path != marker or data != marker_data or _snapshot(info) != _snapshot(marker_before):
+            raise ValueError("Windows v19 marker changed during upgrade")
+    def verify_sources(replaced=0):
+        for index, (relative, path, original, before, changed) in enumerate(inputs):
+            current, data, info = _read(work, relative, source_limit(relative))
+            is_new = 19 <= index < 19 + replaced
+            if (current != path or data != (changed if is_new else original)
+                    or (not is_new and _snapshot(info) != _snapshot(before))
+                    or (is_new and info.st_mtime_ns <= before.st_mtime_ns)):
+                raise ValueError("Windows v19 source changed during upgrade")
+    for replaced, (relative, path, original, before, changed) in enumerate(inputs[19:]):
+        fd, name = tempfile.mkstemp(prefix=".cef-header-", dir=path.parent)
+        temporary = Path(name)
+        try:
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(changed); stream.flush(); os.fsync(stream.fileno())
+            temporary.chmod(stat.S_IMODE(before.st_mode))
+            new_time = max(time.time_ns(), before.st_mtime_ns + 1_000_000)
+            os.utime(temporary, ns=(new_time, new_time))
+            verify_sources(replaced); verify_marker(); os.replace(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)
+        verify_sources(replaced + 1); verify_marker()
+    fd, name = tempfile.mkstemp(prefix=".cef-marker-", dir=work)
+    temporary = Path(name)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(expected + b"\n"); stream.flush(); os.fsync(stream.fileno())
+        temporary.chmod(stat.S_IMODE(marker_before.st_mode))
+        verify_sources(replaced=2); verify_marker(); os.replace(temporary, marker)
+    finally:
+        temporary.unlink(missing_ok=True)
+    _, data, _ = _read(work, MARKER, 8192)
+    if canonical(parse(data)) != expected:
+        raise ValueError("Windows upgraded marker verification failed")
+    verify_sources(replaced=2)
+    return "upgraded-v19"

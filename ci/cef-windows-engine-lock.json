@@ -15,7 +15,7 @@
   },
   "source_repair": {
     "schema": 2,
-    "id": "windows-affiliated-result-in-place-v19",
+    "id": "windows-password-backend-error-nothrow-v20",
     "chromium_commit": "79460ebecaa5625e57a5fb679a735659e73dc687",
     "v8_commit": "4323497a6a73839e6d5260f6acd7ec0212cb3321",
     "corrections": [
@@ -113,8 +113,18 @@
         "path": "components/password_manager/core/browser/affiliation/affiliated_match_helper.cc",
         "before_sha256": "efeb49da7d34594d877dad553efab6a14aef33e209b0aa48780e810785e1301b",
         "after_sha256": "ce5b8a9575fd441afef0b6416af40596d3d0e040d40b28457a031831870d03f7"
+      },
+      {
+        "path": "components/password_manager/core/browser/password_store/password_store_backend_error.h",
+        "before_sha256": "670caf88a0a98fc25d516d672ca7d3a28d56f9d414580efa9bd057d1e239f291",
+        "after_sha256": "61f89eaf1043c024a3605ee38a33fa67e7a95f60b479129edeb26db293235ad2"
+      },
+      {
+        "path": "components/password_manager/core/browser/password_store/password_store_backend_error.cc",
+        "before_sha256": "4b19a74de291fd09caf9e516033114f5ae8348fdd69e81eecbacacd4658b6cdf",
+        "after_sha256": "8b99f25b7c099934136e7d337c2ba8b4420ecb92fca5d52ba7762896c5ef3833"
       }
     ],
-    "implementation_sha256": "7d161a04fdb755642b1530a98c64e2c53247384b48f3e0a92d71d04253cd3f65"
+    "implementation_sha256": "44b746ab5314826099ffaebab342858b8fbaeb178460c78189cffb0f2676c519"
   }
 }
