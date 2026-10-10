@@ -155,11 +155,11 @@ class FrameTreeRepairTests(unittest.TestCase):
     def test_exact_blob_digests_and_only_four_source_edits(self):
         self.assertEqual(hashlib.sha256(self.fixed).hexdigest(), AFTER)
         self.assertEqual((repair.FRAME_TREE_BEFORE, repair.FRAME_TREE_AFTER), (BEFORE, AFTER))
-        self.assertEqual(len(repair.CORRECTIONS), 17)
-        self.assertEqual(repair.CORRECTIONS[-1][0], repair.FRAME_TREE_HEADER)
-        self.assertEqual(repair.profile()['id'], 'windows-frame-tree-node-iterator-assignment-v17')
+        self.assertEqual(len(repair.CORRECTIONS), 18)
+        self.assertEqual(repair.CORRECTIONS[16][0], repair.FRAME_TREE_HEADER)
+        self.assertEqual(repair.profile()['id'], 'windows-lock-manager-node-map-v18')
         reverted = self.fixed
-        for before, after in reversed(repair.CORRECTIONS[-1][3]):
+        for before, after in reversed(repair.CORRECTIONS[16][3]):
             self.assertEqual(reverted.count(after), 1)
             reverted = reverted.replace(after, before, 1)
         self.assertEqual(reverted, self.old)
@@ -180,7 +180,7 @@ class FrameTreeRepairTests(unittest.TestCase):
             self.assertEqual(repair.transform(changed, repair.FRAME_TREE_HEADER), changed)
         invalid = [b'', self.old + b'\n', self.fixed + b'\n',
                    self.old.replace(b'\n', b'\r\n', 1)]
-        for anchor, replacement in repair.CORRECTIONS[-1][3]:
+        for anchor, replacement in repair.CORRECTIONS[16][3]:
             invalid.append(self.old.replace(anchor, replacement, 1))
         for raw in invalid:
             with self.assertRaises(ValueError):
@@ -294,7 +294,7 @@ class V16TransitionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             repair.verify_summary(value, repair.UPGRADE_V16)
 
-    def test_only_frame_and_marker_change_objects_and_resume_preserved(self):
+    def test_only_later_sources_and_marker_change_objects_and_resume_preserved(self):
         obj = self.work / 'out/keep.obj'; obj.parent.mkdir(); obj.write_bytes(b'v16-object')
         def snapshot(p):
             st = p.stat()
@@ -302,8 +302,8 @@ class V16TransitionTests(unittest.TestCase):
         before = {p: snapshot(p) for p in self.work.rglob('*') if p.is_file()}
         self.assertEqual(self.apply(), 'upgraded-v16')
         for p, saved in before.items():
-            if p == self.path:
-                self.assertEqual(p.read_bytes(), repair.transform(saved[0], repair.FRAME_TREE_HEADER))
+            if p in (self.path, self.work / repair.LOCK_MANAGER_HEADER):
+                self.assertEqual(p.read_bytes(), repair.transform(saved[0], p.relative_to(self.work).as_posix()))
                 self.assertGreater(p.stat().st_mtime_ns, saved[1])
             elif p != self.marker:
                 self.assertEqual(snapshot(p), saved)

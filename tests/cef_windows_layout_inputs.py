@@ -11,6 +11,7 @@ from pathlib import Path
 import urllib.request
 from tests.cef_windows_accessibility_inputs import fixture_bytes as accessibility_fixture
 from tests.cef_windows_string_inputs import fixture_bytes as string_fixture
+from tests.cef_windows_lock_inputs import LOCK_MANAGER
 
 V8 = "4323497a6a73839e6d5260f6acd7ec0212cb3321"
 SOURCE_ROOT = os.environ.get("CEF_WINDOWS_LAYOUT_SOURCE_ROOT")
@@ -47,6 +48,8 @@ _GENERATOR = public_input("src/torque/implementation-visitor.cc")
 
 
 def fixture_bytes(name):
+    if name == "lock_manager.h":
+        return LOCK_MANAGER
     if name == "wtf_string.h":
         return string_fixture(name)
     if name in {"browser_accessibility.h", "browser_accessibility.cc"}:

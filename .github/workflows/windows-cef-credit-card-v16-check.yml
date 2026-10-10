@@ -1,4 +1,4 @@
-name: Windows CEF frame-tree V17 verification
+name: Windows CEF lock-manager V18 verification
 on:
   push:
     branches: [repair/windows-cef-60-credit-card-string-v16]
@@ -23,6 +23,7 @@ jobs:
       CEF_WINDOWS_API_KEY_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
       CEF_WINDOWS_CREDIT_CARD_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
       CEF_WINDOWS_FRAME_TREE_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+      CEF_WINDOWS_LOCK_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
     steps:
       - name: Preserve exact public source newlines
         run: git config --global core.autocrlf false
@@ -74,6 +75,7 @@ jobs:
             /google_apis/common/api_key_request_util.h
             /components/autofill/core/common/credit_card_number_validation.h
             /content/browser/renderer_host/frame_tree.h
+            /content/browser/locks/lock_manager.h
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
         with: {python-version: '3.12'}
       - name: Verify exact inputs and offline runtime
@@ -507,7 +509,7 @@ jobs:
               + ' after_sha256='
               + after
           )
-      - name: Bind exact V17 implementation digest
+      - name: Bind exact V18 implementation digest
         shell: python
         run: |
           import copy, hashlib, json, os, sys
@@ -524,22 +526,22 @@ jobs:
           value = parse(raw)
           digest = hashlib.sha256(Path('secure_release/cef_windows_source_repair.py').read_bytes()).hexdigest()
           current = repair.profile()
-          if current['id'] != 'windows-frame-tree-node-iterator-assignment-v17' or len(current['corrections']) != 17:
-              raise RuntimeError('Not the reviewed V17 source profile')
+          if current['id'] != 'windows-lock-manager-node-map-v18' or len(current['corrections']) != 18:
+              raise RuntimeError('Not the reviewed V18 source profile')
           if current['implementation_sha256'] != digest:
               raise RuntimeError('Source implementation digest mismatch')
           if (value.get('schema') != 2 or value.get('platform') != 'windows'
                   or value.get('vcpkg_commit') != worker.VCPKG
                   or value.get('cef_recipe_commit') != worker.CEF
                   or canonical(value.get('checkpoint')) != canonical(repair.UPGRADE_V16)):
-              raise RuntimeError('V17 candidate changed exact V16 checkpoint input or source pins')
+              raise RuntimeError('V18 candidate changed exact V16 checkpoint input or source pins')
           branch_digest = value.get('source_repair', {}).get('implementation_sha256')
           if branch_digest not in ('0' * 64, digest):
               raise RuntimeError('Unreviewed implementation binding; only explicit bootstrap or exact lock permitted')
           expected_branch = copy.deepcopy(current)
           expected_branch['implementation_sha256'] = branch_digest
           if canonical(value.get('source_repair')) != canonical(expected_branch):
-              raise RuntimeError('V17 correction/profile mismatch')
+              raise RuntimeError('V18 correction/profile mismatch')
           original = copy.deepcopy(value)
           matched = branch_digest == digest
           if not matched:
@@ -550,16 +552,16 @@ jobs:
                   raise RuntimeError('Binding changed more than the implementation digest')
               path.write_bytes((json.dumps(value, indent=2) + '\n').encode('utf-8'))
           binding = {
-              'schema': 1, 'kind': 'public-windows-frame-tree-v17-lock-binding',
+              'schema': 1, 'kind': 'public-windows-lock-manager-v18-lock-binding',
               'branch_lock_matched': matched,
               'branch_implementation_sha256': branch_digest,
               'implementation_sha256': digest,
               'branch_lock_sha256': hashlib.sha256(raw).hexdigest(),
               'effective_lock_sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
           }
-          Path('frame-tree-v17-lock-binding.json').write_bytes((json.dumps(binding, indent=2) + '\n').encode())
-          print('CEF_FRAME_TREE_V17_LOCK_BINDING branch_lock_matched=' + str(matched).lower() + ' implementation_sha256=' + digest)
-      - name: V17 focused and complete regressions
+          Path('lock-manager-v18-lock-binding.json').write_bytes((json.dumps(binding, indent=2) + '\n').encode())
+          print('CEF_LOCK_MANAGER_V18_LOCK_BINDING branch_lock_matched=' + str(matched).lower() + ' implementation_sha256=' + digest)
+      - name: V18 focused and complete regressions
         shell: python
         run: |
           import ast, hashlib, json, os, re, subprocess, sys
@@ -569,11 +571,11 @@ jobs:
               raise RuntimeError('Helper step must run in the exact checkout')
           sys.path.insert(0, str(workspace))
           from secure_release.crypto import parse
-          tested = ('.github/workflows/cef-windows-engine-iteration.yml', '.github/workflows/windows-cef-credit-card-v16-check.yml', 'ci/cef-windows-engine-lock.json', 'secure_release/cef_windows_iteration.py', 'secure_release/cef_windows_source_repair.py', 'tests/cef_windows_callable_repair_base.py', 'tests/cef_windows_layout_inputs.py', 'tests/cef_windows_source_repair_base.py', 'tests/cef_windows_tail_size_repair_base.py', 'tests/fixtures/cef-windows/credit_card_number_validation.h', 'tests/fixtures/cef-windows/frame_tree.h', 'tests/test_cef_windows_accessibility_iterator_repair.py', 'tests/test_cef_windows_api_key_string_repair.py', 'tests/test_cef_windows_callable_repair.py', 'tests/test_cef_windows_credit_card_string_repair.py', 'tests/test_cef_windows_dom_memory_repair.py', 'tests/test_cef_windows_frame_tree_iterator_repair.py', 'tests/test_cef_windows_inline_empty_repair.py', 'tests/test_cef_windows_inline_items_lifetime_repair.py', 'tests/test_cef_windows_source_repair.py', 'tests/test_cef_windows_string_iterator_repair.py', 'tests/test_cef_windows_tail_size_repair.py', 'tests/test_cef_windows_workspace_path_migration.py')
+          tested = ('.github/workflows/cef-windows-engine-iteration.yml', '.github/workflows/windows-cef-credit-card-v16-check.yml', 'ci/cef-windows-engine-lock.json', 'secure_release/cef_windows_iteration.py', 'secure_release/cef_windows_source_repair.py', 'tests/cef_windows_callable_repair_base.py', 'tests/cef_windows_layout_inputs.py', 'tests/cef_windows_lock_inputs.py', 'tests/cef_windows_source_repair_base.py', 'tests/cef_windows_tail_size_repair_base.py', 'tests/fixtures/cef-windows/credit_card_number_validation.h', 'tests/fixtures/cef-windows/frame_tree.h', 'tests/test_cef_windows_accessibility_iterator_repair.py', 'tests/test_cef_windows_api_key_string_repair.py', 'tests/test_cef_windows_callable_repair.py', 'tests/test_cef_windows_credit_card_string_repair.py', 'tests/test_cef_windows_dom_memory_repair.py', 'tests/test_cef_windows_frame_tree_iterator_repair.py', 'tests/test_cef_windows_inline_empty_repair.py', 'tests/test_cef_windows_inline_items_lifetime_repair.py', 'tests/test_cef_windows_lock_manager_repair.py', 'tests/test_cef_windows_source_repair.py', 'tests/test_cef_windows_string_iterator_repair.py', 'tests/test_cef_windows_tail_size_repair.py', 'tests/test_cef_windows_workspace_path_migration.py')
           for path in tested:
               if path.endswith('.py'):
                   ast.parse(Path(path).read_bytes(), filename=path)
-          binding = parse(Path('frame-tree-v17-lock-binding.json').read_bytes())
+          binding = parse(Path('lock-manager-v18-lock-binding.json').read_bytes())
           diagnostic = parse(Path('frame-tree-iterator-diagnostic-results.json').read_bytes())
           if (diagnostic.get('sha') != os.environ['GITHUB_SHA']
                   or diagnostic.get('run') != int(os.environ['GITHUB_RUN_ID'])
@@ -581,21 +583,22 @@ jobs:
                   or diagnostic.get('proof', {}).get('fixed_find_if_runs') is not True):
               raise RuntimeError('Original exact native diagnostic missing')
           stages = {
-              'focused': ['tests.test_cef_windows_frame_tree_iterator_repair',
+              'focused': ['tests.test_cef_windows_lock_manager_repair',
+                          'tests.test_cef_windows_frame_tree_iterator_repair',
                           'tests.test_cef_windows_workspace_path_migration',
                           'tests.test_cef_windows_credit_card_string_repair', '-v'],
               'repair': ['discover', '-s', 'tests', '-p', 'test_cef_windows_source_repair.py', '-v'],
               'full': ['discover', '-s', 'tests', '-v'],
           }
           report = {
-              'schema': 1, 'kind': 'public-windows-frame-tree-v17-test-results',
+              'schema': 1, 'kind': 'public-windows-lock-manager-v18-test-results',
               'sha': os.environ['GITHUB_SHA'], 'run': int(os.environ['GITHUB_RUN_ID']),
               'attempt': int(os.environ['GITHUB_RUN_ATTEMPT']), 'os': os.environ['RUNNER_OS'],
               'binding': binding, 'diagnostic_proof': diagnostic['proof'],
               'blobs': {p: hashlib.sha256(Path(p).read_bytes()).hexdigest() for p in tested},
               'stages': {},
           }
-          output = Path('frame-tree-v17-ci-results.json')
+          output = Path('lock-manager-v18-ci-results.json')
           def save():
               output.write_bytes((json.dumps(report, sort_keys=True, indent=2) + '\n').encode())
           save()
@@ -613,13 +616,24 @@ jobs:
                   'tests': int(count[-1][0]) if len(count) == 1 else None,
                   'skipped': int(skips[-1]) if skips else 0,
                   'frame_proof': proofs('CEF_FRAME_TREE_V17_NATIVE'),
+                  'lock_proof': proofs('CEF_LOCK_MANAGER_V18_NATIVE'),
                   'credit_proof': proofs('CEF_CREDIT_CARD_STRING_NATIVE'),
                   'workspace_proof': proofs('CEF_WINDOWS_WORKSPACE_PATH_NATIVE'),
               }
               save()
               if result.returncode or len(count) != 1:
-                  raise RuntimeError('Required V17 regression failed: ' + name)
+                  raise RuntimeError('Required V18 regression failed: ' + name)
               if name == 'focused':
+                  lock = report['stages'][name]['lock_proof']
+                  required_lock = ('fixed_runs=true', 'fifo=true', 'shared_grants=true', 'preemption=true',
+                      'no_wait=true', 'stable_nodes=true', 'iterator_release=true', 'algorithms_unchanged=true',
+                      'public_blob=true', 'edits=1',
+                      'before_sha256=5da1667d945bccc542dcef1268139f1c923dae0d1d2cd6559840055d1c78a2fd',
+                      'after_sha256=e5bc278ffcaf644f3741e7d6d7102d50b533a1c6eede695647b9010524a4f6f0')
+                  if len(lock) != 1 or not all(x in lock[0].split() for x in required_lock):
+                      raise RuntimeError('Missing exact V18 native lock-manager proof')
+                  if 'windows_copy_failed=' + str(os.environ['RUNNER_OS'] == 'Windows').lower() not in lock[0].split():
+                      raise RuntimeError('Original platform-specific lock-map control is missing')
                   frame = report['stages'][name]['frame_proof']
                   required = ('original_nonassignable=true', 'fixed_assignable=true', 'fixed_find_if_runs=true',
                       'policy_copied=true', 'independent_queue=true', 'node_range_unchanged=true', 'public_blob=true', 'edits=4',
@@ -642,7 +656,7 @@ jobs:
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
-          name: public-windows-frame-tree-v17-tests-${{ runner.os }}-${{ github.run_id }}
-          path: frame-tree-v17-ci-results.json
+          name: public-windows-lock-manager-v18-tests-${{ runner.os }}-${{ github.run_id }}
+          path: lock-manager-v18-ci-results.json
           if-no-files-found: error
           retention-days: 7
