@@ -17,6 +17,7 @@ from tests.cef_windows_backend_error_inputs import HEADER as BACKEND_ERROR_HEADE
 from tests.cef_windows_permission_inputs import HEADER as PERMISSION_MANAGER_HEADER
 from tests.cef_windows_pdfium_inputs import SPAN as PDFIUM_SPAN
 from tests.cef_windows_vertical_tab_inputs import SOURCE as VERTICAL_TAB_SOURCE
+from tests.cef_windows_profile_launch_inputs import HEADER as PROFILE_LAUNCH_HEADER
 
 V8 = "4323497a6a73839e6d5260f6acd7ec0212cb3321"
 SOURCE_ROOT = os.environ.get("CEF_WINDOWS_LAYOUT_SOURCE_ROOT")
@@ -53,6 +54,8 @@ _GENERATOR = public_input("src/torque/implementation-visitor.cc")
 
 
 def fixture_bytes(name):
+    if name == "profile_launch_observer.h":
+        return PROFILE_LAUNCH_HEADER
     if name == "vertical_tab_strip_region_view.cc":
         return VERTICAL_TAB_SOURCE
     if name == "span.h":

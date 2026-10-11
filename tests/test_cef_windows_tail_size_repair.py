@@ -1,4 +1,4 @@
-"""Current V24 profile expectations over the preserved Torque regression suite."""
+"""Current V25 profile expectations over the preserved Torque regression suite."""
 from __future__ import annotations
 
 from secure_release import cef_windows_source_repair as repair
@@ -9,9 +9,9 @@ class TorqueTailSizeTests(base.TorqueTailSizeTests):
     def test_exact_profile_keeps_source_set_and_rejects_v6(self):
         self.assertEqual(
             repair.profile()["id"],
-            "windows-vertical-tab-math-overload-v24",
+            "windows-profile-launch-transparent-compare-v25",
         )
-        self.assertEqual(len(repair.CORRECTIONS), 25)
+        self.assertEqual(len(repair.CORRECTIONS), 26)
         self.assertEqual(
             repair.profile()["v8_commit"],
             "4323497a6a73839e6d5260f6acd7ec0212cb3321",

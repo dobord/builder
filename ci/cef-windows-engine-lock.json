@@ -15,7 +15,7 @@
   },
   "source_repair": {
     "schema": 2,
-    "id": "windows-vertical-tab-math-overload-v24",
+    "id": "windows-profile-launch-transparent-compare-v25",
     "chromium_commit": "79460ebecaa5625e57a5fb679a735659e73dc687",
     "v8_commit": "4323497a6a73839e6d5260f6acd7ec0212cb3321",
     "pdfium_commit": "8f3e90282ef137adf7d380079c3178b24407104a",
@@ -144,8 +144,13 @@
         "path": "chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc",
         "before_sha256": "a1bee63d0203242f2de5c936ef64b93e0281a519376c7b3ea0612629b0b8e9df",
         "after_sha256": "9a8b40ad18393c4d5dd8a145cbd0588d1f5310314f651eb449662243747774f9"
+      },
+      {
+        "path": "chrome/browser/ui/startup/profile_launch_observer.h",
+        "before_sha256": "78665a0bfc54bd50a687f9d1fef8dcf843d95ed1a04e6036a7d9241a0051abb5",
+        "after_sha256": "394006c22407286d64a06ab01c39a1e5564d9f7ffc902f1b79baaf193195fc4d"
       }
     ],
-    "implementation_sha256": "8211fffbd7a8cd35f5325b11ea0b48f7665476bf6dca808b6c6d0ffbcdd209aa"
+    "implementation_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
   }
 }

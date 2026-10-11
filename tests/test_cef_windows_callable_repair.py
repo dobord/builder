@@ -1,4 +1,4 @@
-"""Current V24 profile expectations over the preserved callable regression suite."""
+"""Current V25 profile expectations over the preserved callable regression suite."""
 from __future__ import annotations
 
 import copy
@@ -16,9 +16,9 @@ class CallableRepairTests(base.CallableRepairTests):
         profile = repair.profile()
         self.assertEqual(
             profile["id"],
-            "windows-vertical-tab-math-overload-v24",
+            "windows-profile-launch-transparent-compare-v25",
         )
-        self.assertEqual(len(profile["corrections"]), 25)
+        self.assertEqual(len(profile["corrections"]), 26)
         self.assertEqual(worker.qualification_lock(base.ROOT)["source_repair"], profile)
         self.assertEqual(
             profile["implementation_sha256"],
