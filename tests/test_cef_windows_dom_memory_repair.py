@@ -90,8 +90,8 @@ class DomMemoryTests(unittest.TestCase):
         self.assertEqual(self.fixed.count(b"#include <memory>"), 1)
         self.assertIn(b"class Node;", self.fixed)
         self.assertNotIn(b"#include <memory>", public_bytes("rust_cxx.h"))
-        self.assertEqual(repair.profile()["id"], "windows-watermark-string-include-v22")
-        self.assertEqual(len(repair.CORRECTIONS), 23)
+        self.assertEqual(repair.profile()["id"], "windows-pdfium-span-comparator-ctad-v23")
+        self.assertEqual(len(repair.CORRECTIONS), 24)
         self.assertEqual(tuple(row[0] for row in repair.CORRECTIONS[11:13]),
                          (repair.INLINE_HEADER, repair.DOM_HEADER))
 
@@ -195,6 +195,7 @@ class DomUpgradeTests(unittest.TestCase):
             self.work / repair.BACKEND_ERROR_SOURCE: repair.BACKEND_ERROR_SOURCE,
             self.work / repair.PERMISSION_MANAGER_HEADER: repair.PERMISSION_MANAGER_HEADER,
             self.work / repair.WATERMARK_HEADER: repair.WATERMARK_HEADER,
+            self.work / repair.PDFIUM_SPAN_HEADER: repair.PDFIUM_SPAN_HEADER,
         }
         for path, snapshot in before.items():
             if path in changed:
@@ -236,6 +237,7 @@ class DomUpgradeTests(unittest.TestCase):
             self.work / repair.BACKEND_ERROR_SOURCE: repair.BACKEND_ERROR_SOURCE,
             self.work / repair.PERMISSION_MANAGER_HEADER: repair.PERMISSION_MANAGER_HEADER,
             self.work / repair.WATERMARK_HEADER: repair.WATERMARK_HEADER,
+            self.work / repair.PDFIUM_SPAN_HEADER: repair.PDFIUM_SPAN_HEADER,
         }
         for path, relative in changed.items():
             raw = path.read_bytes()

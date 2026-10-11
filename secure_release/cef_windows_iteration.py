@@ -744,6 +744,8 @@ def main() -> None:
         stage = "source-repair"
         if git_head(engine_work / "download/chromium/src") != source_repair.CHROMIUM:
             raise ValueError("Windows source repair Chromium revision mismatch")
+        if git_head(engine_work / "download/chromium/src/third_party/pdfium") != source_repair.PDFIUM:
+            raise ValueError("Windows source repair PDFium revision mismatch")
         summary["source_repair_state"] = source_repair.apply(engine_work, build_key, repair_origin)
         summary["source_repair_verified"] = True
 

@@ -15,9 +15,10 @@
   },
   "source_repair": {
     "schema": 2,
-    "id": "windows-watermark-string-include-v22",
+    "id": "windows-pdfium-span-comparator-ctad-v23",
     "chromium_commit": "79460ebecaa5625e57a5fb679a735659e73dc687",
     "v8_commit": "4323497a6a73839e6d5260f6acd7ec0212cb3321",
+    "pdfium_commit": "8f3e90282ef137adf7d380079c3178b24407104a",
     "corrections": [
       {
         "path": "net/websockets/websocket_handshake_challenge.h",
@@ -133,8 +134,13 @@
         "path": "chrome/browser/enterprise/watermark/settings.h",
         "before_sha256": "d7a0cd34ef3fc8bd33a1d13c88699d5ec5a31ee614c12dedc1b72a08cd9c3233",
         "after_sha256": "2810e40f606ff37a20ebccfa00610b2fae1d5377fcea20c08d2b7be39e8676a8"
+      },
+      {
+        "path": "third_party/pdfium/core/fxcrt/span.h",
+        "before_sha256": "98a34192c186cbfb1524b61e0f9ed213e14f8d1d011e7834d240baa7e87bf394",
+        "after_sha256": "88ab22d160c1324129049a1e01bf0355b6aff26a83691d9e60e8ea7cb6a08e3c"
       }
     ],
-    "implementation_sha256": "5d8a168e286c4fe6fa13653582b4b5e2c69c6962f9f9cf481a4582171ce61daf"
+    "implementation_sha256": "618275a82ad7e33d00180fc6f480ef9060edf2845a87b8786a8803783c2b8c7a"
   }
 }
