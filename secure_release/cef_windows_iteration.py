@@ -801,13 +801,16 @@ def main() -> None:
             stage = "engine-runtime"
             summary["ready"] = True
             output("ready", True)
+            # The pinned smoke reports third-party module proof only when its
+            # real browser/renderer module audit is explicitly enabled.
+            runtime_env = dict(recipe_env, CEF_STATIC_STRICT_THIRD_PARTY="1")
             run(
                 [
                     sys.executable,
                     recipe / "vcpkg/ports/cef-static/source_build.py", "build",
                     "--work", engine_work, "--logs", engine_logs, "--jobs", "4",
                 ],
-                cwd=recipe, env=recipe_env,
+                cwd=recipe, env=runtime_env,
                 log=temp / "cef-windows-engine-runtime.log", timeout=21600,
             )
             receipt = json.loads(
