@@ -90,8 +90,8 @@ class DomMemoryTests(unittest.TestCase):
         self.assertEqual(self.fixed.count(b"#include <memory>"), 1)
         self.assertIn(b"class Node;", self.fixed)
         self.assertNotIn(b"#include <memory>", public_bytes("rust_cxx.h"))
-        self.assertEqual(repair.profile()["id"], "windows-wallpaper-search-string-include-v26")
-        self.assertEqual(len(repair.CORRECTIONS), 27)
+        self.assertEqual(repair.profile()["id"], "windows-speech-callback-node-map-v27")
+        self.assertEqual(len(repair.CORRECTIONS), 28)
         self.assertEqual(tuple(row[0] for row in repair.CORRECTIONS[11:13]),
                          (repair.INLINE_HEADER, repair.DOM_HEADER))
 
@@ -199,6 +199,7 @@ class DomUpgradeTests(unittest.TestCase):
             self.work / repair.VERTICAL_TAB_SOURCE: repair.VERTICAL_TAB_SOURCE,
             self.work / repair.PROFILE_LAUNCH_HEADER: repair.PROFILE_LAUNCH_HEADER,
             self.work / repair.WALLPAPER_HEADER: repair.WALLPAPER_HEADER,
+            self.work / repair.SPEECH_CALLBACK_HEADER: repair.SPEECH_CALLBACK_HEADER,
         }
         for path, snapshot in before.items():
             if path in changed:
@@ -244,6 +245,7 @@ class DomUpgradeTests(unittest.TestCase):
             self.work / repair.VERTICAL_TAB_SOURCE: repair.VERTICAL_TAB_SOURCE,
             self.work / repair.PROFILE_LAUNCH_HEADER: repair.PROFILE_LAUNCH_HEADER,
             self.work / repair.WALLPAPER_HEADER: repair.WALLPAPER_HEADER,
+            self.work / repair.SPEECH_CALLBACK_HEADER: repair.SPEECH_CALLBACK_HEADER,
         }
         for path, relative in changed.items():
             raw = path.read_bytes()

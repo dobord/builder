@@ -1,4 +1,4 @@
-name: Windows CEF wallpaper-string V26 verification
+name: Windows CEF speech-callback V27 verification
 on:
   push:
     branches: [repair/windows-cef-60-credit-card-string-v16]
@@ -32,6 +32,7 @@ jobs:
       CEF_WINDOWS_VERTICAL_TAB_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
       CEF_WINDOWS_PROFILE_LAUNCH_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
       CEF_WINDOWS_WALLPAPER_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+      CEF_WINDOWS_SPEECH_CALLBACK_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
     steps:
       - name: Preserve exact public source newlines
         run: git config --global core.autocrlf false
@@ -98,6 +99,8 @@ jobs:
             /chrome/browser/ui/startup/profile_launch_observer.cc
             /base/allocator/partition_allocator/src/partition_alloc/pointers/raw_ptr.h
             /chrome/browser/ui/webui/side_panel/customize_chrome/wallpaper_search/wallpaper_search_string_map.h
+            /chrome/browser/speech/on_device_speech_recognition_impl.h
+            /chrome/browser/speech/on_device_speech_recognition_impl.cc
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: chromium/pdfium
@@ -540,7 +543,7 @@ jobs:
               + ' after_sha256='
               + after
           )
-      - name: Bind exact V26 implementation digest
+      - name: Bind exact V27 implementation digest
         shell: python
         run: |
           import copy, hashlib, json, os, sys
@@ -557,8 +560,8 @@ jobs:
           value = parse(raw)
           digest = hashlib.sha256(Path('secure_release/cef_windows_source_repair.py').read_bytes()).hexdigest()
           current = repair.profile()
-          if current['id'] != 'windows-wallpaper-search-string-include-v26' or len(current['corrections']) != 27:
-              raise RuntimeError('Not the reviewed V26 source profile')
+          if current['id'] != 'windows-speech-callback-node-map-v27' or len(current['corrections']) != 28:
+              raise RuntimeError('Not the reviewed V27 source profile')
           if current.get('pdfium_commit') != '8f3e90282ef137adf7d380079c3178b24407104a':
               raise RuntimeError('V23 PDFium dependency pin mismatch')
           if current['implementation_sha256'] != digest:
@@ -566,15 +569,15 @@ jobs:
           if (value.get('schema') != 2 or value.get('platform') != 'windows'
                   or value.get('vcpkg_commit') != worker.VCPKG
                   or value.get('cef_recipe_commit') != worker.CEF
-                  or canonical(value.get('checkpoint')) != canonical(repair.UPGRADE_V23)):
-              raise RuntimeError('V26 candidate changed exact V23 checkpoint input or source pins')
+                  or canonical(value.get('checkpoint')) != canonical(repair.UPGRADE_V26)):
+              raise RuntimeError('V27 candidate changed exact V26 checkpoint input or source pins')
           branch_digest = value.get('source_repair', {}).get('implementation_sha256')
           if branch_digest not in ('0' * 64, digest):
               raise RuntimeError('Unreviewed implementation binding; only explicit bootstrap or exact lock permitted')
           expected_branch = copy.deepcopy(current)
           expected_branch['implementation_sha256'] = branch_digest
           if canonical(value.get('source_repair')) != canonical(expected_branch):
-              raise RuntimeError('V26 correction/profile mismatch')
+              raise RuntimeError('V27 correction/profile mismatch')
           original = copy.deepcopy(value)
           matched = branch_digest == digest
           if not matched:
@@ -585,16 +588,16 @@ jobs:
                   raise RuntimeError('Binding changed more than the implementation digest')
               path.write_bytes((json.dumps(value, indent=2) + '\n').encode('utf-8'))
           binding = {
-              'schema': 1, 'kind': 'public-windows-wallpaper-string-v26-lock-binding',
+              'schema': 1, 'kind': 'public-windows-speech-callback-v27-lock-binding',
               'branch_lock_matched': matched,
               'branch_implementation_sha256': branch_digest,
               'implementation_sha256': digest,
               'branch_lock_sha256': hashlib.sha256(raw).hexdigest(),
               'effective_lock_sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
           }
-          Path('wallpaper-string-v26-lock-binding.json').write_bytes((json.dumps(binding, indent=2) + '\n').encode())
-          print('CEF_WALLPAPER_STRING_V26_LOCK_BINDING branch_lock_matched=' + str(matched).lower() + ' implementation_sha256=' + digest)
-      - name: V26 focused and complete regressions
+          Path('speech-callback-v27-lock-binding.json').write_bytes((json.dumps(binding, indent=2) + '\n').encode())
+          print('CEF_SPEECH_CALLBACK_V27_LOCK_BINDING branch_lock_matched=' + str(matched).lower() + ' implementation_sha256=' + digest)
+      - name: V27 focused and complete regressions
         shell: python
         run: |
           import ast, hashlib, json, os, re, subprocess, sys
@@ -604,11 +607,11 @@ jobs:
               raise RuntimeError('Helper step must run in the exact checkout')
           sys.path.insert(0, str(workspace))
           from secure_release.crypto import parse
-          tested = ('.github/workflows/cef-windows-engine-iteration.yml', '.github/workflows/windows-cef-credit-card-v16-check.yml', 'ci/cef-windows-engine-lock.json', 'secure_release/cef_windows_iteration.py', 'secure_release/cef_windows_source_repair.py', 'tests/cef_windows_affiliated_inputs.py', 'tests/cef_windows_backend_error_inputs.py', 'tests/cef_windows_callable_repair_base.py', 'tests/cef_windows_layout_inputs.py', 'tests/cef_windows_lock_inputs.py', 'tests/cef_windows_pdfium_inputs.py', 'tests/cef_windows_permission_inputs.py', 'tests/cef_windows_profile_launch_inputs.py', 'tests/cef_windows_source_repair_base.py', 'tests/cef_windows_tail_size_repair_base.py', 'tests/cef_windows_vertical_tab_inputs.py', 'tests/fixtures/cef-windows/credit_card_number_validation.h', 'tests/fixtures/cef-windows/frame_tree.h', 'tests/fixtures/cef-windows/wallpaper_search_string_map.h', 'tests/fixtures/cef-windows/watermark_settings.h', 'tests/test_cef_windows_accessibility_iterator_repair.py', 'tests/test_cef_windows_affiliated_result_repair.py', 'tests/test_cef_windows_api_key_string_repair.py', 'tests/test_cef_windows_backend_error_repair.py', 'tests/test_cef_windows_callable_repair.py', 'tests/test_cef_windows_credit_card_string_repair.py', 'tests/test_cef_windows_dom_memory_repair.py', 'tests/test_cef_windows_frame_tree_iterator_repair.py', 'tests/test_cef_windows_inline_empty_repair.py', 'tests/test_cef_windows_inline_items_lifetime_repair.py', 'tests/test_cef_windows_lock_manager_repair.py', 'tests/test_cef_windows_pdfium_span_repair.py', 'tests/test_cef_windows_permission_source_repair.py', 'tests/test_cef_windows_profile_launch_repair.py', 'tests/test_cef_windows_source_repair.py', 'tests/test_cef_windows_string_iterator_repair.py', 'tests/test_cef_windows_tail_size_repair.py', 'tests/test_cef_windows_vertical_tab_math_repair.py', 'tests/test_cef_windows_wallpaper_string_repair.py', 'tests/test_cef_windows_watermark_string_repair.py', 'tests/test_cef_windows_workspace_path_migration.py')
+          tested = ('.github/workflows/cef-windows-engine-iteration.yml', '.github/workflows/windows-cef-credit-card-v16-check.yml', 'ci/cef-windows-engine-lock.json', 'secure_release/cef_windows_iteration.py', 'secure_release/cef_windows_source_repair.py', 'tests/cef_windows_affiliated_inputs.py', 'tests/cef_windows_backend_error_inputs.py', 'tests/cef_windows_callable_repair_base.py', 'tests/cef_windows_layout_inputs.py', 'tests/cef_windows_lock_inputs.py', 'tests/cef_windows_pdfium_inputs.py', 'tests/cef_windows_permission_inputs.py', 'tests/cef_windows_profile_launch_inputs.py', 'tests/cef_windows_source_repair_base.py', 'tests/cef_windows_speech_callback_inputs.py', 'tests/cef_windows_tail_size_repair_base.py', 'tests/cef_windows_vertical_tab_inputs.py', 'tests/fixtures/cef-windows/credit_card_number_validation.h', 'tests/fixtures/cef-windows/frame_tree.h', 'tests/fixtures/cef-windows/wallpaper_search_string_map.h', 'tests/fixtures/cef-windows/watermark_settings.h', 'tests/test_cef_windows_accessibility_iterator_repair.py', 'tests/test_cef_windows_affiliated_result_repair.py', 'tests/test_cef_windows_api_key_string_repair.py', 'tests/test_cef_windows_backend_error_repair.py', 'tests/test_cef_windows_callable_repair.py', 'tests/test_cef_windows_credit_card_string_repair.py', 'tests/test_cef_windows_dom_memory_repair.py', 'tests/test_cef_windows_frame_tree_iterator_repair.py', 'tests/test_cef_windows_inline_empty_repair.py', 'tests/test_cef_windows_inline_items_lifetime_repair.py', 'tests/test_cef_windows_lock_manager_repair.py', 'tests/test_cef_windows_pdfium_span_repair.py', 'tests/test_cef_windows_permission_source_repair.py', 'tests/test_cef_windows_profile_launch_repair.py', 'tests/test_cef_windows_source_repair.py', 'tests/test_cef_windows_speech_callback_repair.py', 'tests/test_cef_windows_string_iterator_repair.py', 'tests/test_cef_windows_tail_size_repair.py', 'tests/test_cef_windows_vertical_tab_math_repair.py', 'tests/test_cef_windows_wallpaper_string_repair.py', 'tests/test_cef_windows_watermark_string_repair.py', 'tests/test_cef_windows_workspace_path_migration.py')
           for path in tested:
               if path.endswith('.py'):
                   ast.parse(Path(path).read_bytes(), filename=path)
-          binding = parse(Path('wallpaper-string-v26-lock-binding.json').read_bytes())
+          binding = parse(Path('speech-callback-v27-lock-binding.json').read_bytes())
           diagnostic = parse(Path('frame-tree-iterator-diagnostic-results.json').read_bytes())
           if (diagnostic.get('sha') != os.environ['GITHUB_SHA']
                   or diagnostic.get('run') != int(os.environ['GITHUB_RUN_ID'])
@@ -616,7 +619,8 @@ jobs:
                   or diagnostic.get('proof', {}).get('fixed_find_if_runs') is not True):
               raise RuntimeError('Original exact native diagnostic missing')
           stages = {
-              'focused': ['tests.test_cef_windows_wallpaper_string_repair',
+              'focused': ['tests.test_cef_windows_speech_callback_repair',
+                          'tests.test_cef_windows_wallpaper_string_repair',
                           'tests.test_cef_windows_profile_launch_repair',
                           'tests.test_cef_windows_vertical_tab_math_repair',
                           'tests.test_cef_windows_pdfium_span_repair',
@@ -632,14 +636,14 @@ jobs:
               'full': ['discover', '-s', 'tests', '-v'],
           }
           report = {
-              'schema': 1, 'kind': 'public-windows-wallpaper-string-v26-test-results',
+              'schema': 1, 'kind': 'public-windows-speech-callback-v27-test-results',
               'sha': os.environ['GITHUB_SHA'], 'run': int(os.environ['GITHUB_RUN_ID']),
               'attempt': int(os.environ['GITHUB_RUN_ATTEMPT']), 'os': os.environ['RUNNER_OS'],
               'binding': binding, 'diagnostic_proof': diagnostic['proof'],
               'blobs': {p: hashlib.sha256(Path(p).read_bytes()).hexdigest() for p in tested},
               'stages': {},
           }
-          output = Path('wallpaper-string-v26-ci-results.json')
+          output = Path('speech-callback-v27-ci-results.json')
           def save():
               output.write_bytes((json.dumps(report, sort_keys=True, indent=2) + '\n').encode())
           save()
@@ -666,13 +670,23 @@ jobs:
                   'vertical_tab_proof': proofs('CEF_VERTICAL_TAB_MATH_V24_NATIVE'),
                   'profile_launch_proof': proofs('CEF_PROFILE_LAUNCH_V25_NATIVE'),
                   'wallpaper_proof': proofs('CEF_WALLPAPER_STRING_V26_NATIVE'),
+                  'speech_proof': proofs('CEF_SPEECH_CALLBACK_V27_NATIVE'),
                   'credit_proof': proofs('CEF_CREDIT_CARD_STRING_NATIVE'),
                   'workspace_proof': proofs('CEF_WINDOWS_WORKSPACE_PATH_NATIVE'),
               }
               save()
               if result.returncode or len(count) != 1:
-                  raise RuntimeError('Required V26 regression failed: ' + name)
+                  raise RuntimeError('Required V27 regression failed: ' + name)
               if name == 'focused':
+                  speech = report['stages'][name]['speech_proof']
+                  required_speech = ('fixed_runs=true', 'merge=true', 'fifo=true', 'once=true', 'binary_failure=true',
+                      'algorithm_verbatim=true', 'public_blob=true', 'edits=2',
+                      'before_sha256=692bef4ce9786292bf93d602c6fcc01a6e14542ea2acb8a4ccde5ff5fa2a340c',
+                      'after_sha256=0f4ab5ce2fd7a6bfb5bccec0b92aa77ae2fa01519774e7c7dbdbc9e0555bb84f')
+                  if len(speech) != 1 or not all(x in speech[0].split() for x in required_speech):
+                      raise RuntimeError('Missing exact V27 native speech callback proof')
+                  if 'windows_copy_failed=' + str(os.environ['RUNNER_OS'] == 'Windows').lower() not in speech[0].split():
+                      raise RuntimeError('Original platform-specific speech callback control is missing')
                   wallpaper = report['stages'][name]['wallpaper_proof']
                   required_wallpaper = ('fixed_runs=true', 'signatures=5', 'optional_string=true',
                       'direct_string_include=true', 'public_blob=true',
@@ -776,7 +790,7 @@ jobs:
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
-          name: public-windows-wallpaper-string-v26-tests-${{ runner.os }}-${{ github.run_id }}
-          path: wallpaper-string-v26-ci-results.json
+          name: public-windows-speech-callback-v27-tests-${{ runner.os }}-${{ github.run_id }}
+          path: speech-callback-v27-ci-results.json
           if-no-files-found: error
           retention-days: 7

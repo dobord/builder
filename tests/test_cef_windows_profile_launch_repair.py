@@ -100,7 +100,7 @@ class ProfileLaunchRepairTests(unittest.TestCase):
         for old, new in reversed(repair.CORRECTIONS[25][3]):
             fixed = fixed.replace(new, old, 1)
         self.assertEqual(fixed, HEADER)
-        self.assertEqual(len(repair.CORRECTIONS), 27)
+        self.assertEqual(len(repair.CORRECTIONS), 28)
         self.assertEqual(repair.profile()['corrections'][:24], repair.v23_profile()['corrections'])
 
     def test_native_original_const_lookup_failure_fixed_traits_and_mutable_activation(self):
