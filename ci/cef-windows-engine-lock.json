@@ -4,14 +4,14 @@
   "vcpkg_commit": "39dccd415da14d8051559d66069019475d95787c",
   "cef_recipe_commit": "03abd124ebe3b8a57fb78470a75b5aa3ce064e31",
   "checkpoint": {
-    "run": 38073597639,
+    "run": 38103369109,
     "attempt": 1,
-    "producer_sha": "56849f25f39c1e99aa101392807538b07808242f",
-    "artifact_id": 11682106537,
-    "artifact_sha256": "f1d7eb93e743a4400ffdf2cbdd078079e5246453579f0a6c262073ad1469f0bd",
-    "summary_artifact_id": 11681782053,
-    "summary_artifact_sha256": "436c8d3fb1f350c0600aa1d649aedf5ae96348734eaedda1a0d997a04668d5fd",
-    "build_key": "829652636524483559f552ce0cb6e12dc9033eadd8b3851587410636db38c39a"
+    "producer_sha": "5832dca43c30f72f4170575039f507ca656df39c",
+    "artifact_id": 11692611334,
+    "artifact_sha256": "c8f336845811e34cb58348d28f629be6d51b4dbcd918f1ef9145046dcb6caf76",
+    "summary_artifact_id": 11692691301,
+    "summary_artifact_sha256": "afde79b3b3d1fa47d14fc50f25e9744c2a1a238a75b8c2b088bed6cc722d26a4",
+    "build_key": "c6c7957840bf38e7c9aacf541fcb36a02fbf5d7f9c9111d2e1e2f3383ae6ed2f"
   },
   "source_repair": {
     "schema": 2,
