@@ -51,7 +51,8 @@ def populate(work):
                               (repair.BACKEND_ERROR_SOURCE, Path("password_store_backend_error.cc")),
                               (repair.PERMISSION_MANAGER_HEADER, Path("permission_request_manager.h")),
                               (repair.WATERMARK_HEADER, Path("watermark_settings.h")),
-                              (repair.PDFIUM_SPAN_HEADER, Path("span.h"))):
+                              (repair.PDFIUM_SPAN_HEADER, Path("span.h")),
+                              (repair.VERTICAL_TAB_SOURCE, Path("vertical_tab_strip_region_view.cc"))):
         path = work / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(public_input("include/v8-template.h")

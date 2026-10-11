@@ -15,7 +15,7 @@
   },
   "source_repair": {
     "schema": 2,
-    "id": "windows-pdfium-span-comparator-ctad-v23",
+    "id": "windows-vertical-tab-math-overload-v24",
     "chromium_commit": "79460ebecaa5625e57a5fb679a735659e73dc687",
     "v8_commit": "4323497a6a73839e6d5260f6acd7ec0212cb3321",
     "pdfium_commit": "8f3e90282ef137adf7d380079c3178b24407104a",
@@ -139,8 +139,13 @@
         "path": "third_party/pdfium/core/fxcrt/span.h",
         "before_sha256": "98a34192c186cbfb1524b61e0f9ed213e14f8d1d011e7834d240baa7e87bf394",
         "after_sha256": "88ab22d160c1324129049a1e01bf0355b6aff26a83691d9e60e8ea7cb6a08e3c"
+      },
+      {
+        "path": "chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc",
+        "before_sha256": "a1bee63d0203242f2de5c936ef64b93e0281a519376c7b3ea0612629b0b8e9df",
+        "after_sha256": "9a8b40ad18393c4d5dd8a145cbd0588d1f5310314f651eb449662243747774f9"
       }
     ],
-    "implementation_sha256": "618275a82ad7e33d00180fc6f480ef9060edf2845a87b8786a8803783c2b8c7a"
+    "implementation_sha256": "8211fffbd7a8cd35f5325b11ea0b48f7665476bf6dca808b6c6d0ffbcdd209aa"
   }
 }
