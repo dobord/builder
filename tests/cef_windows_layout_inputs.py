@@ -54,6 +54,8 @@ _GENERATOR = public_input("src/torque/implementation-visitor.cc")
 
 
 def fixture_bytes(name):
+    if name == "wallpaper_search_string_map.h":
+        return (FIXTURES / name).read_bytes()
     if name == "profile_launch_observer.h":
         return PROFILE_LAUNCH_HEADER
     if name == "vertical_tab_strip_region_view.cc":

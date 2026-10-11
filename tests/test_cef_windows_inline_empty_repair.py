@@ -286,7 +286,8 @@ class V11TransitionTests(unittest.TestCase):
                             self.work / repair.WATERMARK_HEADER,
                             self.work / repair.PDFIUM_SPAN_HEADER,
                             self.work / repair.VERTICAL_TAB_SOURCE,
-                            self.work / repair.PROFILE_LAUNCH_HEADER, self.marker):
+                            self.work / repair.PROFILE_LAUNCH_HEADER,
+                            self.work / repair.WALLPAPER_HEADER, self.marker):
                 self.assertEqual((path.read_bytes(), path.stat().st_mtime_ns), snap)
         self.assertGreater(self.path.stat().st_mtime_ns, before[self.path][1])
         self.assertEqual(parse(self.marker.read_bytes())["build_key"], self.key)

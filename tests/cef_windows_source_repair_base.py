@@ -53,7 +53,8 @@ def populate(work):
                               (repair.WATERMARK_HEADER, Path("watermark_settings.h")),
                               (repair.PDFIUM_SPAN_HEADER, Path("span.h")),
                               (repair.VERTICAL_TAB_SOURCE, Path("vertical_tab_strip_region_view.cc")),
-                              (repair.PROFILE_LAUNCH_HEADER, Path("profile_launch_observer.h"))):
+                              (repair.PROFILE_LAUNCH_HEADER, Path("profile_launch_observer.h")),
+                              (repair.WALLPAPER_HEADER, Path("wallpaper_search_string_map.h"))):
         path = work / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(public_input("include/v8-template.h")

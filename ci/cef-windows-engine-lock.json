@@ -15,7 +15,7 @@
   },
   "source_repair": {
     "schema": 2,
-    "id": "windows-profile-launch-transparent-compare-v25",
+    "id": "windows-wallpaper-search-string-include-v26",
     "chromium_commit": "79460ebecaa5625e57a5fb679a735659e73dc687",
     "v8_commit": "4323497a6a73839e6d5260f6acd7ec0212cb3321",
     "pdfium_commit": "8f3e90282ef137adf7d380079c3178b24407104a",
@@ -149,8 +149,13 @@
         "path": "chrome/browser/ui/startup/profile_launch_observer.h",
         "before_sha256": "78665a0bfc54bd50a687f9d1fef8dcf843d95ed1a04e6036a7d9241a0051abb5",
         "after_sha256": "394006c22407286d64a06ab01c39a1e5564d9f7ffc902f1b79baaf193195fc4d"
+      },
+      {
+        "path": "chrome/browser/ui/webui/side_panel/customize_chrome/wallpaper_search/wallpaper_search_string_map.h",
+        "before_sha256": "3629a32178863d181a06f66a64e09d4f3af0ca139dcc693c896355e345700005",
+        "after_sha256": "66ec5e52f118ffa9ec87755b963a5da111e6671421d5e394664939ed5d070a7c"
       }
     ],
-    "implementation_sha256": "a65b9d6d8c5a11f8465eb45ba5e526bee79c84e5caed1e1545480d8254f17b8f"
+    "implementation_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
   }
 }
