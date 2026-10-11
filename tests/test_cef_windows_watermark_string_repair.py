@@ -37,7 +37,7 @@ class WatermarkStringRepairTests(unittest.TestCase):
         self.assertEqual(hashlib.sha256(fixed).hexdigest(), repair.WATERMARK_AFTER)
         self.assertEqual(fixed.replace(b'#include <string>\n\n', b'', 1), raw)
         self.assertEqual(fixed.count(b'#include <string>'), 1)
-        self.assertEqual(len(repair.CORRECTIONS), 25)
+        self.assertEqual(len(repair.CORRECTIONS), 26)
 
     def test_newlines_idempotence_and_unreviewed_inputs_rejected(self):
         raw = source_bytes()
@@ -129,7 +129,8 @@ class V21TransitionTests(unittest.TestCase):
         self.assertEqual(self.apply(), 'upgraded-v21')
         for path, saved in before.items():
             if path in (self.path, self.work / repair.PDFIUM_SPAN_HEADER,
-                        self.work / repair.VERTICAL_TAB_SOURCE):
+                        self.work / repair.VERTICAL_TAB_SOURCE,
+                        self.work / repair.PROFILE_LAUNCH_HEADER):
                 self.assertEqual(path.read_bytes(), repair.transform(saved[0], path.relative_to(self.work).as_posix()))
                 self.assertGreater(path.stat().st_mtime_ns, saved[1])
             elif path != self.marker:

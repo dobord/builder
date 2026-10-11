@@ -20,6 +20,7 @@ jobs:
     env:
       CEF_WINDOWS_PDFIUM_SOURCE_ROOT: ${{ github.workspace }}/public-pdfium
       CEF_WINDOWS_VERTICAL_TAB_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+      CEF_WINDOWS_PROFILE_LAUNCH_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -90,6 +91,9 @@ jobs:
             /base/allocator/partition_allocator/src/partition_alloc/pointers/raw_ref.h
             /chrome/browser/enterprise/watermark/settings.h
             /chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+            /chrome/browser/ui/startup/profile_launch_observer.h
+            /chrome/browser/ui/startup/profile_launch_observer.cc
+            /base/allocator/partition_allocator/src/partition_alloc/pointers/raw_ptr.h
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: chromium/pdfium
@@ -181,6 +185,17 @@ jobs:
           CEF_WINDOWS_BACKEND_ERROR_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
           CEF_WINDOWS_PERMISSION_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
         run: python -m unittest tests.test_cef_windows_vertical_tab_math_repair -v
+      - name: Test reviewed Windows profile-launch V25 repair
+        env:
+          CEF_REPAIR_RECIPE_DIR: ${{ github.workspace }}/private-cef
+          CEF_WINDOWS_LAYOUT_SOURCE_ROOT: ${{ github.workspace }}/public-v8
+          CEF_WINDOWS_ACCESSIBILITY_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_STRING_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_LOCK_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_AFFILIATED_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_BACKEND_ERROR_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_PERMISSION_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+        run: python -m unittest tests.test_cef_windows_profile_launch_repair -v
       - name: Test reviewed Windows credit-card string repair
         env:
           CEF_REPAIR_RECIPE_DIR: ${{ github.workspace }}/private-cef

@@ -1,4 +1,4 @@
-"""Current V24 source-repair regressions over the preserved historical suite.
+"""Current V25 source-repair regressions over the preserved historical suite.
 
 The implementation-heavy tests remain in cef_windows_source_repair_base so
 profile migrations can update current expectations without rewriting their
@@ -51,10 +51,11 @@ class PaintHeaderTests(base.PaintHeaderTests):
             repair.WATERMARK_HEADER,
             repair.PDFIUM_SPAN_HEADER,
             repair.VERTICAL_TAB_SOURCE,
+            repair.PROFILE_LAUNCH_HEADER,
         ]
         profile = repair.profile()
         self.assertEqual(profile["schema"], 2)
-        self.assertEqual(profile["id"], "windows-vertical-tab-math-overload-v24")
+        self.assertEqual(profile["id"], "windows-profile-launch-transparent-compare-v25")
         self.assertEqual(
             [correction["path"] for correction in profile["corrections"]],
             [path.removeprefix("download/chromium/src/") for path in expected_paths],
@@ -104,6 +105,7 @@ class PaintHeaderTests(base.PaintHeaderTests):
             (repair.WATERMARK_HEADER, Path("watermark_settings.h")),
             (repair.PDFIUM_SPAN_HEADER, Path("span.h")),
             (repair.VERTICAL_TAB_SOURCE, Path("vertical_tab_strip_region_view.cc")),
+            (repair.PROFILE_LAUNCH_HEADER, Path("profile_launch_observer.h")),
         )
         for relative, fixture in sources:
             path = self.work / relative
