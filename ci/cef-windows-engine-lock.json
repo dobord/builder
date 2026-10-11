@@ -15,7 +15,7 @@
   },
   "source_repair": {
     "schema": 2,
-    "id": "windows-wallpaper-search-string-include-v26",
+    "id": "windows-speech-callback-node-map-v27",
     "chromium_commit": "79460ebecaa5625e57a5fb679a735659e73dc687",
     "v8_commit": "4323497a6a73839e6d5260f6acd7ec0212cb3321",
     "pdfium_commit": "8f3e90282ef137adf7d380079c3178b24407104a",
@@ -154,8 +154,13 @@
         "path": "chrome/browser/ui/webui/side_panel/customize_chrome/wallpaper_search/wallpaper_search_string_map.h",
         "before_sha256": "3629a32178863d181a06f66a64e09d4f3af0ca139dcc693c896355e345700005",
         "after_sha256": "66ec5e52f118ffa9ec87755b963a5da111e6671421d5e394664939ed5d070a7c"
+      },
+      {
+        "path": "chrome/browser/speech/on_device_speech_recognition_impl.h",
+        "before_sha256": "692bef4ce9786292bf93d602c6fcc01a6e14542ea2acb8a4ccde5ff5fa2a340c",
+        "after_sha256": "0f4ab5ce2fd7a6bfb5bccec0b92aa77ae2fa01519774e7c7dbdbc9e0555bb84f"
       }
     ],
-    "implementation_sha256": "b232dc9c3dfcabf79d00b23fd7e76c264676166f578da06ada079df33c52437c"
+    "implementation_sha256": "f8adbcbb537e187c9ef3a60c6712b3d06de25663fe93e4fc387c3f126662eb0c"
   }
 }

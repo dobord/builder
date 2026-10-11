@@ -155,9 +155,9 @@ class FrameTreeRepairTests(unittest.TestCase):
     def test_exact_blob_digests_and_only_four_source_edits(self):
         self.assertEqual(hashlib.sha256(self.fixed).hexdigest(), AFTER)
         self.assertEqual((repair.FRAME_TREE_BEFORE, repair.FRAME_TREE_AFTER), (BEFORE, AFTER))
-        self.assertEqual(len(repair.CORRECTIONS), 27)
+        self.assertEqual(len(repair.CORRECTIONS), 28)
         self.assertEqual(repair.CORRECTIONS[16][0], repair.FRAME_TREE_HEADER)
-        self.assertEqual(repair.profile()['id'], 'windows-wallpaper-search-string-include-v26')
+        self.assertEqual(repair.profile()['id'], 'windows-speech-callback-node-map-v27')
         reverted = self.fixed
         for before, after in reversed(repair.CORRECTIONS[16][3]):
             self.assertEqual(reverted.count(after), 1)
@@ -311,7 +311,8 @@ class V16TransitionTests(unittest.TestCase):
                      self.work / repair.PDFIUM_SPAN_HEADER,
                      self.work / repair.VERTICAL_TAB_SOURCE,
                      self.work / repair.PROFILE_LAUNCH_HEADER,
-                     self.work / repair.WALLPAPER_HEADER):
+                     self.work / repair.WALLPAPER_HEADER,
+                     self.work / repair.SPEECH_CALLBACK_HEADER):
                 self.assertEqual(p.read_bytes(), repair.transform(saved[0], p.relative_to(self.work).as_posix()))
                 self.assertGreater(p.stat().st_mtime_ns, saved[1])
             elif p != self.marker:

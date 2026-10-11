@@ -61,7 +61,7 @@ class VerticalTabMathRepairTests(unittest.TestCase):
             self.assertEqual(fixed.count(new), 1)
             fixed = fixed.replace(new, old, 1)
         self.assertEqual(fixed, SOURCE)
-        self.assertEqual(len(repair.CORRECTIONS), 27)
+        self.assertEqual(len(repair.CORRECTIONS), 28)
         self.assertEqual(repair.profile()['corrections'][:24], repair.v23_profile()['corrections'])
 
     def test_native_original_overload_failure_and_fixed_expand_collapse_rounding(self):
@@ -145,7 +145,8 @@ class V23TransitionTests(unittest.TestCase):
         self.assertEqual(self.apply(), 'upgraded-v23')
         for path, saved in before.items():
             if path in (self.path, self.work / repair.PROFILE_LAUNCH_HEADER,
-                        self.work / repair.WALLPAPER_HEADER):
+                        self.work / repair.WALLPAPER_HEADER,
+                        self.work / repair.SPEECH_CALLBACK_HEADER):
                 self.assertEqual(path.read_bytes(), repair.transform(saved[0], path.relative_to(self.work).as_posix()))
                 self.assertGreater(path.stat().st_mtime_ns, saved[1])
             elif path != self.marker:

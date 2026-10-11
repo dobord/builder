@@ -34,7 +34,7 @@ class WallpaperStringRepairTests(unittest.TestCase):
         self.assertEqual(hashlib.sha256(fixed).hexdigest(), repair.WALLPAPER_AFTER)
         self.assertEqual(fixed.replace(b'#include <string>\n', b'', 1), raw)
         self.assertEqual(fixed.count(b'#include <string>'), 1)
-        self.assertEqual(len(repair.CORRECTIONS), 27)
+        self.assertEqual(len(repair.CORRECTIONS), 28)
 
     def test_native_original_failure_fixed_self_containment_and_five_signatures(self):
         from tests.test_cef_windows_frame_tree_iterator_repair import FrameTreeRepairTests
