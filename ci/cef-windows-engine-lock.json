@@ -4,18 +4,18 @@
   "vcpkg_commit": "39dccd415da14d8051559d66069019475d95787c",
   "cef_recipe_commit": "03abd124ebe3b8a57fb78470a75b5aa3ce064e31",
   "checkpoint": {
-    "run": 38073597639,
+    "run": 38113618224,
     "attempt": 1,
-    "producer_sha": "56849f25f39c1e99aa101392807538b07808242f",
-    "artifact_id": 11682106537,
-    "artifact_sha256": "f1d7eb93e743a4400ffdf2cbdd078079e5246453579f0a6c262073ad1469f0bd",
-    "summary_artifact_id": 11681782053,
-    "summary_artifact_sha256": "436c8d3fb1f350c0600aa1d649aedf5ae96348734eaedda1a0d997a04668d5fd",
-    "build_key": "829652636524483559f552ce0cb6e12dc9033eadd8b3851587410636db38c39a"
+    "producer_sha": "a6b1abaac1c8cf5490ee76aafd0754aee981ad6b",
+    "artifact_id": 11696022938,
+    "artifact_sha256": "c796cfa33f0e001a49e322d396b5010c3374a6c50fb34fec702f5583fb06be61",
+    "summary_artifact_id": 11695994510,
+    "summary_artifact_sha256": "aa372921d09cd77a260986ca14b4736eb87eba834e1e3f355a33fe107b29e935",
+    "build_key": "c6c7957840bf38e7c9aacf541fcb36a02fbf5d7f9c9111d2e1e2f3383ae6ed2f"
   },
   "source_repair": {
     "schema": 2,
-    "id": "windows-pdfium-span-comparator-ctad-v23",
+    "id": "windows-vertical-tab-math-overload-v24",
     "chromium_commit": "79460ebecaa5625e57a5fb679a735659e73dc687",
     "v8_commit": "4323497a6a73839e6d5260f6acd7ec0212cb3321",
     "pdfium_commit": "8f3e90282ef137adf7d380079c3178b24407104a",
@@ -139,8 +139,13 @@
         "path": "third_party/pdfium/core/fxcrt/span.h",
         "before_sha256": "98a34192c186cbfb1524b61e0f9ed213e14f8d1d011e7834d240baa7e87bf394",
         "after_sha256": "88ab22d160c1324129049a1e01bf0355b6aff26a83691d9e60e8ea7cb6a08e3c"
+      },
+      {
+        "path": "chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc",
+        "before_sha256": "a1bee63d0203242f2de5c936ef64b93e0281a519376c7b3ea0612629b0b8e9df",
+        "after_sha256": "9a8b40ad18393c4d5dd8a145cbd0588d1f5310314f651eb449662243747774f9"
       }
     ],
-    "implementation_sha256": "618275a82ad7e33d00180fc6f480ef9060edf2845a87b8786a8803783c2b8c7a"
+    "implementation_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
   }
 }
