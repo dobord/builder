@@ -196,7 +196,8 @@ class V19ToV20TransitionTests(unittest.TestCase):
         self.assertEqual(self.apply(), 'upgraded-v19')
         for path, saved in before.items():
             if path in (self.header, self.source, self.work / repair.PERMISSION_MANAGER_HEADER,
-                        self.work / repair.WATERMARK_HEADER):
+                        self.work / repair.WATERMARK_HEADER,
+                        self.work / repair.PDFIUM_SPAN_HEADER):
                 self.assertEqual(path.read_bytes(), repair.transform(saved[0], path.relative_to(self.work).as_posix()))
                 self.assertGreater(path.stat().st_mtime_ns, saved[1])
             elif path != self.marker:

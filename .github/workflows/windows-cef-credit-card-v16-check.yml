@@ -1,4 +1,4 @@
-name: Windows CEF watermark-string V22 verification
+name: Windows CEF PDFium-span V23 verification
 on:
   push:
     branches: [repair/windows-cef-60-credit-card-string-v16]
@@ -28,6 +28,7 @@ jobs:
       CEF_WINDOWS_BACKEND_ERROR_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
       CEF_WINDOWS_PERMISSION_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
       CEF_WINDOWS_WATERMARK_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+      CEF_WINDOWS_PDFIUM_SOURCE_ROOT: ${{ github.workspace }}/public-pdfium
     steps:
       - name: Preserve exact public source newlines
         run: git config --global core.autocrlf false
@@ -89,6 +90,14 @@ jobs:
             /components/permissions/permission_request_manager.cc
             /base/allocator/partition_allocator/src/partition_alloc/pointers/raw_ref.h
             /chrome/browser/enterprise/watermark/settings.h
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: chromium/pdfium
+          ref: 8f3e90282ef137adf7d380079c3178b24407104a
+          path: public-pdfium
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: /core/fxcrt/span.h
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
         with: {python-version: '3.12'}
       - name: Verify exact inputs and offline runtime
@@ -100,6 +109,7 @@ jobs:
               'private-cef': '03abd124ebe3b8a57fb78470a75b5aa3ce064e31',
               'public-v8': '4323497a6a73839e6d5260f6acd7ec0212cb3321',
               'public-chromium': '79460ebecaa5625e57a5fb679a735659e73dc687',
+              'public-pdfium': '8f3e90282ef137adf7d380079c3178b24407104a',
           }
           for path, pin in pins.items():
               actual = subprocess.check_output(
@@ -522,7 +532,7 @@ jobs:
               + ' after_sha256='
               + after
           )
-      - name: Bind exact V22 implementation digest
+      - name: Bind exact V23 implementation digest
         shell: python
         run: |
           import copy, hashlib, json, os, sys
@@ -539,22 +549,24 @@ jobs:
           value = parse(raw)
           digest = hashlib.sha256(Path('secure_release/cef_windows_source_repair.py').read_bytes()).hexdigest()
           current = repair.profile()
-          if current['id'] != 'windows-watermark-string-include-v22' or len(current['corrections']) != 23:
-              raise RuntimeError('Not the reviewed V22 source profile')
+          if current['id'] != 'windows-pdfium-span-comparator-ctad-v23' or len(current['corrections']) != 24:
+              raise RuntimeError('Not the reviewed V23 source profile')
+          if current.get('pdfium_commit') != '8f3e90282ef137adf7d380079c3178b24407104a':
+              raise RuntimeError('V23 PDFium dependency pin mismatch')
           if current['implementation_sha256'] != digest:
               raise RuntimeError('Source implementation digest mismatch')
           if (value.get('schema') != 2 or value.get('platform') != 'windows'
                   or value.get('vcpkg_commit') != worker.VCPKG
                   or value.get('cef_recipe_commit') != worker.CEF
                   or canonical(value.get('checkpoint')) != canonical(repair.UPGRADE_V21)):
-              raise RuntimeError('V22 candidate changed exact V21 checkpoint input or source pins')
+              raise RuntimeError('V23 candidate changed exact V21 checkpoint input or source pins')
           branch_digest = value.get('source_repair', {}).get('implementation_sha256')
           if branch_digest not in ('0' * 64, digest):
               raise RuntimeError('Unreviewed implementation binding; only explicit bootstrap or exact lock permitted')
           expected_branch = copy.deepcopy(current)
           expected_branch['implementation_sha256'] = branch_digest
           if canonical(value.get('source_repair')) != canonical(expected_branch):
-              raise RuntimeError('V22 correction/profile mismatch')
+              raise RuntimeError('V23 correction/profile mismatch')
           original = copy.deepcopy(value)
           matched = branch_digest == digest
           if not matched:
@@ -565,16 +577,16 @@ jobs:
                   raise RuntimeError('Binding changed more than the implementation digest')
               path.write_bytes((json.dumps(value, indent=2) + '\n').encode('utf-8'))
           binding = {
-              'schema': 1, 'kind': 'public-windows-watermark-string-v22-lock-binding',
+              'schema': 1, 'kind': 'public-windows-pdfium-span-v23-lock-binding',
               'branch_lock_matched': matched,
               'branch_implementation_sha256': branch_digest,
               'implementation_sha256': digest,
               'branch_lock_sha256': hashlib.sha256(raw).hexdigest(),
               'effective_lock_sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
           }
-          Path('watermark-string-v22-lock-binding.json').write_bytes((json.dumps(binding, indent=2) + '\n').encode())
-          print('CEF_WATERMARK_STRING_V22_LOCK_BINDING branch_lock_matched=' + str(matched).lower() + ' implementation_sha256=' + digest)
-      - name: V22 focused and complete regressions
+          Path('pdfium-span-v23-lock-binding.json').write_bytes((json.dumps(binding, indent=2) + '\n').encode())
+          print('CEF_PDFIUM_SPAN_V23_LOCK_BINDING branch_lock_matched=' + str(matched).lower() + ' implementation_sha256=' + digest)
+      - name: V23 focused and complete regressions
         shell: python
         run: |
           import ast, hashlib, json, os, re, subprocess, sys
@@ -584,11 +596,11 @@ jobs:
               raise RuntimeError('Helper step must run in the exact checkout')
           sys.path.insert(0, str(workspace))
           from secure_release.crypto import parse
-          tested = ('.github/workflows/cef-windows-engine-iteration.yml', '.github/workflows/windows-cef-credit-card-v16-check.yml', 'ci/cef-windows-engine-lock.json', 'secure_release/cef_windows_iteration.py', 'secure_release/cef_windows_source_repair.py', 'tests/cef_windows_affiliated_inputs.py', 'tests/cef_windows_backend_error_inputs.py', 'tests/cef_windows_callable_repair_base.py', 'tests/cef_windows_layout_inputs.py', 'tests/cef_windows_lock_inputs.py', 'tests/cef_windows_permission_inputs.py', 'tests/cef_windows_source_repair_base.py', 'tests/cef_windows_tail_size_repair_base.py', 'tests/fixtures/cef-windows/credit_card_number_validation.h', 'tests/fixtures/cef-windows/frame_tree.h', 'tests/fixtures/cef-windows/watermark_settings.h', 'tests/test_cef_windows_accessibility_iterator_repair.py', 'tests/test_cef_windows_affiliated_result_repair.py', 'tests/test_cef_windows_api_key_string_repair.py', 'tests/test_cef_windows_backend_error_repair.py', 'tests/test_cef_windows_callable_repair.py', 'tests/test_cef_windows_credit_card_string_repair.py', 'tests/test_cef_windows_dom_memory_repair.py', 'tests/test_cef_windows_frame_tree_iterator_repair.py', 'tests/test_cef_windows_inline_empty_repair.py', 'tests/test_cef_windows_inline_items_lifetime_repair.py', 'tests/test_cef_windows_lock_manager_repair.py', 'tests/test_cef_windows_permission_source_repair.py', 'tests/test_cef_windows_source_repair.py', 'tests/test_cef_windows_string_iterator_repair.py', 'tests/test_cef_windows_tail_size_repair.py', 'tests/test_cef_windows_watermark_string_repair.py', 'tests/test_cef_windows_workspace_path_migration.py')
+          tested = ('.github/workflows/cef-windows-engine-iteration.yml', '.github/workflows/windows-cef-credit-card-v16-check.yml', 'ci/cef-windows-engine-lock.json', 'secure_release/cef_windows_iteration.py', 'secure_release/cef_windows_source_repair.py', 'tests/cef_windows_affiliated_inputs.py', 'tests/cef_windows_backend_error_inputs.py', 'tests/cef_windows_callable_repair_base.py', 'tests/cef_windows_layout_inputs.py', 'tests/cef_windows_lock_inputs.py', 'tests/cef_windows_pdfium_inputs.py', 'tests/cef_windows_permission_inputs.py', 'tests/cef_windows_source_repair_base.py', 'tests/cef_windows_tail_size_repair_base.py', 'tests/fixtures/cef-windows/credit_card_number_validation.h', 'tests/fixtures/cef-windows/frame_tree.h', 'tests/fixtures/cef-windows/watermark_settings.h', 'tests/test_cef_windows_accessibility_iterator_repair.py', 'tests/test_cef_windows_affiliated_result_repair.py', 'tests/test_cef_windows_api_key_string_repair.py', 'tests/test_cef_windows_backend_error_repair.py', 'tests/test_cef_windows_callable_repair.py', 'tests/test_cef_windows_credit_card_string_repair.py', 'tests/test_cef_windows_dom_memory_repair.py', 'tests/test_cef_windows_frame_tree_iterator_repair.py', 'tests/test_cef_windows_inline_empty_repair.py', 'tests/test_cef_windows_inline_items_lifetime_repair.py', 'tests/test_cef_windows_lock_manager_repair.py', 'tests/test_cef_windows_pdfium_span_repair.py', 'tests/test_cef_windows_permission_source_repair.py', 'tests/test_cef_windows_source_repair.py', 'tests/test_cef_windows_string_iterator_repair.py', 'tests/test_cef_windows_tail_size_repair.py', 'tests/test_cef_windows_watermark_string_repair.py', 'tests/test_cef_windows_workspace_path_migration.py')
           for path in tested:
               if path.endswith('.py'):
                   ast.parse(Path(path).read_bytes(), filename=path)
-          binding = parse(Path('watermark-string-v22-lock-binding.json').read_bytes())
+          binding = parse(Path('pdfium-span-v23-lock-binding.json').read_bytes())
           diagnostic = parse(Path('frame-tree-iterator-diagnostic-results.json').read_bytes())
           if (diagnostic.get('sha') != os.environ['GITHUB_SHA']
                   or diagnostic.get('run') != int(os.environ['GITHUB_RUN_ID'])
@@ -596,7 +608,8 @@ jobs:
                   or diagnostic.get('proof', {}).get('fixed_find_if_runs') is not True):
               raise RuntimeError('Original exact native diagnostic missing')
           stages = {
-              'focused': ['tests.test_cef_windows_watermark_string_repair',
+              'focused': ['tests.test_cef_windows_pdfium_span_repair',
+                          'tests.test_cef_windows_watermark_string_repair',
                           'tests.test_cef_windows_permission_source_repair',
                           'tests.test_cef_windows_backend_error_repair',
                           'tests.test_cef_windows_affiliated_result_repair',
@@ -608,14 +621,14 @@ jobs:
               'full': ['discover', '-s', 'tests', '-v'],
           }
           report = {
-              'schema': 1, 'kind': 'public-windows-watermark-string-v22-test-results',
+              'schema': 1, 'kind': 'public-windows-pdfium-span-v23-test-results',
               'sha': os.environ['GITHUB_SHA'], 'run': int(os.environ['GITHUB_RUN_ID']),
               'attempt': int(os.environ['GITHUB_RUN_ATTEMPT']), 'os': os.environ['RUNNER_OS'],
               'binding': binding, 'diagnostic_proof': diagnostic['proof'],
               'blobs': {p: hashlib.sha256(Path(p).read_bytes()).hexdigest() for p in tested},
               'stages': {},
           }
-          output = Path('watermark-string-v22-ci-results.json')
+          output = Path('pdfium-span-v23-ci-results.json')
           def save():
               output.write_bytes((json.dumps(report, sort_keys=True, indent=2) + '\n').encode())
           save()
@@ -638,13 +651,24 @@ jobs:
                   'backend_proof': proofs('CEF_BACKEND_ERROR_V20_NATIVE'),
                   'permission_proof': proofs('CEF_PERMISSION_SOURCE_V21_NATIVE'),
                   'watermark_proof': proofs('CEF_WATERMARK_STRING_V22_NATIVE'),
+                  'pdfium_proof': proofs('CEF_PDFIUM_SPAN_V23_NATIVE'),
                   'credit_proof': proofs('CEF_CREDIT_CARD_STRING_NATIVE'),
                   'workspace_proof': proofs('CEF_WINDOWS_WORKSPACE_PATH_NATIVE'),
               }
               save()
               if result.returncode or len(count) != 1:
-                  raise RuntimeError('Required V22 regression failed: ' + name)
+                  raise RuntimeError('Required V23 regression failed: ' + name)
               if name == 'focused':
+                  pdfium = report['stages'][name]['pdfium_proof']
+                  required_pdfium = ('fixed_runs=true', 'strict_ctad=true', 'fixed_extent=true', 'dynamic_extent=true',
+                      'overlap_both_directions=true', 'constexpr=true', 'nonoverlap=true', 'guards=true',
+                      'public_blob=true', 'edits=6', 'pdfium_commit=8f3e90282ef137adf7d380079c3178b24407104a',
+                      'after_sha256=88ab22d160c1324129049a1e01bf0355b6aff26a83691d9e60e8ea7cb6a08e3c')
+                  if len(pdfium) != 1 or not all(x in pdfium[0].split() for x in required_pdfium):
+                      raise RuntimeError('Missing exact V23 native PDFium span proof')
+                  if os.environ['RUNNER_OS'] == 'Windows' and not all(x in pdfium[0].split() for x in (
+                      'original_failed=true', 'windows_ctad_failed=true')):
+                      raise RuntimeError('Original Windows PDFium CTAD warning was not reproduced')
                   watermark = report['stages'][name]['watermark_proof']
                   required_watermark = ('original_failed=true', 'fixed_runs=true', 'signatures=2',
                       'direct_string_include=true', 'public_blob=true',
@@ -710,7 +734,7 @@ jobs:
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
-          name: public-windows-watermark-string-v22-tests-${{ runner.os }}-${{ github.run_id }}
-          path: watermark-string-v22-ci-results.json
+          name: public-windows-pdfium-span-v23-tests-${{ runner.os }}-${{ github.run_id }}
+          path: pdfium-span-v23-ci-results.json
           if-no-files-found: error
           retention-days: 7

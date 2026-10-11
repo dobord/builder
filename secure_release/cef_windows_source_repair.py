@@ -1,9 +1,9 @@
-"""Twenty-three reviewed Windows source corrections, bound to a new build contract.
+"""Twenty-four reviewed Windows source corrections, bound to a new build contract.
 
 The baseline CEF checkout and native checkpoint codec stay unchanged. Only the
 exact reviewed producers below may cross into this profile, after authenticated
 restore under its OLD contract. New checkpoints carry the NEW contract and a
-verified source marker covering all twenty-three files. Neither receipts nor fixtures
+verified source marker covering all twenty-four files. Neither receipts nor fixtures
 constitute runtime proof.
 """
 from __future__ import annotations
@@ -89,6 +89,95 @@ PERMISSION_MANAGER_AFTER = "a021f5322a869f393d2077313e8ef26f3167b9677efc7e92596e
 WATERMARK_HEADER = "download/chromium/src/chrome/browser/enterprise/watermark/settings.h"
 WATERMARK_BEFORE = "d7a0cd34ef3fc8bd33a1d13c88699d5ec5a31ee614c12dedc1b72a08cd9c3233"
 WATERMARK_AFTER = "2810e40f606ff37a20ebccfa00610b2fae1d5377fcea20c08d2b7be39e8676a8"
+PDFIUM = "8f3e90282ef137adf7d380079c3178b24407104a"
+PDFIUM_SPAN_HEADER = "download/chromium/src/third_party/pdfium/core/fxcrt/span.h"
+PDFIUM_SPAN_BEFORE = "98a34192c186cbfb1524b61e0f9ed213e14f8d1d011e7834d240baa7e87bf394"
+PDFIUM_SPAN_AFTER = "88ab22d160c1324129049a1e01bf0355b6aff26a83691d9e60e8ea7cb6a08e3c"
+# Four uniquely scoped, verbatim public methods. Only the six comparator
+# template argument lists change; pointer ordering and safety guards stay exact.
+PDFIUM_SPAN_METHODS = (
+    b'''  constexpr void copy_from(span<const element_type, extent> other)
+    requires(!std::is_const_v<element_type>)
+  {
+    if (std::is_constant_evaluated()) {
+      // Comparing pointers to different objects at compile time yields
+      // unspecified behavior, which would halt compilation. Instead,
+      // unconditionally use a separate buffer in the constexpr context. This
+      // would be inefficient at runtime, but that's irrelevant.
+      std::vector<element_type> vec(other.begin(), other.end());
+      std::ranges::copy(vec, begin());
+    } else {
+      // Using `<=` to compare pointers to different allocations is UB, but
+      // using `std::less_equal` is well-defined ([comparisons.general]).
+      if (std::less_equal{}(begin(), other.begin())) {
+        std::ranges::copy(other, begin());
+      } else {
+        std::ranges::copy_backward(other, end());
+      }
+    }
+  }
+''',
+    b'''  constexpr void copy_from_nonoverlapping(
+      span<const element_type, extent> other)
+    requires(!std::is_const_v<element_type>)
+  {
+    // Comparing pointers to different objects at compile time yields
+    // unspecified behavior, which would halt compilation. Instead implement in
+    // terms of the guaranteed-safe behavior; performance is irrelevant in the
+    // constexpr context.
+    if (std::is_constant_evaluated()) {
+      copy_from(other);
+      return;
+    }
+
+    // See comments in `copy_from()` re: use of templated comparison objects.
+    DCHECK(std::less_equal{}(end(), other.begin()) ||
+           std::greater_equal{}(begin(), other.end()));
+    std::ranges::copy(other, begin());
+  }
+''',
+    b'''  constexpr void copy_from(span<const element_type> other)
+    requires(!std::is_const_v<element_type>)
+  {
+    CHECK(size() == other.size());
+    if (std::is_constant_evaluated()) {
+      // Comparing pointers to different objects at compile time yields
+      // unspecified behavior, which would halt compilation. Instead,
+      // unconditionally use a separate buffer in the constexpr context. This
+      // would be inefficient at runtime, but that's irrelevant.
+      std::vector<element_type> vec(other.begin(), other.end());
+      std::ranges::copy(vec, begin());
+    } else {
+      // Using `<=` to compare pointers to different allocations is UB, but
+      // using `std::less_equal` is well-defined ([comparisons.general]).
+      if (std::less_equal{}(begin(), other.begin())) {
+        std::ranges::copy(other, begin());
+      } else {
+        std::ranges::copy_backward(other, end());
+      }
+    }
+  }
+''',
+    b'''  constexpr void copy_from_nonoverlapping(span<const element_type> other)
+    requires(!std::is_const_v<element_type>)
+  {
+    // Comparing pointers to different objects at compile time yields
+    // unspecified behavior, which would halt compilation. Instead implement in
+    // terms of the guaranteed-safe behavior; performance is irrelevant in the
+    // constexpr context.
+    if (std::is_constant_evaluated()) {
+      copy_from(other);
+      return;
+    }
+
+    CHECK(size() == other.size());
+    // See comments in `copy_from()` re: use of templated comparison objects.
+    DCHECK(std::less_equal{}(end(), other.begin()) ||
+           std::greater_equal{}(begin(), other.end()));
+    std::ranges::copy(other, begin());
+  }
+''',
+)
 # Ordered, closed set of corrections; no caller-selected paths or patches.
 CORRECTIONS = (
     (HEADER, BEFORE, AFTER, (
@@ -223,6 +312,11 @@ CORRECTIONS = (
     (WATERMARK_HEADER, WATERMARK_BEFORE, WATERMARK_AFTER, (
         (b'#include "third_party/skia/include/core/SkColor.h"\n',
          b'#include <string>\n\n#include "third_party/skia/include/core/SkColor.h"\n'),
+    )),
+    (PDFIUM_SPAN_HEADER, PDFIUM_SPAN_BEFORE, PDFIUM_SPAN_AFTER, tuple(
+        (method, method.replace(b'std::less_equal{}', b'std::less_equal<>{}')
+                       .replace(b'std::greater_equal{}', b'std::greater_equal<>{}'))
+        for method in PDFIUM_SPAN_METHODS
     )),
 )
 BASE_KEY = "60a369f6b051ba651cb301af299e7dadcc99608d0db6894bccab87b953817602"
@@ -454,9 +548,10 @@ def v21_profile() -> dict:
 
 def profile() -> dict:
     return {
-        "schema": 2, "id": "windows-watermark-string-include-v22",
+        "schema": 2, "id": "windows-pdfium-span-comparator-ctad-v23",
         "chromium_commit": CHROMIUM,
         "v8_commit": V8,
+        "pdfium_commit": PDFIUM,
         "corrections": [
             {"path": path.removeprefix("download/chromium/src/"),
              "before_sha256": before, "after_sha256": after}
@@ -600,7 +695,7 @@ def _read(work: Path, relative: str, limit: int = 65536) -> tuple[Path, bytes, o
 def source_limit(relative: str) -> int:
     if relative == TORQUE_SOURCE:
         return 262144
-    if relative == ACCESSIBILITY_SOURCE:
+    if relative in (ACCESSIBILITY_SOURCE, PDFIUM_SPAN_HEADER):
         return 131072
     return 65536
 
@@ -680,8 +775,8 @@ def _upgrade_v11(work: Path, expected: bytes, inputs: list) -> str:
     marker, marker_data, marker_before = _read(work, MARKER, 8192)
     previous = canonical({"schema": 1, "kind": "cef-windows-source-repair",
                           "build_key": V11_KEY, "source_repair": v11_profile()})
-    if (canonical(parse(marker_data)) != previous or len(inputs) != 23
-            or tuple(item[0] for item in inputs[11:]) != (INLINE_HEADER, DOM_HEADER, INLINE_ITEMS_SOURCE, API_KEY_HEADER, CREDIT_CARD_HEADER, FRAME_TREE_HEADER, LOCK_MANAGER_HEADER, AFFILIATED_MATCH_SOURCE, BACKEND_ERROR_HEADER, BACKEND_ERROR_SOURCE, PERMISSION_MANAGER_HEADER, WATERMARK_HEADER)
+    if (canonical(parse(marker_data)) != previous or len(inputs) != 24
+            or tuple(item[0] for item in inputs[11:]) != (INLINE_HEADER, DOM_HEADER, INLINE_ITEMS_SOURCE, API_KEY_HEADER, CREDIT_CARD_HEADER, FRAME_TREE_HEADER, LOCK_MANAGER_HEADER, AFFILIATED_MATCH_SOURCE, BACKEND_ERROR_HEADER, BACKEND_ERROR_SOURCE, PERMISSION_MANAGER_HEADER, WATERMARK_HEADER, PDFIUM_SPAN_HEADER)
             or any(original != changed for _, _, original, _, changed in inputs[:11])
             or any(original == changed for _, _, original, _, changed in inputs[11:])):
         raise ValueError("Windows v11 source/marker transition mismatch")
@@ -701,7 +796,7 @@ def _upgrade_v11(work: Path, expected: bytes, inputs: list) -> str:
                     or (is_new and info.st_mtime_ns <= before.st_mtime_ns)):
                 raise ValueError("Windows v11 source changed during upgrade")
 
-    # All twelve later sources were validated before any write. After each replacement,
+    # All thirteen later sources were validated before any write. After each replacement,
     # recheck the complete source set and old marker; a partial upgrade is fatal.
     for replaced, (relative, path, original, before, changed) in enumerate(inputs[11:]):
         fd, name = tempfile.mkstemp(prefix=".cef-header-", dir=path.parent)
@@ -729,7 +824,7 @@ def _upgrade_v11(work: Path, expected: bytes, inputs: list) -> str:
             stream.flush()
             os.fsync(stream.fileno())
         temporary.chmod(stat.S_IMODE(marker_before.st_mode))
-        verify_sources(replaced=12)
+        verify_sources(replaced=13)
         verify_marker()
         os.replace(temporary, marker)
     finally:
@@ -737,7 +832,7 @@ def _upgrade_v11(work: Path, expected: bytes, inputs: list) -> str:
     _, data, _ = _read(work, MARKER, 8192)
     if canonical(parse(data)) != expected:
         raise ValueError("Windows upgraded marker verification failed")
-    verify_sources(replaced=12)
+    verify_sources(replaced=13)
     return "upgraded-v11"
 
 
@@ -746,8 +841,8 @@ def _upgrade_v13(work: Path, expected: bytes, inputs: list) -> str:
     marker, marker_data, marker_before = _read(work, MARKER, 8192)
     previous = canonical({"schema": 1, "kind": "cef-windows-source-repair",
                           "build_key": V13_KEY, "source_repair": v13_profile()})
-    if (canonical(parse(marker_data)) != previous or len(inputs) != 23
-            or tuple(item[0] for item in inputs[13:]) != (INLINE_ITEMS_SOURCE, API_KEY_HEADER, CREDIT_CARD_HEADER, FRAME_TREE_HEADER, LOCK_MANAGER_HEADER, AFFILIATED_MATCH_SOURCE, BACKEND_ERROR_HEADER, BACKEND_ERROR_SOURCE, PERMISSION_MANAGER_HEADER, WATERMARK_HEADER)
+    if (canonical(parse(marker_data)) != previous or len(inputs) != 24
+            or tuple(item[0] for item in inputs[13:]) != (INLINE_ITEMS_SOURCE, API_KEY_HEADER, CREDIT_CARD_HEADER, FRAME_TREE_HEADER, LOCK_MANAGER_HEADER, AFFILIATED_MATCH_SOURCE, BACKEND_ERROR_HEADER, BACKEND_ERROR_SOURCE, PERMISSION_MANAGER_HEADER, WATERMARK_HEADER, PDFIUM_SPAN_HEADER)
             or any(original != changed for _, _, original, _, changed in inputs[:13])
             or any(original == changed for _, _, original, _, changed in inputs[13:])):
         raise ValueError("Windows v13 source/marker transition mismatch")
@@ -786,23 +881,23 @@ def _upgrade_v13(work: Path, expected: bytes, inputs: list) -> str:
         with os.fdopen(fd, "wb") as stream:
             stream.write(expected + b"\n"); stream.flush(); os.fsync(stream.fileno())
         temporary.chmod(stat.S_IMODE(marker_before.st_mode))
-        verify_sources(replaced=10); verify_marker(); os.replace(temporary, marker)
+        verify_sources(replaced=11); verify_marker(); os.replace(temporary, marker)
     finally:
         temporary.unlink(missing_ok=True)
     _, data, _ = _read(work, MARKER, 8192)
     if canonical(parse(data)) != expected:
         raise ValueError("Windows upgraded marker verification failed")
-    verify_sources(replaced=10)
+    verify_sources(replaced=11)
     return "upgraded-v13"
 
 
 def _upgrade_v14(work: Path, expected: bytes, inputs: list) -> str:
-    """Upgrade exact authenticated v14 state through its nine later corrections."""
+    """Upgrade exact authenticated v14 state through its ten later corrections."""
     marker, marker_data, marker_before = _read(work, MARKER, 8192)
     previous = canonical({"schema": 1, "kind": "cef-windows-source-repair",
                           "build_key": V14_KEY, "source_repair": prior_profile()})
-    if (canonical(parse(marker_data)) != previous or len(inputs) != 23
-            or tuple(item[0] for item in inputs[14:]) != (API_KEY_HEADER, CREDIT_CARD_HEADER, FRAME_TREE_HEADER, LOCK_MANAGER_HEADER, AFFILIATED_MATCH_SOURCE, BACKEND_ERROR_HEADER, BACKEND_ERROR_SOURCE, PERMISSION_MANAGER_HEADER, WATERMARK_HEADER)
+    if (canonical(parse(marker_data)) != previous or len(inputs) != 24
+            or tuple(item[0] for item in inputs[14:]) != (API_KEY_HEADER, CREDIT_CARD_HEADER, FRAME_TREE_HEADER, LOCK_MANAGER_HEADER, AFFILIATED_MATCH_SOURCE, BACKEND_ERROR_HEADER, BACKEND_ERROR_SOURCE, PERMISSION_MANAGER_HEADER, WATERMARK_HEADER, PDFIUM_SPAN_HEADER)
             or any(original != changed for _, _, original, _, changed in inputs[:14])
             or any(original == changed for _, _, original, _, changed in inputs[14:])):
         raise ValueError("Windows v14 source/marker transition mismatch")
@@ -837,23 +932,23 @@ def _upgrade_v14(work: Path, expected: bytes, inputs: list) -> str:
         with os.fdopen(fd, "wb") as stream:
             stream.write(expected + b"\n"); stream.flush(); os.fsync(stream.fileno())
         temporary.chmod(stat.S_IMODE(marker_before.st_mode))
-        verify_sources(replaced=9); verify_marker(); os.replace(temporary, marker)
+        verify_sources(replaced=10); verify_marker(); os.replace(temporary, marker)
     finally:
         temporary.unlink(missing_ok=True)
     _, data, _ = _read(work, MARKER, 8192)
     if canonical(parse(data)) != expected:
         raise ValueError("Windows upgraded marker verification failed")
-    verify_sources(replaced=9)
+    verify_sources(replaced=10)
     return "upgraded-v14"
 
 
 def _upgrade_v15(work: Path, expected: bytes, inputs: list) -> str:
-    """Upgrade exact authenticated v15 state through its eight later corrections."""
+    """Upgrade exact authenticated v15 state through its nine later corrections."""
     marker, marker_data, marker_before = _read(work, MARKER, 8192)
     previous = canonical({"schema": 1, "kind": "cef-windows-source-repair",
                           "build_key": V15_KEY, "source_repair": v15_profile()})
-    if (canonical(parse(marker_data)) != previous or len(inputs) != 23
-            or tuple(item[0] for item in inputs[15:]) != (CREDIT_CARD_HEADER, FRAME_TREE_HEADER, LOCK_MANAGER_HEADER, AFFILIATED_MATCH_SOURCE, BACKEND_ERROR_HEADER, BACKEND_ERROR_SOURCE, PERMISSION_MANAGER_HEADER, WATERMARK_HEADER)
+    if (canonical(parse(marker_data)) != previous or len(inputs) != 24
+            or tuple(item[0] for item in inputs[15:]) != (CREDIT_CARD_HEADER, FRAME_TREE_HEADER, LOCK_MANAGER_HEADER, AFFILIATED_MATCH_SOURCE, BACKEND_ERROR_HEADER, BACKEND_ERROR_SOURCE, PERMISSION_MANAGER_HEADER, WATERMARK_HEADER, PDFIUM_SPAN_HEADER)
             or any(original != changed for _, _, original, _, changed in inputs[:15])
             or any(original == changed for _, _, original, _, changed in inputs[15:])):
         raise ValueError("Windows v15 source/marker transition mismatch")
@@ -888,23 +983,23 @@ def _upgrade_v15(work: Path, expected: bytes, inputs: list) -> str:
         with os.fdopen(fd, "wb") as stream:
             stream.write(expected + b"\n"); stream.flush(); os.fsync(stream.fileno())
         temporary.chmod(stat.S_IMODE(marker_before.st_mode))
-        verify_sources(replaced=8); verify_marker(); os.replace(temporary, marker)
+        verify_sources(replaced=9); verify_marker(); os.replace(temporary, marker)
     finally:
         temporary.unlink(missing_ok=True)
     _, data, _ = _read(work, MARKER, 8192)
     if canonical(parse(data)) != expected:
         raise ValueError("Windows upgraded marker verification failed")
-    verify_sources(replaced=8)
+    verify_sources(replaced=9)
     return "upgraded-v15"
 
 
 def _upgrade_v16(work: Path, expected: bytes, inputs: list) -> str:
-    """Upgrade exact authenticated V16 state through its seven later corrections."""
+    """Upgrade exact authenticated V16 state through its eight later corrections."""
     marker, marker_data, marker_before = _read(work, MARKER, 8192)
     previous = canonical({"schema": 1, "kind": "cef-windows-source-repair",
                           "build_key": V16_KEY, "source_repair": v16_profile()})
-    if (canonical(parse(marker_data)) != previous or len(inputs) != 23
-            or tuple(item[0] for item in inputs[16:]) != (FRAME_TREE_HEADER, LOCK_MANAGER_HEADER, AFFILIATED_MATCH_SOURCE, BACKEND_ERROR_HEADER, BACKEND_ERROR_SOURCE, PERMISSION_MANAGER_HEADER, WATERMARK_HEADER)
+    if (canonical(parse(marker_data)) != previous or len(inputs) != 24
+            or tuple(item[0] for item in inputs[16:]) != (FRAME_TREE_HEADER, LOCK_MANAGER_HEADER, AFFILIATED_MATCH_SOURCE, BACKEND_ERROR_HEADER, BACKEND_ERROR_SOURCE, PERMISSION_MANAGER_HEADER, WATERMARK_HEADER, PDFIUM_SPAN_HEADER)
             or any(original != changed for _, _, original, _, changed in inputs[:16])
             or any(original == changed for _, _, original, _, changed in inputs[16:])):
         raise ValueError("Windows v16 source/marker transition mismatch")
@@ -939,23 +1034,23 @@ def _upgrade_v16(work: Path, expected: bytes, inputs: list) -> str:
         with os.fdopen(fd, "wb") as stream:
             stream.write(expected + b"\n"); stream.flush(); os.fsync(stream.fileno())
         temporary.chmod(stat.S_IMODE(marker_before.st_mode))
-        verify_sources(replaced=7); verify_marker(); os.replace(temporary, marker)
+        verify_sources(replaced=8); verify_marker(); os.replace(temporary, marker)
     finally:
         temporary.unlink(missing_ok=True)
     _, data, _ = _read(work, MARKER, 8192)
     if canonical(parse(data)) != expected:
         raise ValueError("Windows upgraded marker verification failed")
-    verify_sources(replaced=7)
+    verify_sources(replaced=8)
     return "upgraded-v16"
 
 
 def _upgrade_v19(work: Path, expected: bytes, inputs: list) -> str:
-    """Upgrade qualified V19 state through its four later source corrections."""
+    """Upgrade qualified V19 state through its five later source corrections."""
     marker, marker_data, marker_before = _read(work, MARKER, 8192)
     previous = canonical({"schema": 1, "kind": "cef-windows-source-repair",
                           "build_key": V19_KEY, "source_repair": v19_profile()})
-    if (canonical(parse(marker_data)) != previous or len(inputs) != 23
-            or tuple(item[0] for item in inputs[19:]) != (BACKEND_ERROR_HEADER, BACKEND_ERROR_SOURCE, PERMISSION_MANAGER_HEADER, WATERMARK_HEADER)
+    if (canonical(parse(marker_data)) != previous or len(inputs) != 24
+            or tuple(item[0] for item in inputs[19:]) != (BACKEND_ERROR_HEADER, BACKEND_ERROR_SOURCE, PERMISSION_MANAGER_HEADER, WATERMARK_HEADER, PDFIUM_SPAN_HEADER)
             or any(original != changed for _, _, original, _, changed in inputs[:19])
             or any(original == changed for _, _, original, _, changed in inputs[19:])):
         raise ValueError("Windows v19 source/marker transition mismatch")
@@ -990,62 +1085,62 @@ def _upgrade_v19(work: Path, expected: bytes, inputs: list) -> str:
         with os.fdopen(fd, "wb") as stream:
             stream.write(expected + b"\n"); stream.flush(); os.fsync(stream.fileno())
         temporary.chmod(stat.S_IMODE(marker_before.st_mode))
-        verify_sources(replaced=4); verify_marker(); os.replace(temporary, marker)
+        verify_sources(replaced=5); verify_marker(); os.replace(temporary, marker)
     finally:
         temporary.unlink(missing_ok=True)
     _, data, _ = _read(work, MARKER, 8192)
     if canonical(parse(data)) != expected:
         raise ValueError("Windows upgraded marker verification failed")
-    verify_sources(replaced=4)
+    verify_sources(replaced=5)
     return "upgraded-v19"
 
 
 def _upgrade_v21(work: Path, expected: bytes, inputs: list) -> str:
-    """Upgrade qualified V21 state by adding only the watermark string include."""
+    """Upgrade qualified V21 state through watermark and PDFium span corrections."""
     marker, marker_data, marker_before = _read(work, MARKER, 8192)
     previous = canonical({"schema": 1, "kind": "cef-windows-source-repair",
                           "build_key": V21_KEY, "source_repair": v21_profile()})
-    if (canonical(parse(marker_data)) != previous or len(inputs) != 23
-            or inputs[-1][0] != WATERMARK_HEADER
+    if (canonical(parse(marker_data)) != previous or len(inputs) != 24
+            or tuple(item[0] for item in inputs[22:]) != (WATERMARK_HEADER, PDFIUM_SPAN_HEADER)
             or any(original != changed for _, _, original, _, changed in inputs[:22])
-            or inputs[-1][2] == inputs[-1][4]):
+            or any(original == changed for _, _, original, _, changed in inputs[22:])):
         raise ValueError("Windows v21 source/marker transition mismatch")
     def verify_marker():
         path, data, info = _read(work, MARKER, 8192)
         if path != marker or data != marker_data or _snapshot(info) != _snapshot(marker_before):
             raise ValueError("Windows v21 marker changed during upgrade")
-    def verify_sources(replaced=False):
+    def verify_sources(replaced=0):
         for index, (relative, path, original, before, changed) in enumerate(inputs):
             current, data, info = _read(work, relative, source_limit(relative))
-            is_new = replaced and index == 22
+            is_new = 22 <= index < 22 + replaced
             if (current != path or data != (changed if is_new else original)
                     or (not is_new and _snapshot(info) != _snapshot(before))
                     or (is_new and info.st_mtime_ns <= before.st_mtime_ns)):
                 raise ValueError("Windows v21 source changed during upgrade")
-    relative, path, original, before, changed = inputs[-1]
-    fd, name = tempfile.mkstemp(prefix=".cef-header-", dir=path.parent)
-    temporary = Path(name)
-    try:
-        with os.fdopen(fd, "wb") as stream:
-            stream.write(changed); stream.flush(); os.fsync(stream.fileno())
-        temporary.chmod(stat.S_IMODE(before.st_mode))
-        new_time = max(time.time_ns(), before.st_mtime_ns + 1_000_000)
-        os.utime(temporary, ns=(new_time, new_time))
-        verify_sources(); verify_marker(); os.replace(temporary, path)
-    finally:
-        temporary.unlink(missing_ok=True)
-    verify_sources(replaced=True); verify_marker()
+    for replaced, (relative, path, original, before, changed) in enumerate(inputs[22:]):
+        fd, name = tempfile.mkstemp(prefix=".cef-header-", dir=path.parent)
+        temporary = Path(name)
+        try:
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(changed); stream.flush(); os.fsync(stream.fileno())
+            temporary.chmod(stat.S_IMODE(before.st_mode))
+            new_time = max(time.time_ns(), before.st_mtime_ns + 1_000_000)
+            os.utime(temporary, ns=(new_time, new_time))
+            verify_sources(replaced); verify_marker(); os.replace(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)
+        verify_sources(replaced + 1); verify_marker()
     fd, name = tempfile.mkstemp(prefix=".cef-marker-", dir=work)
     temporary = Path(name)
     try:
         with os.fdopen(fd, "wb") as stream:
             stream.write(expected + b"\n"); stream.flush(); os.fsync(stream.fileno())
         temporary.chmod(stat.S_IMODE(marker_before.st_mode))
-        verify_sources(replaced=True); verify_marker(); os.replace(temporary, marker)
+        verify_sources(replaced=2); verify_marker(); os.replace(temporary, marker)
     finally:
         temporary.unlink(missing_ok=True)
     _, data, _ = _read(work, MARKER, 8192)
     if canonical(parse(data)) != expected:
         raise ValueError("Windows upgraded marker verification failed")
-    verify_sources(replaced=True)
+    verify_sources(replaced=2)
     return "upgraded-v21"

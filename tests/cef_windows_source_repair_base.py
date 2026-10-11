@@ -50,7 +50,8 @@ def populate(work):
                               (repair.BACKEND_ERROR_HEADER, Path("password_store_backend_error.h")),
                               (repair.BACKEND_ERROR_SOURCE, Path("password_store_backend_error.cc")),
                               (repair.PERMISSION_MANAGER_HEADER, Path("permission_request_manager.h")),
-                              (repair.WATERMARK_HEADER, Path("watermark_settings.h"))):
+                              (repair.WATERMARK_HEADER, Path("watermark_settings.h")),
+                              (repair.PDFIUM_SPAN_HEADER, Path("span.h"))):
         path = work / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(public_input("include/v8-template.h")
@@ -439,6 +440,8 @@ class OrchestrationTests(unittest.TestCase):
                    "GITHUB_TOKEN": "synthetic-test-token", "ImageVersion": "20261004.326.1",
                    "BUILDER_INPUT_PRIVATE_KEY": "synthetic-not-a-key"}
             def head(path):
+                if path.name == "pdfium":
+                    return repair.PDFIUM
                 return worker.VCPKG if path.name == "private-vcpkg" else worker.CEF if path.name == "private-cef" else repair.CHROMIUM
             with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(worker.sys, "platform", "win32"), \
                     mock.patch.object(worker, "git_head", side_effect=head), \

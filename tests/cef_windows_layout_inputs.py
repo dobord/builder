@@ -15,6 +15,7 @@ from tests.cef_windows_lock_inputs import LOCK_MANAGER
 from tests.cef_windows_affiliated_inputs import AFFILIATED_MATCH
 from tests.cef_windows_backend_error_inputs import HEADER as BACKEND_ERROR_HEADER, SOURCE as BACKEND_ERROR_SOURCE
 from tests.cef_windows_permission_inputs import HEADER as PERMISSION_MANAGER_HEADER
+from tests.cef_windows_pdfium_inputs import SPAN as PDFIUM_SPAN
 
 V8 = "4323497a6a73839e6d5260f6acd7ec0212cb3321"
 SOURCE_ROOT = os.environ.get("CEF_WINDOWS_LAYOUT_SOURCE_ROOT")
@@ -51,6 +52,8 @@ _GENERATOR = public_input("src/torque/implementation-visitor.cc")
 
 
 def fixture_bytes(name):
+    if name == "span.h":
+        return PDFIUM_SPAN
     if name in {"settings.h", "watermark_settings.h"}:
         return (FIXTURES / "watermark_settings.h").read_bytes()
     if name == "permission_request_manager.h":
