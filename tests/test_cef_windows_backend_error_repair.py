@@ -199,7 +199,8 @@ class V19ToV20TransitionTests(unittest.TestCase):
                         self.work / repair.WATERMARK_HEADER,
                         self.work / repair.PDFIUM_SPAN_HEADER,
                         self.work / repair.VERTICAL_TAB_SOURCE,
-                        self.work / repair.PROFILE_LAUNCH_HEADER):
+                        self.work / repair.PROFILE_LAUNCH_HEADER,
+                        self.work / repair.WALLPAPER_HEADER):
                 self.assertEqual(path.read_bytes(), repair.transform(saved[0], path.relative_to(self.work).as_posix()))
                 self.assertGreater(path.stat().st_mtime_ns, saved[1])
             elif path != self.marker:

@@ -136,8 +136,8 @@ class InlineItemsLifetimeTests(unittest.TestCase):
         self.assertIn("return with_offset->offset_map;", method(self.fixed))
         self.assertIn("return *kEmpty;", method(self.fixed))
         self.assertNotIn(b"Wno-", self.fixed); self.assertNotIn(b"#pragma", self.fixed)
-        self.assertEqual(repair.profile()["id"], "windows-profile-launch-transparent-compare-v25")
-        self.assertEqual(len(repair.CORRECTIONS), 26)
+        self.assertEqual(repair.profile()["id"], "windows-wallpaper-search-string-include-v26")
+        self.assertEqual(len(repair.CORRECTIONS), 27)
 
     def test_idempotence_newlines_and_unreviewed_sources(self):
         for nl in (b"\n", b"\r\n"):
@@ -255,6 +255,7 @@ class V13TransitionTests(unittest.TestCase):
             self.work / repair.PDFIUM_SPAN_HEADER: repair.PDFIUM_SPAN_HEADER,
             self.work / repair.VERTICAL_TAB_SOURCE: repair.VERTICAL_TAB_SOURCE,
             self.work / repair.PROFILE_LAUNCH_HEADER: repair.PROFILE_LAUNCH_HEADER,
+            self.work / repair.WALLPAPER_HEADER: repair.WALLPAPER_HEADER,
         }
         for path, snapshot in before.items():
             if path in changed:
