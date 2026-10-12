@@ -153,11 +153,12 @@ class ProjectCiTests(unittest.TestCase):
             (root / "runner/project-ci").mkdir(parents=True)
             (root / "runner/project-ci/request.json").write_bytes(crypto.canonical(payload()))
             script = "import os; assert 'GH_TOKEN' not in os.environ; assert 'CI_INPUT_PRIVATE_KEY_B64' not in os.environ; print('PRIVATE_SENTINEL')"
+            command = ("& " if os.name == "nt" else "") + f"'{os.sys.executable}' -c \"{script}\""
             lane = {"id": "synthetic", "profile": "ci", "matrix": {}, "runner": ["ubuntu-24.04"],
-                    "job": {"steps": [{"run": f"'{os.sys.executable}' -c \"{script}\""}, {"run": "false"}]}}
+                    "job": {"steps": [{"run": command}, {"run": "exit 7"}]}}
             environment = {"GITHUB_WORKSPACE": str(root / "workspace"), "RUNNER_TEMP": str(root / "runner"),
                            "CI_LANE": "synthetic", "GITHUB_RUN_ID": "1", "GITHUB_RUN_NUMBER": "1",
-                           "GITHUB_RUN_ATTEMPT": "1", "RUNNER_OS": "Linux", "GH_TOKEN": "SYNTHETIC_SECRET",
+                           "GITHUB_RUN_ATTEMPT": "1", "RUNNER_OS": "Windows" if os.name == "nt" else "Linux", "GH_TOKEN": "SYNTHETIC_SECRET",
                            "CI_INPUT_PRIVATE_KEY_B64": "SYNTHETIC_SECRET"}
             console = io.StringIO()
             with patch.dict(os.environ, environment), patch.object(ci, "recipes", return_value=[lane]), contextlib.redirect_stdout(console):
