@@ -218,7 +218,44 @@ A supported offline installation is therefore reproducible from a repository
 clone alone; internet access is needed only when intentionally refreshing the
 committed wheelhouse.
 
-## Operational limits
+## Encrypted project CI
+
+The separately provisioned `.github/workflows/encrypted-project-ci.yml` accepts
+an opaque, signed HPKE request from a protected source-repository authorizer.
+It verifies repository IDs, current-head independent reviews, dependency review,
+immutable artifact hashes and the exact approved `PROJECT_CI_BUILDER_SHA` before
+executing any source. `secure_release/project_ci.py` reauthenticates the signed
+request and source ciphertext in every native job. Recipe commands run through
+`project_ci_runner.py` with credential-free environments and privately captured
+stdout/stderr; only encrypted source bundles, diagnostics, reports, corpora and
+baseline/candidate datasets leave jobs. Missing or failed lanes fail the entire run.
+
+Project qualification uses GitHub-hosted runners only. Performance compares the
+signed immutable previous-release tree and candidate on the same allocation;
+baseline tag/SHA is independently revalidated before source checkout. Rolling
+cross-machine baselines are not release evidence. The source-read credential
+uses its own `PROJECT_CI_SOURCE_READ_TOKEN`; existing SDK tokens are untouched.
+
+This path uses separate signing/input/log cryptographic roles and the existing
+`VCPKGSE1` Tink envelope. Dedicated CI pairs are the default; explicit local
+`--reuse-sdk-keys` provisioning can read existing SDK pairs for the same roles
+without overwriting SDK secrets or backup files. Shared-key compromise/rotation
+then affects both contours; authenticated protocol contexts remain distinct.
+It does not alter the
+offline wheelhouse. `project-ci-requirements.lock` pins the official online
+CPython 3.12 Linux, Windows and macOS runtime. Source identity and approval
+patterns are private operator-provisioned policy, not discovered from source code.
+`project_ci_bootstrap.py` generates protected local backups and provisions keys
+through `gh` stdin, initially setting `PROJECT_CI_ENABLED=false`. An operator
+reviews the immutable builder SHA, protected source environment, narrow tokens
+and fixed runner before activation. Never bypass signatures, replay/attempt,
+recipient, path or digest checks to get a qualification to pass.
+
+The source transport client verifies the exact external workflow/run/attempt and
+request digest before mirroring an exact-source success status. Local diagnostic
+decryption and a successful dispatch response are not release authorization.
+
+## SDK operational limits
 
 Initial release profile is x64, Release-only. Each compressed SDK is capped at
 1900 MiB. Archives reject symlinks, special files, C/C++ implementation source
