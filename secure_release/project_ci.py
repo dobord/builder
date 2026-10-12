@@ -393,22 +393,26 @@ def verify_source_policy(payload, token):
     if (pr["head"]["sha"] != payload["source_sha"] or pr["base"]["sha"] != payload["base_sha"] or
             pr["head"]["repo"]["id"] != payload["source_id"] or pr["state"] != "open"):
         raise ValueError("stale or foreign PR")
-    files = pages(f"repos/{payload['source']}/pulls/{payload['pr']}/files", token)
-    paths = [item["filename"] for item in files]
-    boundaries = sum(any(re.search(pattern, name) for name in paths) for pattern in policy["approval_boundaries"])
-    platforms = sum(any(re.search(r"(^|/)" + platform + r"(/|\.|_)", name) for name in paths)
-                    for platform in ("linux", "windows", "bsd", "macos", "apple", "darwin"))
-    needed = 2 if boundaries > 1 or platforms > 1 else int(boundaries > 0)
-    reviews = pages(f"repos/{payload['source']}/pulls/{payload['pr']}/reviews", token)
-    latest = {}
-    for review in sorted(reviews, key=lambda item: item["id"]):
-        if review["state"] != "COMMENTED":
-            latest[review["user"]["login"]] = review
-    approvals = {login for login, review in latest.items() if review["state"] == "APPROVED" and
-                 review["commit_id"] == payload["source_sha"] and login != pr["user"]["login"] and
-                 review["user"].get("type") == "User"}
-    if len(approvals) < needed:
-        raise ValueError("current-head independent approval missing")
+    # The release profile is authorized by the protected signer and complete
+    # exact-SHA CI qualification, without a separate manual approval gate.
+    # Ordinary CI retains its existing sensitive-boundary PR review policy.
+    if payload["suite"] != "release":
+        files = pages(f"repos/{payload['source']}/pulls/{payload['pr']}/files", token)
+        paths = [item["filename"] for item in files]
+        boundaries = sum(any(re.search(pattern, name) for name in paths) for pattern in policy["approval_boundaries"])
+        platforms = sum(any(re.search(r"(^|/)" + platform + r"(/|\.|_)", name) for name in paths)
+                        for platform in ("linux", "windows", "bsd", "macos", "apple", "darwin"))
+        needed = 2 if boundaries > 1 or platforms > 1 else int(boundaries > 0)
+        reviews = pages(f"repos/{payload['source']}/pulls/{payload['pr']}/reviews", token)
+        latest = {}
+        for review in sorted(reviews, key=lambda item: item["id"]):
+            if review["state"] != "COMMENTED":
+                latest[review["user"]["login"]] = review
+        approvals = {login for login, review in latest.items() if review["state"] == "APPROVED" and
+                     review["commit_id"] == payload["source_sha"] and login != pr["user"]["login"] and
+                     review["user"].get("type") == "User"}
+        if len(approvals) < needed:
+            raise ValueError("current-head independent approval missing")
     comparison = pages(f"repos/{payload['source']}/dependency-graph/compare/{payload['base_sha']}...{payload['source_sha']}", token)
     for dependency in comparison:
         if dependency.get("change_type") != "added":

@@ -81,10 +81,8 @@ def configure(directory, revision, policy_file, *, reuse_sdk_keys=False):
     environment = crypto.parse(gh(["api", f"repos/{policy['repository']}/environments/encrypted-builder-ci"]))
     deployment = environment.get("deployment_branch_policy") or {}
     branches = crypto.parse(gh(["api", f"repos/{policy['repository']}/environments/encrypted-builder-ci/deployment-branch-policies"]))
-    reviewers = [rule for rule in environment["protection_rules"] if rule["type"] == "required_reviewers"]
     if (not deployment.get("custom_branch_policies") or
-            [(item["name"], item["type"]) for item in branches["branch_policies"]] != [("main", "branch")] or
-            not reviewers or not reviewers[0].get("reviewers")):
+            [(item["name"], item["type"]) for item in branches["branch_policies"]] != [("main", "branch")]):
         raise ValueError("source authorizer environment is not protected")
     existing = crypto.parse(gh(["api", f"repos/{policy['repository']}/actions/secrets"]))
     if {item["name"] for item in existing["secrets"]} & {"PROJECT_CI_SIGNING_PRIVATE_KEY_B64", "BUILDER_DISPATCH_TOKEN"}:

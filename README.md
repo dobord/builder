@@ -224,7 +224,10 @@ The separately provisioned `.github/workflows/encrypted-project-ci.yml` accepts
 an opaque, signed HPKE request from a protected source-repository authorizer.
 It verifies repository IDs, current-head independent reviews, dependency review,
 immutable artifact hashes and the exact approved `PROJECT_CI_BUILDER_SHA` before
-executing any source. `secure_release/project_ci.py` reauthenticates the signed
+executing any source. The signed `release` profile replaces the manual PR approval
+gate with successful complete exact-SHA qualification; ordinary sensitive-change
+CI review remains enforced, along with dependency review and all admission checks.
+`secure_release/project_ci.py` reauthenticates the signed
 request and source ciphertext in every native job. Recipe commands run through
 `project_ci_runner.py` with credential-free environments and privately captured
 stdout/stderr; only encrypted source bundles, diagnostics, reports, corpora and

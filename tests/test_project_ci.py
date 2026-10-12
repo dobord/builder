@@ -1,6 +1,7 @@
 """Fail-closed encrypted project-CI transport and runner regressions."""
 import contextlib
 import io
+import json
 import os
 from pathlib import Path
 import tempfile
@@ -132,6 +133,37 @@ class ProjectCiTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 ci.prepare()
             decrypt.assert_not_called()
+
+    def test_release_requires_ci_evidence_but_not_manual_pr_approval(self):
+        policy = {"repository": "dobord/synthetic", "repository_id": 1,
+                  "authorizer_branch": "main", "approval_boundaries": ["^sensitive"]}
+        request = dict(payload(), pr=1, suite="release")
+        def api_reply(path, token):
+            if "/releases/tags/" in path:
+                return {"draft": False, "prerelease": False, "tag_name": "v0.4.0", "published_at": "2026-09-22"}
+            if "/git/ref/tags/" in path:
+                return {"object": {"type": "commit", "sha": request["baseline_sha"]}}
+            if "/actions/runs/" in path:
+                return {"repository": {"id": 1}, "head_repository": {"id": 1},
+                        "path": ".github/workflows/builder-ci.yml", "run_attempt": 1,
+                        "event": "push", "head_branch": "main"}
+            if "/pulls/" in path:
+                return {"head": {"sha": request["source_sha"], "repo": {"id": 1}},
+                        "base": {"sha": request["base_sha"]}, "state": "open", "user": {"login": "author"}}
+            raise AssertionError("unexpected admission API")
+        def list_reply(path, token, field=None):
+            if path.endswith("/files"):
+                return [{"filename": "sensitive.cpp"}]
+            if path.endswith("/reviews"):
+                return []
+            if "/dependency-graph/compare/" in path:
+                return []
+            raise AssertionError("unexpected policy API")
+        with patch.dict(os.environ, {"CI_SOURCE_POLICY": json.dumps(policy)}), patch.object(ci, "api_json", side_effect=api_reply), patch.object(ci, "pages", side_effect=list_reply) as calls:
+            ci.verify_source_policy(request, "SYNTHETIC")
+            self.assertFalse(any(call.args[0].endswith("/reviews") for call in calls.call_args_list))
+            with self.assertRaisesRegex(ValueError, "independent approval"):
+                ci.verify_source_policy(dict(request, suite="ci"), "SYNTHETIC")
 
     def test_unprotected_environment_cannot_receive_signing_secrets(self):
         with tempfile.TemporaryDirectory() as tmp:
