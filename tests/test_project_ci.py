@@ -41,6 +41,17 @@ class ProjectCiTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             ci.validate_action("attacker/action@main")
 
+    def test_api_allows_dependency_comparison_but_rejects_traversal(self):
+        response = unittest.mock.MagicMock()
+        response.read.return_value = b"[]"
+        opener = unittest.mock.MagicMock()
+        opener.open.return_value = response
+        with patch("urllib.request.build_opener", return_value=opener):
+            self.assertEqual(ci.api_json("repos/dobord/synthetic/dependency-graph/compare/" + "a" * 40 + "..." + "b" * 40, "SYNTHETIC"), [])
+            for path in ("repos/../synthetic", "repos/dobord/%2e%2e/synthetic", "repos/dobord/synthetic\n"):
+                with self.subTest(path=path), self.assertRaises(ValueError):
+                    ci.api(path, "SYNTHETIC")
+
     def test_cancelled_missing_and_wrong_attempt_do_not_authorize_success(self):
         run = {"repository": {"id": ci.BUILDER_ID}, "head_repository": {"id": ci.BUILDER_ID},
                "path": ".github/workflows/encrypted-project-ci.yml", "head_sha": "a" * 40,
