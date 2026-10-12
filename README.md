@@ -228,7 +228,13 @@ executing any source. `secure_release/project_ci.py` reauthenticates the signed
 request and source ciphertext in every native job. Recipe commands run through
 `project_ci_runner.py` with credential-free environments and privately captured
 stdout/stderr; only encrypted source bundles, diagnostics, reports, corpora and
-fixed-runner baselines leave jobs. Missing or failed lanes fail the entire run.
+baseline/candidate datasets leave jobs. Missing or failed lanes fail the entire run.
+
+Project qualification uses GitHub-hosted runners only. Performance compares the
+signed immutable previous-release tree and candidate on the same allocation;
+baseline tag/SHA is independently revalidated before source checkout. Rolling
+cross-machine baselines are not release evidence. The source-read credential
+uses its own `PROJECT_CI_SOURCE_READ_TOKEN`; existing SDK tokens are untouched.
 
 This path uses separate signing/input/log cryptographic roles and the existing
 `VCPKGSE1` Tink envelope. Dedicated CI pairs are the default; explicit local

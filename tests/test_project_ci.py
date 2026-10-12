@@ -21,7 +21,7 @@ def payload():
             "source_run": 1, "source_attempt": 1, "source_event": "push", "pr": 0,
             "builder_sha": "b" * 40, "suite": "ci", "created": now, "expires": now + 3600,
             "artifact_id": 1, "artifact_digest": "c" * 64, "source_cipher_digest": "d" * 64,
-            "baseline_run": 0}
+            "baseline_run": 0, "baseline_tag": "v0.4.0", "baseline_sha": "e" * 40}
 
 
 class ProjectCiTests(unittest.TestCase):
@@ -81,7 +81,9 @@ class ProjectCiTests(unittest.TestCase):
         valid = payload()
         ci.validate_payload(valid)
         for changes in ({"source_sha": "main"}, {"source_attempt": True}, {"suite": "unknown"},
-                        {"expires": int(time.time()) - 1}, {"artifact_digest": "bad"}, {"pr": -1}):
+                        {"expires": int(time.time()) - 1}, {"artifact_digest": "bad"}, {"pr": -1},
+                        {"baseline_tag": "main"}, {"baseline_run": 1},
+                        {"suite": "release", "baseline_sha": valid["source_sha"]}):
             with self.subTest(changes=changes), self.assertRaises(ValueError):
                 ci.validate_payload(dict(valid, **changes))
         with self.assertRaises(ValueError):

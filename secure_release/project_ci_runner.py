@@ -158,6 +158,8 @@ def run():
                 "GITHUB_BASE_REF": "main", "GITHUB_RUN_ID": ci.required("GITHUB_RUN_ID"),
                 "GITHUB_RUN_NUMBER": ci.required("GITHUB_RUN_NUMBER"), "GITHUB_RUN_ATTEMPT": ci.required("GITHUB_RUN_ATTEMPT"),
                 "RUNNER_TEMP": str(work)})
+    if lane["profile"] == "performance":
+        env["LFC_PERFORMANCE_BASELINE_ROOT"] = str(work / "source-baseline")
     context = {"matrix." + key: value for key, value in lane["matrix"].items()}
     context.update({"runner.os": ci.required("RUNNER_OS"), "runner.temp": str(work),
                     "github.workspace": str(root), "github.run_id": env["GITHUB_RUN_ID"],
@@ -227,8 +229,6 @@ def run():
         succeeded = succeeded and result == 0
     if not succeeded:
         raise ValueError("qualification failed")
-    if lane["profile"] == "performance":
-        publish_baseline(root, payload, lane)
     print("PROJECT_CI_LANE_SUCCESS")
 
 

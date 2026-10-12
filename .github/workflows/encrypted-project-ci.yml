@@ -52,7 +52,7 @@ jobs:
           CI_INPUT_PRIVATE_KEY_B64: ${{ secrets.PROJECT_CI_INPUT_PRIVATE_KEY_B64 }}
           CI_VERIFY_PUBLIC_KEY_B64: ${{ secrets.PROJECT_CI_VERIFY_PUBLIC_KEY_B64 }}
           CI_SOURCE_POLICY: ${{ secrets.PROJECT_CI_SOURCE_POLICY }}
-          SOURCE_READ_TOKEN: ${{ secrets.SOURCE_READ_TOKEN }}
+          SOURCE_READ_TOKEN: ${{ secrets.PROJECT_CI_SOURCE_READ_TOKEN }}
           BUILDER_READ_TOKEN: ${{ github.token }}
         run: python -m secure_release.project_ci prepare
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -127,14 +127,6 @@ jobs:
           if-no-files-found: ignore
           compression-level: 0
           retention-days: 14
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        if: success() && matrix.lane == 'performance-fixed-runner-benchmarks-0'
-        with:
-          name: baseline-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/cipher-baseline/baseline.enc
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 90
       - name: Remove all staging plaintext
         if: always()
         run: python -m secure_release.project_ci cleanup

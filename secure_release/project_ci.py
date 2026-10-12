@@ -165,13 +165,14 @@ def source_context(payload):
 def validate_payload(payload):
     fields = {"schema", "request_id", "source", "source_id", "source_sha", "base_sha",
               "source_run", "source_attempt", "source_event", "pr", "builder_sha", "suite",
-              "created", "expires", "artifact_id", "artifact_digest", "source_cipher_digest", "baseline_run"}
+              "created", "expires", "artifact_id", "artifact_digest", "source_cipher_digest", "baseline_run",
+              "baseline_tag", "baseline_sha"}
     if set(payload) != fields or type(payload["schema"]) is not int or payload["schema"] != 1:
         raise ValueError("invalid CI request schema")
     message_context(payload["request_id"])
     if not re.fullmatch(r"dobord/[A-Za-z0-9_.-]+", payload["source"]):
         raise ValueError("invalid source repository")
-    for name in ("source_sha", "base_sha", "builder_sha"):
+    for name in ("source_sha", "base_sha", "builder_sha", "baseline_sha"):
         if not isinstance(payload[name], str) or not SHA.fullmatch(payload[name]):
             raise ValueError("invalid exact revision")
     for name in ("source_id", "source_run", "source_attempt", "artifact_id"):
@@ -182,6 +183,10 @@ def validate_payload(payload):
             raise ValueError("invalid optional identity")
     if payload["suite"] not in SUITES or payload["source_event"] not in {"push", "workflow_dispatch", "schedule"}:
         raise ValueError("unsupported CI profile or authorizer")
+    if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", payload["baseline_tag"]) or payload["baseline_run"]:
+        raise ValueError("hosted comparisons require an immutable release tag, not a rolling runner baseline")
+    if payload["suite"] in {"performance", "release"} and payload["baseline_sha"] == payload["source_sha"]:
+        raise ValueError("benchmark baseline must differ from candidate")
     if not HASH.fullmatch(payload["artifact_digest"]) or not HASH.fullmatch(payload["source_cipher_digest"]):
         raise ValueError("invalid artifact digest")
     now = int(time.time())
@@ -278,6 +283,8 @@ def package():
                "artifact_id": 1, "artifact_digest": "0" * 64,
                "source_cipher_digest": "0" * 64,
                "baseline_run": int(os.environ.get("CI_BASELINE_RUN", "0"))}
+    payload["baseline_tag"] = required("CI_BASELINE_TAG")
+    payload["baseline_sha"] = required("CI_BASELINE_SHA")
     validate_payload(payload)
     env = git_environment(os.environ, work)
     auth = base64.b64encode(("x-access-token:" + required("SOURCE_READ_TOKEN")).encode()).decode()
@@ -287,6 +294,9 @@ def package():
     checked(["git", "init", "--bare", str(repo)], work, env, log)
     checked(["git", "-C", str(repo), "fetch", "--no-tags", "https://github.com/" + source + ".git",
              source_sha + ":refs/heads/candidate", base_sha + ":refs/heads/base"], work, env, log)
+    if payload["suite"] in {"performance", "release"}:
+        checked(["git", "-C", str(repo), "fetch", "--no-tags", "https://github.com/" + source + ".git",
+                 payload["baseline_sha"] + ":refs/heads/performance-baseline"], work, env, log)
     plain = work / "repository.bundle"
     checked(["git", "-C", str(repo), "bundle", "create", str(plain), "--all"], work, env, log)
     if not 0 < plain.stat().st_size <= MAX_ARCHIVE - 1024**2:
@@ -354,6 +364,19 @@ def verify_source_policy(payload, token):
     policy = crypto.parse(required("CI_SOURCE_POLICY"))
     if payload["source"] != policy["repository"] or payload["source_id"] != policy["repository_id"]:
         raise ValueError("source not authorized")
+    if payload["suite"] in {"performance", "release"}:
+        released = api_json(f"repos/{payload['source']}/releases/tags/{payload['baseline_tag']}", token)
+        if released["draft"] or released["prerelease"] or released["tag_name"] != payload["baseline_tag"] or not released["published_at"]:
+            raise ValueError("baseline is not a published stable release")
+        reference = api_json(f"repos/{payload['source']}/git/ref/tags/{payload['baseline_tag']}", token)["object"]
+        for _ in range(4):
+            if reference["type"] == "commit":
+                break
+            if reference["type"] != "tag":
+                raise ValueError("invalid released baseline")
+            reference = api_json(f"repos/{payload['source']}/git/tags/{reference['sha']}", token)["object"]
+        if reference["type"] != "commit" or reference["sha"] != payload["baseline_sha"]:
+            raise ValueError("released baseline identity mismatch")
     run = api_json(f"repos/{payload['source']}/actions/runs/{payload['source_run']}", token)
     if (run["repository"]["id"] != payload["source_id"] or
             run["head_repository"]["id"] != payload["source_id"] or
@@ -489,8 +512,9 @@ def materialize():
     checked(["git", "-C", str(root), "-c", "core.autocrlf=false", "checkout", "--detach", payload["source_sha"]], work, env, log)
     checked(["git", "-C", str(root), "update-ref", "refs/remotes/origin/main", payload["base_sha"]], work, env, log)
     (work / "repository.bundle").unlink()
-    if payload["baseline_run"]:
-        restore_baseline(payload, root, work)
+    if payload["suite"] in {"performance", "release"}:
+        checked(["git", "-C", str(root), "worktree", "add", "--detach", str(work / "source-baseline"),
+                 payload["baseline_sha"]], work, env, log)
     output("source_root", str(root))
 
 
