@@ -169,6 +169,31 @@ class ProjectCiTests(unittest.TestCase):
 
 
 class ProjectCiCryptoTests(unittest.TestCase):
+    def test_explicit_sdk_key_reuse_preserves_backups_and_crypto_roles(self):
+        signing_private, signing_public = crypto.generate("sign")
+        input_private, input_public = crypto.generate("encrypt")
+        texts = {"request-signing-private.json": signing_private, "request-signing-public.json": signing_public,
+                 "builder-input-private.json": input_private, "builder-input-public.json": input_public}
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for name, text in texts.items():
+                (root / name).write_text(text)
+                (root / name).chmod(0o600)
+            actual = bootstrap.load_key_pairs(root, reuse_sdk_keys=True)
+            self.assertEqual(crypto.verify(crypto.sign({"purpose": "pair-check"}, actual[0]), actual[1]), {"purpose": "pair-check"})
+            self.assertEqual(crypto.fingerprint(actual[3]), crypto.fingerprint(input_public))
+            self.assertTrue(all((root / name).read_text() == text for name, text in texts.items()))
+            with self.assertRaises(FileNotFoundError):
+                bootstrap.load_key_pairs(root)
+
+    def test_shared_input_key_does_not_bypass_protocol_context(self):
+        private, public = crypto.generate("encrypt")
+        context = ci.message_context(str(uuid.uuid4()))
+        ciphertext = crypto.seal_message(b"PUBLIC_SYNTHETIC_CI_REQUEST", public, context)
+        self.assertEqual(crypto.open_message(ciphertext, private, context), b"PUBLIC_SYNTHETIC_CI_REQUEST")
+        with self.assertRaises(Exception):
+            crypto.open_message(ciphertext, private, dict(context, purpose="sdk-release-request"))
+
     def test_existing_tink_stream_authenticates_context_and_never_exposes_failed_output(self):
         private, public = crypto.generate("encrypt")
         with tempfile.TemporaryDirectory() as tmp:

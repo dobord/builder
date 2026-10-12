@@ -230,8 +230,12 @@ request and source ciphertext in every native job. Recipe commands run through
 stdout/stderr; only encrypted source bundles, diagnostics, reports, corpora and
 fixed-runner baselines leave jobs. Missing or failed lanes fail the entire run.
 
-This path uses dedicated CI input/signing keys and the existing `VCPKGSE1` Tink
-envelope. It does not reuse or rotate the SDK-release credentials or alter the
+This path uses separate signing/input/log cryptographic roles and the existing
+`VCPKGSE1` Tink envelope. Dedicated CI pairs are the default; explicit local
+`--reuse-sdk-keys` provisioning can read existing SDK pairs for the same roles
+without overwriting SDK secrets or backup files. Shared-key compromise/rotation
+then affects both contours; authenticated protocol contexts remain distinct.
+It does not alter the
 offline wheelhouse. `project-ci-requirements.lock` pins the official online
 CPython 3.12 Linux, Windows and macOS runtime. Source identity and approval
 patterns are private operator-provisioned policy, not discovered from source code.

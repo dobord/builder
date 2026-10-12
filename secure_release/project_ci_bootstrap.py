@@ -1,4 +1,4 @@
-"""LOCAL-only dedicated project-CI keys and gh-stdin provisioning."""
+"""LOCAL-only role-separated CI keys and explicit gh-stdin provisioning."""
 from __future__ import annotations
 import argparse
 import os
@@ -38,7 +38,27 @@ def gh(arguments, *, data=None):
     return result.stdout
 
 
-def configure(directory, revision, policy_file):
+def load_key_pairs(directory, *, reuse_sdk_keys=False):
+    directory = outside_worktree(directory)
+    signing = "request-signing" if reuse_sdk_keys else "ci-signing"
+    recipient = "builder-input" if reuse_sdk_keys else "ci-input"
+    def load(role, private):
+        path = directory / (role + ("-private.json" if private else "-public.json"))
+        if path.is_symlink() or (private and os.name != "nt" and path.stat().st_mode & 0o077):
+            raise ValueError("unprotected key backup")
+        return path.read_text()
+    signing_private, signing_public = load(signing, True), load(signing, False)
+    input_private, input_public = load(recipient, True), load(recipient, False)
+    if (crypto.canonical(crypto.parse(crypto.public_text(signing_private))) != crypto.canonical(crypto.parse(signing_public)) or
+            crypto.fingerprint(crypto.public_text(input_private)) != crypto.fingerprint(input_public)):
+        raise ValueError("key backup mismatch")
+    challenge = {"purpose": "local-project-ci-key-validation"}
+    if crypto.verify(crypto.sign(challenge, signing_private), signing_public) != challenge:
+        raise ValueError("invalid signing role")
+    return signing_private, signing_public, input_private, input_public
+
+
+def configure(directory, revision, policy_file, *, reuse_sdk_keys=False):
     directory = outside_worktree(directory)
     if not ci.SHA.fullmatch(revision):
         raise ValueError("reviewed full builder SHA required")
@@ -69,16 +89,7 @@ def configure(directory, revision, policy_file):
     existing = crypto.parse(gh(["api", f"repos/{policy['repository']}/actions/secrets"]))
     if {item["name"] for item in existing["secrets"]} & {"PROJECT_CI_SIGNING_PRIVATE_KEY_B64", "BUILDER_DISPATCH_TOKEN"}:
         raise ValueError("privileged CI credentials must not be repository scoped")
-    def load(role):
-        path = directory / (role + ".json")
-        if path.is_symlink() or (os.name != "nt" and path.stat().st_mode & 0o077):
-            raise ValueError("unprotected key backup")
-        return path.read_text()
-    signing_private, signing_public = load("ci-signing-private"), load("ci-signing-public")
-    input_private, input_public = load("ci-input-private"), load("ci-input-public")
-    if (crypto.public_text(signing_private) != signing_public or
-            crypto.fingerprint(crypto.public_text(input_private)) != crypto.fingerprint(input_public)):
-        raise ValueError("key backup mismatch")
+    signing_private, signing_public, input_private, input_public = load_key_pairs(directory, reuse_sdk_keys=reuse_sdk_keys)
     settings = {
         policy["repository"]: {"PROJECT_CI_SIGNING_PRIVATE_KEY_B64": crypto.b64(signing_private.encode()),
                                 "PROJECT_CI_INPUT_PUBLIC_KEY_B64": crypto.b64(input_public.encode())},
@@ -104,16 +115,20 @@ def main():
     parser.add_argument("--directory", type=Path, required=True)
     parser.add_argument("--builder-sha")
     parser.add_argument("--source-policy", type=Path)
+    parser.add_argument("--reuse-sdk-keys", action="store_true",
+                        help="Explicitly read existing same-role SDK backups; never overwrite SDK secrets")
     args = parser.parse_args()
     if os.environ.get("GITHUB_ACTIONS") == "true":
         raise SystemExit("LOCAL_CONFIGURATION_ONLY")
     try:
         if args.stage == "generate":
+            if args.reuse_sdk_keys:
+                raise ValueError("reuse is configure-only; SDK backups are never generated or overwritten")
             generate(args.directory)
         else:
             if args.source_policy is None:
                 raise ValueError("operator-reviewed source policy required")
-            configure(args.directory, args.builder_sha or "", args.source_policy)
+            configure(args.directory, args.builder_sha or "", args.source_policy, reuse_sdk_keys=args.reuse_sdk_keys)
     except Exception:
         raise SystemExit("PROJECT_CI_CONFIGURATION_FAILED; no key material is printed") from None
 
