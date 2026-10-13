@@ -518,6 +518,22 @@ def diagnostics():
     """Compiler/supervisor logs only; never credentialed prepare/fetch logs."""
     guard(BUILDER, event="workflow_dispatch")
     root = work()
+    if os.name == "nt" and os.environ.get("SDK_BUILD_WORKFLOW") == "build-windows-release.yml":
+        target = root / "windows-runtime-isolation"
+        target.mkdir(exist_ok=True)
+        script = (
+            "$ErrorActionPreference='Stop'; "
+            "$events=Get-WinEvent -FilterHashtable @{LogName='Application';Id=1000,1001;"
+            "StartTime=(Get-Date).AddMinutes(-20)} -ErrorAction SilentlyContinue | "
+            "Where-Object {$_.Message -match 'cef_static_combined_smoke'} | "
+            "Select-Object -First 20 TimeCreated,Id,Message; "
+            "$events | ConvertTo-Json -Depth 3")
+        try:
+            with (target / "application-events.json").open("wb") as output:
+                subprocess.run(["powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
+                               stdout=output, stderr=subprocess.DEVNULL, env=clean_env(), timeout=60)
+        except (OSError, subprocess.TimeoutExpired):
+            pass  # Diagnostic collection cannot alter the original failed result.
     source = root / "build.log"
     if not source.is_file():
         return
@@ -530,6 +546,10 @@ def diagnostics():
         candidates = []
         if (root / "windows-runtime-isolation").is_dir():
             candidates.extend(sorted((root / "windows-runtime-isolation").glob("*.log")))
+            candidates.extend(sorted((root / "windows-runtime-isolation").glob("*.json")))
+        if (root / "cef-consumer-evidence").is_dir():
+            for pattern in ("static-smoke.log", "cef-static.log", "static-smoke-status.json", "timeout-processes.json", "smoke-runs.json"):
+                candidates.extend(sorted((root / "cef-consumer-evidence").rglob(pattern)))
         runtime_logs = root / "upstream/buildtrees/cef-static/diagnostics"
         if runtime_logs.is_dir() and not runtime_logs.is_symlink():
             for pattern in ("smoke-progress-*.json", "stdout.txt", "stderr.txt", "cef-static.log"):
