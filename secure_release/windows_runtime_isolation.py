@@ -29,13 +29,13 @@ MAX_COLLISIONS = 65536
 
 def _tools(source: Path) -> tuple[Path, Path, Path]:
     paths = source / "third_party/llvm-build/Release+Asserts/bin"
-    nm, objcopy, librarian = paths / "llvm-nm.exe", paths / "llvm-objcopy.exe", paths / "clang-cl.exe"
+    nm, objcopy, librarian = paths / "llvm-nm.exe", paths / "llvm-objcopy.exe", paths / "lld-link.exe"
     if not all(t.is_file() for t in (nm, objcopy, librarian)):
         paths = Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "LLVM/bin"
-        nm, objcopy, librarian = paths / "llvm-nm.exe", paths / "llvm-objcopy.exe", paths / "clang-cl.exe"
+        nm, objcopy, librarian = paths / "llvm-nm.exe", paths / "llvm-objcopy.exe", paths / "lld-link.exe"
         for tool in (nm, objcopy, librarian):
             result = subprocess.check_output([str(tool), "--version"], text=True, timeout=30)
-            checked.require(re.search(r"(?:LLVM|clang) version 20\.1\.8\b", result) is not None,
+            checked.require(re.search(r"(?:LLVM version|LLD) 20\.1\.8\b", result) is not None,
                             "Reviewed Windows LLVM runtime-isolation tool changed")
     checked.require(all(safeio.regular(t) for t in (nm, objcopy, librarian)), "Missing Windows LLVM isolation tools")
     return nm, objcopy, librarian
@@ -211,7 +211,7 @@ def _rewrite_members(objcopy: Path, librarian: Path, archive: Path, output: Path
             response = root / "members.rsp"
             response.write_text("".join(subprocess.list2cmdline([str(p)]) + "\n" for p in reversed(members)), encoding="utf-8")
             command = [str(librarian)]
-            if "clang-cl" in librarian.name:
+            if "lld-link" in librarian.name:
                 command.append("/lib")
             command += ["/nologo", "/out:" + str(output), "@" + str(response)]
             result = subprocess.run(command, stdout=log, stderr=log, timeout=1800)

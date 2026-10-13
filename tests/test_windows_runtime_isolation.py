@@ -61,7 +61,7 @@ class WindowsCoffIsolationTests(unittest.TestCase):
             self.assertIn(b"duplicate symbol", failed.stderr)
             section_hash = subject._sections(engine)
             provider_hashes = {p: crypto.digest(p) for p in (ssl, crypt)}
-            receipt = subject.install(installed, root, root / "diagnostics", tools=(nm, objcopy, librarian))
+            receipt = subject.install(installed, root, root / "diagnostics", tools=(nm, objcopy, linker))
             self.assertEqual(subject._sections(engine), section_hash)
             self.assertTrue(all(crypto.digest(p) == h for p, h in provider_hashes.items()))
             succeeded = subprocess.run(command, capture_output=True)

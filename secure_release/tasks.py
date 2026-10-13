@@ -528,6 +528,8 @@ def diagnostics():
             shutil.copyfileobj(stream, out, 1024 * 1024)
         remaining = 32 * 1024**2
         candidates = []
+        if (root / "windows-runtime-isolation").is_dir():
+            candidates.extend(sorted((root / "windows-runtime-isolation").glob("*.log")))
         runtime_logs = root / "upstream/buildtrees/cef-static/diagnostics"
         if runtime_logs.is_dir() and not runtime_logs.is_symlink():
             for pattern in ("smoke-progress-*.json", "stdout.txt", "stderr.txt", "cef-static.log"):
