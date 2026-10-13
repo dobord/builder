@@ -6,6 +6,12 @@ repository's signed, HPKE-encrypted release plan, not in this repository.
 
 ## Trust boundary
 
+For opt-in operator-approved Docker endurance snapshots on ordinary hosted
+runners, see [encrypted Docker endurance CI](docs/docker-endurance-ci.md).
+That experimental branch workflow uses a five-hour qualification timer inside a
+six-hour job budget and uploads only authenticated ciphertext; it does not change
+SDK release/publication or existing project-CI policy.
+
 The source repository only signs/encrypts a small request and dispatches this
 repository. This repository does the actual Linux/Windows build. A separate
 `workflow_run` handler in the same reviewed builder revision independently
