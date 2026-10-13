@@ -125,9 +125,21 @@ def _sections(archive: Path) -> str:
                             checked.require(strings <= pos < end <= len(payload), "Invalid COFF section string")
                             section = payload[pos:end]
                         length, position = struct.unpack_from("<II", payload, offset + 16)
-                        checked.require(position + length <= len(payload), "COFF section payload escapes object")
-                        digest.update(struct.pack("<II", index, length) + section + b"\0")
-                        digest.update(hashlib.sha256(payload[position:position + length]).digest())
+                        characteristics = struct.unpack_from("<I", payload, offset + 36)[0]
+                        checked.require(length <= safeio.MAX_BYTES and
+                                        (position == 0 or position + length <= len(payload)),
+                                        "COFF section payload escapes object")
+                        checked.require(position != 0 or length == 0 or characteristics & 0x80,
+                                        "Initialized COFF section lacks file payload")
+                        # LLVM may materialize zero bytes for virtual COFF BSS.
+                        # Bind its extent/flags and prove any stored payload is zero.
+                        data = payload[position:position + length] if position else b""
+                        digest.update(struct.pack("<III", index, length, characteristics) + section + b"\0")
+                        if characteristics & 0x80:
+                            checked.require(not any(data), "COFF BSS unexpectedly contains initialized bytes")
+                            digest.update(hashlib.sha256(b"coff-zero-initialized-bss").digest())
+                        else:
+                            digest.update(hashlib.sha256(data).digest())
             if size & 1:
                 checked.require(stream.read(1) == b"\n", "Invalid COFF archive padding")
     return digest.hexdigest()
@@ -260,8 +272,10 @@ def install(installed: Path, source: Path, diagnostics: Path, *, tools=None) -> 
             expected = Counter()
             for (name, kind), count in before.items():
                 expected[mapping.get(name, name), kind] += count
-            checked.require(symbols(nm, output) == expected and _sections(output) == section_hash,
-                            "Windows runtime rewrite changed code or lost symbol references")
+            checked.require(symbols(nm, output) == expected,
+                            "Windows runtime rewrite lost symbol definitions or references")
+            checked.require(_sections(output) == section_hash,
+                            "Windows runtime rewrite changed ordered COFF section bytes, extents or flags")
             checked.require(crypto.digest(path) == original, "Windows engine archive changed during isolation")
             output.replace(path)
         records[path.relative_to(prefix).as_posix()] = {
