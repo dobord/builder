@@ -250,6 +250,9 @@ case-insensitive name matching for Windows. Linux recipes use host Python rather
 than the setup-python crypto runtime, preserving apt-provided interoperability
 modules. Ephemeral cleanup handles read-only Git pack files without following
 symlinks or Windows junctions.
+Windows Bash steps explicitly use the hosted Git Bash executable instead of the
+WSL launcher. Explicit recipe conditions retain Actions' implicit success guard
+unless they name a status function such as `always()` or `failure()`.
 `secure_release/project_ci.py` reauthenticates the signed
 request and source ciphertext in every native job. Recipe commands run through
 `project_ci_runner.py` with credential-free environments and privately captured
