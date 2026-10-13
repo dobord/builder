@@ -34,8 +34,11 @@ job is FAIL; a short pilot is never a five-hour qualification.
    remain independently controlled. The workflow refuses any other SHA, rerun
    attempt, additional code change, wrong purpose or expired signature.
 
-The workflow uses the existing input/signature secrets and the base64 public
-input-key backup. Validate those same-role key pairs locally before dispatch.
+The workflow uses isolated `ENDURANCE_CI_INPUT_PRIVATE_KEY`,
+`ENDURANCE_CI_VERIFY_PUBLIC_KEY` and `ENDURANCE_CI_INPUT_PUBLIC_KEY_B64` secrets,
+provisioned through `gh` stdin from the operator's same-role backups. Validate
+those input/signature key pairs locally before dispatch; SDK/project-CI secrets
+are neither replaced nor required by this experimental workflow.
 An unconfigured variable makes the job SKIP, which is not acceptance evidence.
 
 ## Execution and evidence

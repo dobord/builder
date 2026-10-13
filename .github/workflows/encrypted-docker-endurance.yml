@@ -30,9 +30,9 @@ jobs:
           -r requirements.lock
       - name: Authenticate private snapshot, execute Docker recipe, encrypt evidence
         env:
-          ENDURANCE_INPUT_PRIVATE_KEY: ${{ secrets.BUILDER_INPUT_PRIVATE_KEY }}
-          ENDURANCE_VERIFY_PUBLIC_KEY: ${{ secrets.REQUEST_VERIFY_PUBLIC_KEY }}
-          ENDURANCE_INPUT_PUBLIC_KEY_B64: ${{ secrets.PROJECT_CI_INPUT_PUBLIC_KEY_B64 }}
+          ENDURANCE_INPUT_PRIVATE_KEY: ${{ secrets.ENDURANCE_CI_INPUT_PRIVATE_KEY }}
+          ENDURANCE_VERIFY_PUBLIC_KEY: ${{ secrets.ENDURANCE_CI_VERIFY_PUBLIC_KEY }}
+          ENDURANCE_INPUT_PUBLIC_KEY_B64: ${{ secrets.ENDURANCE_CI_INPUT_PUBLIC_KEY_B64 }}
         run: python -m secure_release.docker_endurance run
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()

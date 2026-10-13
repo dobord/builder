@@ -21,6 +21,7 @@ INPUT = "ci/docker-endurance-input.enc"
 MAX_SOURCE = 100 * 1024**2
 FIELDS = {"schema", "purpose", "builder_code_sha", "source", "source_id", "source_base_sha",
           "source_digest", "recipe", "mode", "duration_seconds", "cycles", "created", "expires"}
+PHASE = "configuration"
 
 
 def input_context(revision):
@@ -124,6 +125,7 @@ def package(args):
 
 
 def run():
+    global PHASE
     root = Path(project_ci.required("GITHUB_WORKSPACE"))
     work = Path(project_ci.required("RUNNER_TEMP")) / "docker-endurance"
     work.mkdir(mode=0o700)
@@ -135,6 +137,7 @@ def run():
     status = {"schema": 1, "result": "fail", "phase": "admission", "context": run_context}
     failed = True
     try:
+        PHASE = "admission"
         if (int(project_ci.required("GITHUB_REPOSITORY_ID")) != project_ci.BUILDER_ID or
                 run_context["attempt"] != "1" or project_ci.required("GITHUB_EVENT_NAME") != "push" or
                 project_ci.required("GITHUB_REF") != "refs/heads/ci/encrypted-docker-endurance" or
@@ -162,6 +165,7 @@ def run():
             raise ValueError("missing approved recipe")
         status.update(phase="execution", mode=payload["mode"], source=payload["source"],
                       source_base_sha=payload["source_base_sha"], source_snapshot_sha256=payload["source_digest"])
+        PHASE = "execution"
         command = ["python3", str(recipe), "--reports", str(work / "reports"),
                    "--duration-seconds", str(payload["duration_seconds"]), "--cycles", str(payload["cycles"])]
         if payload["mode"] == "pilot":
@@ -191,11 +195,15 @@ def run():
         if (work / "reports").exists():
             import shutil
             shutil.move(str(work / "reports"), evidence / "reports")
+        PHASE = "evidence-archive"
         safeio.pack_tar(evidence, work / "evidence.tar.gz")
         target = Path(project_ci.required("RUNNER_TEMP")) / "cipher-endurance/evidence.enc"
+        PHASE = "evidence-encryption"
         crypto.encrypt_file(work / "evidence.tar.gz", target, public, run_context)
+        PHASE = "cleanup"
         project_ci.remove_staging(work)
     if failed:
+        PHASE = status["phase"]
         raise ValueError("qualification failed")
     print("ENCRYPTED_DOCKER_ENDURANCE_PASS")
 
@@ -218,8 +226,12 @@ def main():
     args = parser.parse_args()
     try:
         package(args) if args.stage == "package" else run()
-    except Exception:
-        raise SystemExit("ENCRYPTED_DOCKER_ENDURANCE_FAILED; inspect authenticated private evidence") from None
+    except Exception as error:
+        kind = type(error).__name__
+        if kind not in {"ValueError", "KeyError", "TypeError", "FileNotFoundError", "PermissionError"}:
+            kind = "other"
+        raise SystemExit("ENCRYPTED_DOCKER_ENDURANCE_FAILED phase=" + PHASE + " kind=" + kind +
+                         "; inspect authenticated private evidence") from None
 
 
 if __name__ == "__main__":
