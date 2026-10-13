@@ -416,14 +416,6 @@ def verify_source_policy(payload, token):
                      review["user"].get("type") == "User"}
         if len(approvals) < needed:
             raise ValueError("current-head independent approval missing")
-    comparison = pages(f"repos/{payload['source']}/dependency-graph/compare/{payload['base_sha']}...{payload['source_sha']}", token)
-    for dependency in comparison:
-        if dependency.get("change_type") != "added":
-            continue
-        for vulnerability in dependency["vulnerabilities"]:
-            severity = vulnerability["severity"].lower()
-            if severity not in {"low", "moderate", "high", "critical"} or severity != "low":
-                raise ValueError("dependency-review gate failed")
 
 
 def prepare():
@@ -471,6 +463,11 @@ def prepare():
     log = work / "prepare.log"
     checked(["git", "clone", "--no-checkout", str(work / "repository.bundle"), str(root)], work, env, log)
     checked(["git", "-C", str(root), "-c", "core.autocrlf=false", "checkout", "--detach", payload["source_sha"]], work, env, log)
+    from . import project_dependency_review
+    receipt = project_dependency_review.verify(root, payload, env)
+    (work / "dependency-review.json").write_bytes(crypto.canonical(receipt))
+    crypto.encrypt_file(work / "dependency-review.json", Path(required("RUNNER_TEMP")) / "cipher-dependency/dependency-review.enc",
+                        crypto.public_text(key_env("CI_INPUT_PRIVATE_KEY_B64")), builder_context("dependency-review"))
     lanes = recipes(root, payload["suite"])
     (work / "request.json").write_bytes(crypto.canonical(document))
     # Re-encrypt for this builder run/attempt before distributing to native jobs.
