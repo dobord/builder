@@ -7,6 +7,7 @@ import os
 import hashlib
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 
 from . import cef_build, cef_combined_smoke, cef_contract, cef_windows_iteration, crypto, safeio
@@ -111,6 +112,16 @@ def validate_binding(value: dict, cfg: dict) -> None:
 def run_engine(root: Path, cfg: dict, execute, environment: dict, private: str) -> None:
     if sys.platform != "win32":
         raise ValueError("Windows release requires native Windows")
+    dumps = root / "windows-crash-dumps"
+    dumps.mkdir()
+    key = r"HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\cef_static_combined_smoke.exe"
+    script = (f"$key='{key}'; New-Item -Path $key -Force | Out-Null; "
+              f"New-ItemProperty -Path $key -Name DumpFolder -PropertyType ExpandString -Value '{dumps}' -Force | Out-Null; "
+              "New-ItemProperty -Path $key -Name DumpType -PropertyType DWord -Value 1 -Force | Out-Null; "
+              "New-ItemProperty -Path $key -Name DumpCount -PropertyType DWord -Value 4 -Force | Out-Null")
+    with (root / "windows-crash-setup.log").open("wb") as log:
+        subprocess.run(["powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
+                       stdout=log, stderr=log, timeout=60, check=True)
     proof = binding(cfg)
     selected = proof["checkpoint"]
     api = Client(os.environ["GITHUB_TOKEN"])

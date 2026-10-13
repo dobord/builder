@@ -469,6 +469,8 @@ def build():
     configure = build_support.consumer_configure_command(source, out, root / "consumer-sdk", triplet)
     if cfg is not None:
         configure.append("-DCEF_STATIC_SMOKE_SOURCE=" + str(smoke_fixture))
+        if workflow == "build-windows-release.yml":
+            configure.append("-DCMAKE_EXE_LINKER_FLAGS=/MAP /MAPINFO:EXPORTS /DEBUG:FULL /INCREMENTAL:NO")
         if platform == "linux":
             from . import cef_consumer_linker
             configure.append(cef_consumer_linker.cmake_flag())
@@ -534,6 +536,20 @@ def diagnostics():
                                stdout=output, stderr=subprocess.DEVNULL, env=clean_env(), timeout=60)
         except (OSError, subprocess.TimeoutExpired):
             pass  # Diagnostic collection cannot alter the original failed result.
+        debugger = Path(os.environ.get("ProgramFiles(x86)", "C:/Program Files (x86)")) / "Windows Kits/10/Debuggers/x64/cdb.exe"
+        (target / "crash-debugger-status.json").write_bytes(crypto.canonical({
+            "debugger_available": debugger.is_file(),
+            "dump_count": len(list((root / "windows-crash-dumps").glob("*.dmp")))}))
+        if debugger.is_file():
+            for index, dump in enumerate(sorted((root / "windows-crash-dumps").glob("*.dmp"))[:4]):
+                try:
+                    with (target / f"crash-stack-{index}.log").open("wb") as output:
+                        subprocess.run([str(debugger), "-z", str(dump), "-y", str(root / "smoke-build/Release"),
+                                        "-i", str(root / "cef-consumer-deployed"),
+                                        "-c", ".ecxr; r; kv; !analyze -v; q"], stdout=output,
+                                       stderr=output, env=clean_env(), timeout=180)
+                except (OSError, subprocess.TimeoutExpired):
+                    pass
     source = root / "build.log"
     if not source.is_file():
         return
@@ -544,6 +560,8 @@ def diagnostics():
             shutil.copyfileobj(stream, out, 1024 * 1024)
         remaining = 32 * 1024**2
         candidates = []
+        for path in sorted((root / "smoke-build").rglob("*.map")):
+            candidates.append(path)
         if (root / "windows-runtime-isolation").is_dir():
             candidates.extend(sorted((root / "windows-runtime-isolation").glob("*.log")))
             candidates.extend(sorted((root / "windows-runtime-isolation").glob("*.json")))
