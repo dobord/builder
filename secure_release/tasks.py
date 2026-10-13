@@ -535,8 +535,8 @@ def diagnostics():
         for folder in sorted((root / "upstream/buildtrees").glob("*")):
             if folder.is_dir() and not folder.is_symlink():
                 candidates.extend(sorted(folder.glob("*.log")))
-    for folder in (root / "cef-logs", root / "cef-platform-probe/native-work/logs",
-                   root / "cef-consumer-evidence", root / "windows-runtime-isolation"):
+        for folder in (root / "cef-logs", root / "cef-platform-probe/native-work/logs",
+                       root / "cef-consumer-evidence", root / "windows-runtime-isolation"):
             if folder.is_dir() and not folder.is_symlink():
                 for pattern in ("*.log", "*.json", "*.txt"):
                     candidates.extend(sorted(folder.rglob(pattern)))
