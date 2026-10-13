@@ -228,6 +228,23 @@ immutable artifact hashes and the exact approved `PROJECT_CI_BUILDER_SHA` before
 executing any source. The signed `release` profile replaces the manual PR approval
 gate with successful complete exact-SHA qualification; ordinary sensitive-change
 CI review remains enforced, along with dependency review and all admission checks.
+Dependency review runs in the trusted prepare stage over authenticated Git
+objects using public OSV data, without GitHub Advanced Security. It checks
+introduced PR pins (the full inventory for non-PR requests), resolves action
+release versions as well as commits, and rejects unknown formats, unresolved
+versions, API failures and unknown or moderate-or-higher advisory severity.
+Allowlisted public upstream identities are the only query data; private
+manifests never leave staging. The run/attempt/request-bound receipt is encrypted
+as `dependency-review-RUN-ATTEMPT`. Supported inputs are literal CMake archives,
+bundled OpenSSL, public submodules, pinned actions/Python requirements, and direct
+official-baseline vcpkg dependencies including optional features. OSV coverage
+depends on its indexed Git commits, GitHub Actions, PyPI and OSS-Fuzz projects;
+host toolchain packages and uninstalled transitive dependencies are not scanned.
+The libvpx 1.17.0 security overlay is explicitly pinned by its complete port and
+manifest digests in the trusted extractor. Its resolved version replaces the
+official baseline's version, and classic-mode vcpkg lanes install the same
+overlay used by manifest consumers. Unknown or modified overlay files fail
+admission.
 `secure_release/project_ci.py` reauthenticates the signed
 request and source ciphertext in every native job. Recipe commands run through
 `project_ci_runner.py` with credential-free environments and privately captured
