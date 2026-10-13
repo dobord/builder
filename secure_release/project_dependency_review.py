@@ -218,7 +218,15 @@ def check(before, after, base_sha, source_sha):
                 raise ValueError("incomplete vulnerability data")
             if vulnerability.get("withdrawn"):
                 continue
-            severity = vulnerability.get("database_specific", {}).get("severity", "UNKNOWN").upper()
+            severity = vulnerability.get("database_specific", {}).get("severity")
+            if severity is None:
+                severities = [affected.get("ecosystem_specific", {}).get("severity") for affected in vulnerability.get("affected", [])]
+                severities = [value.upper() for value in severities if isinstance(value, str)]
+                ranking = {"LOW": 0, "MODERATE": 1, "MEDIUM": 1, "HIGH": 2, "CRITICAL": 3, "UNKNOWN": 4}
+                severity = max(severities, key=lambda value: ranking.get(value, 4)) if severities else "UNKNOWN"
+            if not isinstance(severity, str):
+                raise ValueError("invalid advisory severity")
+            severity = severity.upper().replace("MEDIUM", "MODERATE")
             findings.append({"query": json.loads(key), "id": vulnerability["id"], "severity": severity})
             if severity != "LOW":
                 raise ValueError("dependency-review gate failed")

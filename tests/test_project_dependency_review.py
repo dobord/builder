@@ -50,6 +50,7 @@ class DependencyReviewTests(unittest.TestCase):
         query = {review.query_key({"commit": "a" * 40})}
         for response in ({"vulns": [{"id": "SYNTHETIC", "database_specific": {"severity": "MODERATE"}}]},
                          {"vulns": [{"id": "SYNTHETIC"}]}, {"vulns": None}, [],
+                         {"vulns": [{"id": "SYNTHETIC", "affected": [{"ecosystem_specific": {"severity": "MEDIUM"}}]}]},
                          {"unexpected": "field"}):
             with self.subTest(response=response), patch.object(review, "public_json", return_value=response), self.assertRaises(ValueError):
                 review.check(set(), query, "b" * 40, "c" * 40)
