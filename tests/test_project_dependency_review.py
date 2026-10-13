@@ -1,5 +1,7 @@
 """Synthetic admission regressions; never query private package identities."""
 import unittest
+import hashlib
+import json
 from unittest.mock import patch
 
 from secure_release import project_dependency_review as review
@@ -69,6 +71,23 @@ class DependencyReviewTests(unittest.TestCase):
                 with self.subTest(repository=repository), self.assertRaises(ValueError):
                     review.public_commit(repository, revision)
             network.assert_not_called()
+
+    def test_security_overlay_changes_resolved_version_and_rejects_tampering(self):
+        manifest = b'{"name":"synthetic","builtin-baseline":"' + b"a" * 40 + b'","dependencies":["libvpx"]}'
+        overlay = {"portfile.cmake": b"# PUBLIC SYNTHETIC TEMPLATE\n", "vcpkg.json": b'{"name":"libvpx","version":"1.17.0"}'}
+        files = {"vcpkg.json": manifest, "vcpkg-configuration.json": b'{"overlay-ports":["packaging/vcpkg/overlays"]}'}
+        files.update({review.OVERLAY_ROOT + name: raw for name, raw in overlay.items()})
+        pins = {name: hashlib.sha256(raw).hexdigest() for name, raw in overlay.items()}
+        versions = {"default": {"libvpx": {"baseline": "1.16.0", "port-version": 2}}}
+        with patch.dict(review.OVERLAY_PINS, pins, clear=True), patch.object(review, "public_json", side_effect=lambda *a, **kw: json.loads(json.dumps(versions))):
+            queries = review.inventory(files, {})
+            self.assertIn(review.query_key({"package": {"ecosystem": "OSS-Fuzz", "name": "libvpx"}, "version": "1.17.0"}), queries)
+            self.assertNotIn(review.query_key({"package": {"ecosystem": "OSS-Fuzz", "name": "libvpx"}, "version": "1.16.0"}), queries)
+            for modification in ({review.OVERLAY_ROOT + "portfile.cmake": b"# TAMPERED\n"},
+                                 {review.OVERLAY_ROOT + "extra.cmake": b"# EXTRA\n"},
+                                 {"vcpkg-configuration.json": b"{}"}):
+                with self.subTest(modification=modification), self.assertRaises(ValueError):
+                    review.inventory(dict(files, **modification), {})
 
     def test_non_pr_qualification_cannot_compare_candidate_against_itself(self):
         candidate = {review.query_key({"commit": "a" * 40})}

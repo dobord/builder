@@ -239,6 +239,11 @@ bundled OpenSSL, public submodules, pinned actions/Python requirements, and dire
 official-baseline vcpkg dependencies including optional features. OSV coverage
 depends on its indexed Git commits, GitHub Actions, PyPI and OSS-Fuzz projects;
 host toolchain packages and uninstalled transitive dependencies are not scanned.
+The libvpx 1.17.0 security overlay is explicitly pinned by its complete port and
+manifest digests in the trusted extractor. Its resolved version replaces the
+official baseline's version, and classic-mode vcpkg lanes install the same
+overlay used by manifest consumers. Unknown or modified overlay files fail
+admission.
 `secure_release/project_ci.py` reauthenticates the signed
 request and source ciphertext in every native job. Recipe commands run through
 `project_ci_runner.py` with credential-free environments and privately captured

@@ -129,6 +129,11 @@ def prepare_vcpkg(root, env, log, payload):
     ci.checked(["git", "-C", str(staged), "fetch", "--depth", "1", "https://github.com/microsoft/vcpkg.git", baseline], root, env, log)
     ci.checked(["git", "-C", str(staged), "checkout", "--detach", "FETCH_HEAD"], root, env, log)
     shutil.copytree(root / "packaging/vcpkg/ports" / package, staged / "ports" / package, dirs_exist_ok=True)
+    overlay = root / "packaging/vcpkg/overlays/libvpx"
+    if overlay.is_dir():
+        # Admission already pins every byte of this security overlay. Preserve
+        # it in classic-mode package lanes as well as manifest-mode consumers.
+        shutil.copytree(overlay, staged / "ports/libvpx", dirs_exist_ok=True)
     port = staged / "ports" / package / "portfile.cmake"
     text = port.read_text()
     # Test this exact candidate, without giving private Git credentials to ports.

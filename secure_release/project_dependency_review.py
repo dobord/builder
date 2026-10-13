@@ -18,6 +18,9 @@ import urllib.request
 
 SHA = re.compile(r"[0-9a-f]{40}")
 MAX_BYTES = 16 * 1024**2
+OVERLAY_ROOT = "packaging/vcpkg/overlays/libvpx/"
+OVERLAY_PINS = {"portfile.cmake": "4c54d1ed1515d2dcf53f2e0ab60a5b85d367e9b0d7157b532a65c49fc2f93e43",
+                "vcpkg.json": "be5d1e2766c60d2eecc5101e72f0807746dca7757d745486c6f719faed58ba17"}
 PUBLIC_REPOSITORIES = {"actions/checkout", "actions/upload-artifact", "actions/download-artifact",
                        "actions/cache", "actions/setup-python", "actions/dependency-review-action",
                        "actions/github-script", "mymindstorm/setup-emsdk", "google/googletest",
@@ -109,12 +112,25 @@ def inventory(files, gitlinks, *, historical=False):
     """Extract explicit pins; source-controlled scanner config cannot suppress them."""
     import yaml
     queries = set()
+    overlay_files = {path.removeprefix(OVERLAY_ROOT): raw for path, raw in files.items() if path.startswith(OVERLAY_ROOT)}
+    if overlay_files:
+        if (set(overlay_files) != set(OVERLAY_PINS) or
+                any(hashlib.sha256(raw).hexdigest() != OVERLAY_PINS[name] for name, raw in overlay_files.items())):
+            raise ValueError("unreviewed dependency overlay")
+        if json.loads(files.get("vcpkg-configuration.json", b"{}")) != {"overlay-ports": ["packaging/vcpkg/overlays"]}:
+            raise ValueError("unconfigured dependency overlay")
+    elif "vcpkg-configuration.json" in files:
+        raise ValueError("unsupported dependency overlay configuration")
+    if any(path.startswith("packaging/vcpkg/overlays/") and not path.startswith(OVERLAY_ROOT) for path in files):
+        raise ValueError("unsupported dependency overlay")
     manifests = [(path, json.loads(raw)) for path, raw in files.items() if PurePosixPath(path).name == "vcpkg.json"]
     baselines = {document["builtin-baseline"] for _, document in manifests if "builtin-baseline" in document}
     if manifests and (len(baselines) != 1 or not SHA.fullmatch(next(iter(baselines)))):
         raise ValueError("vcpkg requires one exact public baseline")
     baseline = next(iter(baselines), None)
     versions = public_json(f"https://raw.githubusercontent.com/microsoft/vcpkg/{baseline}/versions/baseline.json")["default"] if baseline else {}
+    if overlay_files:
+        versions["libvpx"] = {"baseline": "1.17.0", "port-version": 0}
     for _, manifest in manifests:
         if manifest.get("overrides") or manifest.get("registries") or manifest.get("configuration"):
             raise ValueError("unsupported vcpkg resolution override")
@@ -126,7 +142,7 @@ def inventory(files, gitlinks, *, historical=False):
                     continue
                 if isinstance(dependency, dict) and any(key.startswith("version") for key in dependency):
                     raise ValueError("unsupported vcpkg version constraint")
-                if name in {"vcpkg-cmake", "vcpkg-cmake-config"}:
+                if name in {"vcpkg-cmake", "vcpkg-cmake-config", "vcpkg-cmake-get-vars", "vcpkg-msbuild"}:
                     queries.add(query_key({"commit": baseline}))
                     continue
                 if name not in VCPKG_PROJECTS or name not in versions or not isinstance(versions[name].get("baseline"), str):
@@ -135,6 +151,8 @@ def inventory(files, gitlinks, *, historical=False):
                                        "version": versions[name]["baseline"]}))
     for path, raw in files.items():
         name = PurePosixPath(path).name
+        if path == "vcpkg-configuration.json" and overlay_files:
+            continue
         if name in OTHER_MANIFESTS or name.endswith((".csproj", ".fsproj", ".gradle", ".gradle.kts")):
             raise ValueError("unsupported dependency manifest")
         text = raw.decode("utf-8")
@@ -256,7 +274,7 @@ def snapshot(root, revision, env, *, historical=False):
         name = PurePosixPath(path).name
         if kind == "commit":
             gitlinks[path] = digest
-        elif (name in OTHER_MANIFESTS | {"vcpkg.json", ".gitmodules", "CMakeLists.txt"}
+        elif (path.startswith("packaging/vcpkg/overlays/") or name in OTHER_MANIFESTS | {"vcpkg.json", ".gitmodules", "CMakeLists.txt"}
               or name.endswith((".cmake", ".csproj", ".fsproj", ".gradle", ".gradle.kts"))
               or name.startswith("requirements") and name.endswith((".txt", ".lock"))
               or path.endswith((".yml", ".yaml")) and ("/workflows/" in path or path.startswith("ci/builder/"))):
