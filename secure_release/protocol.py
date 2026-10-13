@@ -31,7 +31,7 @@ def release_platforms(payload: dict) -> tuple[str, ...]:
         return BUILD_WORKFLOWS["build-release.yml"]
     if payload["version"] == 2 and payload.get("platforms") == ["linux"]:
         return BUILD_WORKFLOWS["build-linux-release.yml"]
-    if payload["version"] == 2 and payload.get("platforms") == ["windows"]:
+    if payload["version"] in (2, 3) and payload.get("platforms") == ["windows"]:
         return BUILD_WORKFLOWS["build-windows-release.yml"]
     raise ValueError("invalid signed platform selection")
 
@@ -141,13 +141,18 @@ def verified(document: dict, public: str, *, allow_expired: bool = False) -> dic
     payload = crypto.verify(document, public)
     required = {"version", "release_id", "salt", "source_sha", "source_tag", "request_run", "request_attempt",
                  "builder_sha", "output_key", "input_key", "created", "expires", "source_id", "builder_id", "bin_id", "plan"}
-    if payload.get("version") == 2:
+    if payload.get("version") in (2, 3):
         required.add("platforms")
+    if payload.get("version") == 3:
+        required.add("requester_sha")
+        sha(payload.get("requester_sha"))
     if set(payload) != required:
         raise ValueError("invalid request schema")
     release_platforms(payload)
     if str(payload.get("source_tag", "")).endswith("-windows") and release_platforms(payload) != ("windows",):
         raise ValueError("Windows release tag requires a signed Windows-only request")
+    if payload["version"] == 3 and not str(payload.get("source_tag", "")).endswith("-windows"):
+        raise ValueError("Main retry requires an immutable Windows release tag")
     identifiers(payload["release_id"], payload["salt"])
     sha(payload["source_sha"]); sha(payload["builder_sha"])
     if not TAG.fullmatch(payload["source_tag"]) or (payload["source_id"], payload["builder_id"], payload["bin_id"]) != (IDS[SOURCE], IDS[BUILDER], IDS[BIN]):

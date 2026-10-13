@@ -11,6 +11,10 @@ checkpoint codec, host/workspace identity, envelope and source-repair checks are
 retained. The qualification checkpoint is not a release SDK.
 The recipe child reconstructs the original producer ref and reviewed logical
 image; the publication workflow still authenticates the new main-based run.
+An explicit retry may run the source requester on `main`: signed request version
+3 binds both the requester revision and the immutable Windows source-tag revision.
+Preparation independently requires both revisions in approved source-main history,
+the canonical Windows requester workflow and the exact unmoved tag.
 
 The repair binding is part of the vcpkg overlay before ABI computation and is
 installed as `share/cef-static/windows-qualified-engine.json`. Publication checks

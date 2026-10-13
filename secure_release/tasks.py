@@ -120,10 +120,14 @@ def request():
     guard(SOURCE)
     e = event()
     event_name = env("GITHUB_EVENT_NAME")
-    if not e["repository"]["private"] or env("GITHUB_REF_TYPE") != "tag":
-        raise ValueError("release requests require a private immutable tag ref")
-    tag = env("GITHUB_REF_NAME")
-    if not TAG.fullmatch(tag):
+    scope = os.environ.get("SDK_RELEASE_PLATFORMS", "all")
+    main_windows_request = (scope == "windows" and event_name == "workflow_dispatch"
+                            and env("GITHUB_REF") == "refs/heads/main"
+                            and env("GITHUB_REF_TYPE") == "branch")
+    if not e["repository"]["private"] or (env("GITHUB_REF_TYPE") != "tag" and not main_windows_request):
+        raise ValueError("release requests require an immutable tag or an explicit main Windows retry")
+    tag = e.get("inputs", {}).get("source_tag") if main_windows_request else env("GITHUB_REF_NAME")
+    if not isinstance(tag, str) or not TAG.fullmatch(tag):
         raise ValueError("invalid release tag")
     if event_name == "push":
         if e["deleted"] or not e.get("created"):
@@ -136,7 +140,8 @@ def request():
         continuation_inputs = values
     else:
         raise ValueError("unsupported release request event")
-    source_sha = sha(env("GITHUB_SHA"))
+    requester_sha = sha(env("GITHUB_SHA"))
+    source_sha = requester_sha
     builder_sha = sha(env("BUILDER_COMMIT_SHA"))
     scope = os.environ.get("SDK_RELEASE_PLATFORMS", "all")
     if scope not in {"all", "linux", "windows"}:
@@ -144,6 +149,19 @@ def request():
     workflow = "build-release.yml" if scope == "all" else f"build-{scope}-release.yml"
     platforms = BUILD_WORKFLOWS[workflow]
     client = Client(env("SOURCE_TOKEN"))
+    if main_windows_request:
+        if not tag.endswith("-windows"):
+            raise ValueError("Main Windows retry requires a Windows release tag")
+        ref = client.get(f"/repos/{SOURCE}/git/ref/tags/{tag}")["object"]
+        for _ in range(5):
+            if ref["type"] == "commit":
+                break
+            if ref["type"] != "tag":
+                raise ValueError("unsupported source tag ref")
+            ref = client.get(f"/repos/{SOURCE}/git/tags/{sha(ref['sha'])}")["object"]
+        if ref["type"] != "commit":
+            raise ValueError("source tag does not resolve to a commit")
+        source_sha = sha(ref["sha"])
     plan_path = "ci/release-windows-plan.json" if scope == "windows" else "ci/release-plan.json"
     record = client.get(f"/repos/{SOURCE}/contents/{plan_path}?ref={source_sha}")
     plan = crypto.parse(crypto.unb64(record["content"].replace("\n", "")))
@@ -168,6 +186,8 @@ def request():
                 "source_id": IDS[SOURCE], "builder_id": IDS[BUILDER], "bin_id": IDS[BIN], "plan": plan}
     if scope != "all":
         payload.update(version=2, platforms=[scope])
+    if main_windows_request:
+        payload.update(version=3, requester_sha=requester_sha)
     document = crypto.sign(payload, env("REQUEST_SIGNING_PRIVATE_KEY"))
     encrypted = crypto.seal_message(crypto.canonical(document), env("BUILDER_INPUT_PUBLIC_KEY"), message_context(rid, salt))
     answer = builder.dispatch(BUILDER, workflow, {"release_id": rid, "salt": salt, "request": encrypted})
@@ -229,7 +249,14 @@ def prepare():
     if requester_event not in {"push", "workflow_dispatch"}:
         raise ValueError("unsupported requester event")
     request_workflow = "release-windows-request.yml" if release_platforms(payload) == ("windows",) else "release-request.yml"
-    check_run(requester, SOURCE, request_workflow, payload["source_sha"],
+    requester_sha = payload.get("requester_sha", payload["source_sha"])
+    if payload["version"] == 3:
+        if requester_event != "workflow_dispatch" or requester.get("head_branch") != "main":
+            raise ValueError("Windows retry must be dispatched from approved source main")
+        request_comparison = client.get(f"/repos/{SOURCE}/compare/{requester_sha}...main")
+        if request_comparison["status"] not in {"identical", "ahead"}:
+            raise ValueError("Windows requester is outside approved main history")
+    check_run(requester, SOURCE, request_workflow, requester_sha,
               payload["request_attempt"], requester_event, success=False)
     ref = client.get(f"/repos/{SOURCE}/git/ref/tags/{payload['source_tag']}")["object"]
     for _ in range(5):

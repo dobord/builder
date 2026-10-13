@@ -1,6 +1,5 @@
 import copy
 import hashlib
-import json
 import os
 from pathlib import Path
 import tempfile
@@ -10,7 +9,7 @@ from unittest.mock import patch
 import uuid
 import zipfile
 
-from secure_release import cef_contract, crypto, protocol, publish, safeio, windows_sdk
+from secure_release import cef_contract, crypto, protocol, publish, safeio, tasks, windows_sdk
 
 
 class WindowsReleaseTests(unittest.TestCase):
@@ -31,6 +30,51 @@ class WindowsReleaseTests(unittest.TestCase):
         for platforms in (["windows", "linux"], ["windows", "windows"], [], "windows"):
             with self.assertRaises(ValueError):
                 protocol.release_platforms({"version": 2, "platforms": platforms})
+        self.assertEqual(protocol.release_platforms({"version": 3, "platforms": ["windows"]}), ("windows",))
+        with self.assertRaises(ValueError):
+            protocol.release_platforms({"version": 3, "platforms": ["linux"]})
+
+    def test_main_retry_signs_requester_and_immutable_source_separately(self):
+        private, public = crypto.generate("encrypt")
+        signing, verify = crypto.generate("sign")
+        plan = {"version": 1, "upstream_sha": "d" * 40, "smoke_path": "ci/smoke",
+                "ports": [{"name": "test", "repository": "dobord/test", "sha": "e" * 40}],
+                "platforms": {p: {"packages": ["test"]} for p in ("linux", "windows")}}
+        calls = []
+        class Api:
+            def __init__(self, token):
+                pass
+            def get(self, endpoint):
+                calls.append(endpoint)
+                if "/git/ref/tags/" in endpoint:
+                    return {"object": {"type": "commit", "sha": "c" * 40}}
+                if "/contents/ci/release-windows-plan.json?ref=" + "c" * 40 in endpoint:
+                    return {"content": crypto.b64(crypto.canonical(plan))}
+                raise AssertionError("Unexpected retry source endpoint")
+            def dispatch(self, repository, workflow, values):
+                if workflow != "build-windows-release.yml":
+                    raise AssertionError("Wrong retry workflow")
+                document = crypto.parse(crypto.open_message(values["request"], private,
+                    protocol.message_context(values["release_id"], values["salt"])))
+                calls.append(protocol.verified(document, verify))
+                return {"workflow_run_id": 99}
+        with tempfile.TemporaryDirectory() as folder:
+            env = {"GITHUB_REPOSITORY": protocol.SOURCE, "GITHUB_REPOSITORY_ID": str(protocol.IDS[protocol.SOURCE]),
+                   "RELEASE_ENABLED": "true", "GITHUB_EVENT_NAME": "workflow_dispatch",
+                   "GITHUB_REF": "refs/heads/main", "GITHUB_REF_TYPE": "branch", "GITHUB_REF_NAME": "main",
+                   "GITHUB_SHA": "b" * 40, "BUILDER_COMMIT_SHA": "a" * 40,
+                   "GITHUB_RUN_ID": "77", "GITHUB_RUN_ATTEMPT": "1", "SDK_RELEASE_PLATFORMS": "windows",
+                   "SOURCE_TOKEN": "fixture", "BUILDER_DISPATCH_TOKEN": "fixture",
+                   "REQUEST_SIGNING_PRIVATE_KEY": signing, "BUILDER_INPUT_PUBLIC_KEY": public,
+                   "ARTIFACT_ENCRYPTION_PUBLIC_KEY": public, "GITHUB_STEP_SUMMARY": str(Path(folder) / "summary")}
+            event = {"repository": {"private": True}, "inputs": {"source_tag": "v0.2.5-windows"}}
+            with patch.dict(os.environ, env), patch.object(tasks, "event", return_value=event), patch.object(tasks, "Client", Api):
+                tasks.request()
+            payload = calls[-1]
+            self.assertEqual(payload["version"], 3)
+            self.assertEqual(payload["requester_sha"], "b" * 40)
+            self.assertEqual(payload["source_sha"], "c" * 40)
+            self.assertEqual(payload["source_tag"], "v0.2.5-windows")
 
     def test_ready_checkpoint_is_bound_to_the_repaired_contract(self):
         cfg = self.configuration()
