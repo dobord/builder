@@ -244,6 +244,11 @@ manifest digests in the trusted extractor. Its resolved version replaces the
 official baseline's version, and classic-mode vcpkg lanes install the same
 overlay used by manifest consumers. Unknown or modified overlay files fail
 admission.
+Native recipe environments retain only allowlisted host-tool variables, with
+case-insensitive name matching for Windows. Linux recipes use host Python rather
+than the setup-python crypto runtime, preserving apt-provided interoperability
+modules. Ephemeral cleanup handles read-only Git pack files without following
+symlinks or Windows junctions.
 `secure_release/project_ci.py` reauthenticates the signed
 request and source ciphertext in every native job. Recipe commands run through
 `project_ci_runner.py` with credential-free environments and privately captured

@@ -89,6 +89,41 @@ class ProjectCiTests(unittest.TestCase):
                                     "ACTIONS_RUNTIME_TOKEN": "secret", "HOME": "/home/user"})
         self.assertEqual(env, {"PATH": "/bin", "HOME": "/home/user"})
 
+    def test_windows_environment_retains_case_normalized_host_tool_paths(self):
+        environment = {"PATH": "synthetic", "RUNNER_OS": "Windows", "PROGRAMFILES": "PUBLIC_TOOLS",
+                       "PROGRAMFILES(X86)": "PUBLIC_X86_TOOLS", "CHOCOLATEYINSTALL": "PUBLIC_CHOCO",
+                       "VCTOOLSINSTALLDIR": "PUBLIC_MSVC", "SOURCE_READ_TOKEN": "SYNTHETIC_SECRET"}
+        actual = ci.build_environment(environment)
+        for name in ("PROGRAMFILES", "PROGRAMFILES(X86)", "CHOCOLATEYINSTALL", "VCTOOLSINSTALLDIR"):
+            self.assertEqual(actual[name], environment[name])
+        self.assertNotIn("SOURCE_READ_TOKEN", actual)
+
+    def test_linux_recipes_use_host_python_not_the_builder_crypto_runtime(self):
+        toolchain = "/opt/hostedtoolcache/Python/3.12.15/x64/bin"
+        with patch.object(ci.sys, "executable", toolchain + "/python"):
+            environment = ci.build_environment({"RUNNER_OS": "Linux", "PATH": toolchain + ":/usr/bin:/bin"})
+        self.assertEqual(environment["PATH"], "/usr/bin:/bin")
+        with patch.object(ci.sys, "executable", "/usr/bin/python3"):
+            environment = ci.build_environment({"RUNNER_OS": "Linux", "PATH": "/usr/bin:/bin"})
+        self.assertEqual(environment["PATH"], "/usr/bin:/bin")
+
+    def test_cleanup_removes_read_only_git_staging_without_following_links(self):
+        import stat
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "staging"
+            root.mkdir()
+            pack = root / "public-synthetic.pack"
+            pack.write_bytes(b"PUBLIC_SYNTHETIC_GIT_OBJECT")
+            pack.chmod(stat.S_IRUSR)
+            ci.remove_staging(root)
+            self.assertFalse(root.exists())
+            if os.name != "nt":
+                link = Path(tmp) / "linked-staging"
+                link.symlink_to(Path(tmp), target_is_directory=True)
+                with self.assertRaises(ValueError):
+                    ci.remove_staging(link)
+                self.assertTrue(Path(tmp).is_dir())
+
     def test_payload_requires_fresh_exact_complete_identity(self):
         valid = payload()
         ci.validate_payload(valid)

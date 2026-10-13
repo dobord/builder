@@ -16,6 +16,7 @@ from pathlib import Path
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tarfile
@@ -132,7 +133,29 @@ def build_environment(environ):
              "ProgramData", "ALLUSERSPROFILE", "APPDATA", "LOCALAPPDATA", "HOMEDRIVE", "HOMEPATH",
              "PSModulePath", "ChocolateyInstall", "VCToolsInstallDir", "WindowsSdkDir", "VSINSTALLDIR",
              "VCINSTALLDIR", "UniversalCRTSdkDir", "INCLUDE", "LIB", "LIBPATH"}
-    return {name: value for name, value in environ.items() if name in names}
+    allowed = {name.upper() for name in names}
+    env = {name: value for name, value in environ.items() if name.upper() in allowed}
+    if environ.get("RUNNER_OS") == "Linux" and "PATH" in env:
+        # setup-python belongs to the trusted crypto stage. Native recipes use
+        # host Python so their apt-installed grpc/protobuf modules remain visible.
+        runtime_directory = sys.executable.rsplit("/", 1)[0]
+        runtime_paths = ({runtime_directory, runtime_directory.removesuffix("/bin")}
+                         if runtime_directory not in {"/bin", "/usr/bin", "/usr/local/bin"} else set())
+        env["PATH"] = ":".join(path for path in env["PATH"].split(":") if path not in runtime_paths)
+    return env
+
+
+def remove_staging(root):
+    """Remove ephemeral Git objects, including read-only pack files on Windows."""
+    if root.is_symlink() or root.is_junction():
+        raise ValueError("linked staging root")
+    def writable_retry(operation, path, error):
+        if (not isinstance(error, PermissionError) or operation not in {os.unlink, os.remove, os.rmdir}
+                or Path(path).is_symlink() or Path(path).is_junction()):
+            raise error
+        os.chmod(path, stat.S_IMODE(os.lstat(path).st_mode) | stat.S_IWUSR)
+        operation(path)
+    shutil.rmtree(root, onexc=writable_retry)
 
 
 def git_environment(environ, work):
@@ -603,7 +626,7 @@ def main():
             for root in (Path(required("RUNNER_TEMP")) / "project-ci", Path(required("RUNNER_TEMP")) / "project-ci-prepare",
                          Path(required("RUNNER_TEMP")) / "project-ci-package", Path(required("GITHUB_WORKSPACE")) / "private-source"):
                 if root.exists():
-                    shutil.rmtree(root)
+                    remove_staging(root)
         else:
             globals()[args.stage]()
     except Exception:
