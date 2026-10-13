@@ -4,14 +4,58 @@ The original checkpoint envelope, native identity and source repair checks are
 retained. A new relocated SDK consumer is mandatory; READY alone never publishes.
 """
 import os
+import hashlib
 from pathlib import Path
 import shutil
 import sys
 
-from . import cef_build, cef_contract, cef_windows_iteration, crypto
+from . import cef_build, cef_contract, cef_windows_iteration, crypto, safeio
 from . import cef_windows_source_repair as source_repair
 from .github import Client
 
+RECIPE_CHECKOUT = {
+    "git_archive_sha256": "022818396fc8716d072a6e8aea8913171982c5166d7a7593a4a4b4c983f318b7",
+    "native_recipe_sha256": "8f00579610d1a10eaae10b816ad2cd858eb2a3ae7abcae476258bc77d2dff531",
+    "files": 37,
+    "newlines": "windows-crlf",
+}
+
+
+def prepare_recipe_checkout(recipe: Path) -> None:
+    """Reproduce the exact authenticated producer checkout; never edit its codec."""
+    paths = list((recipe / "vcpkg/ports/cef-static").rglob("*")) + [
+        recipe / name for name in ("vcpkg/static/ci.py", "vcpkg/static/checkpoint.py",
+                                  "vcpkg/static/windows_slice.py",
+                                  "vcpkg/static/triplets/x64-windows-static.cmake")]
+    digest = hashlib.sha256()
+    files = []
+    for path in sorted(paths):
+        if path.is_symlink():
+            raise ValueError("Redirected Windows recipe checkout")
+        if path.is_file():
+            if not safeio.regular(path) or path.stat().st_size > 4 * 1024**2:
+                raise ValueError("Unsafe Windows recipe checkout input")
+            data = path.read_bytes()
+            digest.update(path.relative_to(recipe).as_posix().encode() + b"\0")
+            digest.update(data)
+            files.append((path, data))
+    if len(files) != RECIPE_CHECKOUT["files"]:
+        raise ValueError("Windows recipe checkout inventory changed")
+    if digest.hexdigest() == RECIPE_CHECKOUT["native_recipe_sha256"]:
+        return
+    if digest.hexdigest() != RECIPE_CHECKOUT["git_archive_sha256"]:
+        raise ValueError("Windows recipe archive differs from the exact pinned Git blobs")
+    converted = hashlib.sha256()
+    outputs = []
+    for path, data in files:
+        result = data.replace(b"\n", b"\r\n") if b"\0" not in data else data
+        converted.update(path.relative_to(recipe).as_posix().encode() + b"\0")
+        converted.update(result)
+        outputs.append((path, result))
+    if converted.hexdigest() != RECIPE_CHECKOUT["native_recipe_sha256"]:
+        raise ValueError("Windows recipe reconstruction does not match the authenticated producer")
+    for path, result in outputs:
+        path.write_bytes(result)
 
 def selected_checkpoint() -> dict:
     return crypto.parse((Path(__file__).resolve().parents[1] /
@@ -30,6 +74,7 @@ def binding(cfg: dict) -> dict:
         raise ValueError("Windows release must select the exact qualified repaired engine")
     return {"schema": 1, "kind": "windows-qualified-source-engine",
             "checkpoint": selected, "source_repair": source_repair.profile(),
+            "recipe_checkout": dict(RECIPE_CHECKOUT),
             "base_build_key": cef_contract.build_key(cfg, "windows")}
 
 
@@ -66,6 +111,7 @@ def run_engine(root: Path, cfg: dict, execute, environment: dict, private: str) 
         stream.write('\nfile(INSTALL "${CURRENT_PORT_DIR}/windows-qualified-engine.json" '
                      'DESTINATION "${CURRENT_PACKAGES_DIR}/share/cef-static")\n')
     recipe = root / "cef-recipe"
+    prepare_recipe_checkout(recipe)
     logs = root / "cef-logs"
     logs.mkdir()
     environment.update(cef_build.worker_environment(environment, cfg["recipe_commit"]))

@@ -15,6 +15,10 @@ An explicit retry may run the source requester on `main`: signed request version
 3 binds both the requester revision and the immutable Windows source-tag revision.
 Preparation independently requires both revisions in approved source-main history,
 the canonical Windows requester workflow and the exact unmoved tag.
+The native Windows recipe identity includes checkout bytes: its 37 pinned inputs
+are reconstructed from exact Git-archive LF bytes to the exact producer CRLF hash
+before invoking the unchanged checkpoint adapter. Neither ciphertext nor native
+checkpoint identity is modified.
 
 The repair binding is part of the vcpkg overlay before ABI computation and is
 installed as `share/cef-static/windows-qualified-engine.json`. Publication checks
