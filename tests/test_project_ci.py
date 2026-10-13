@@ -187,7 +187,8 @@ class ProjectCiTests(unittest.TestCase):
         env = {"GITHUB_REPOSITORY": ci.BUILDER, "GITHUB_REPOSITORY_ID": str(ci.BUILDER_ID),
                "GITHUB_SHA": "a" * 40, "CI_BUILDER_SHA": "a" * 40,
                "GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_RUN_ATTEMPT": "1", "GITHUB_RUN_ID": "2",
-               "CI_REQUEST": request, "CI_REQUEST_DIGEST": digest, "BUILDER_READ_TOKEN": "SYNTHETIC"}
+               "CI_REQUEST": request, "CI_REQUEST_DIGEST": digest, "BUILDER_READ_TOKEN": "SYNTHETIC",
+               "CI_SOURCE_POLICY": json.dumps({"repository": "dobord/synthetic", "repository_id": 1})}
         runs = [{"id": 1, "display_title": "Encrypted qualification " + digest},
                 {"id": 2, "display_title": "Encrypted qualification " + digest}]
         with patch.dict(os.environ, env), patch.object(ci, "pages", return_value=runs), patch.object(crypto, "open_message") as decrypt:

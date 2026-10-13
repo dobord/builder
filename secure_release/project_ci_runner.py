@@ -181,7 +181,8 @@ def run():
     job = lane["job"]
     env = ci.build_environment(os.environ)
     env.update({"GITHUB_WORKSPACE": str(root), "GITHUB_SHA": payload["source_sha"],
-                "GITHUB_REPOSITORY": payload["source"], "GITHUB_EVENT_NAME": "pull_request" if payload["pr"] else payload["source_event"],
+                "GITHUB_REPOSITORY": payload["source"], "GITHUB_EVENT_NAME": "pull_request" if payload["pr"] else
+                ("workflow_dispatch" if payload["schema"] == 2 else payload["source_event"]),
                 "GITHUB_BASE_REF": "main", "GITHUB_RUN_ID": ci.required("GITHUB_RUN_ID"),
                 "GITHUB_RUN_NUMBER": ci.required("GITHUB_RUN_NUMBER"), "GITHUB_RUN_ATTEMPT": ci.required("GITHUB_RUN_ATTEMPT"),
                 "RUNNER_TEMP": str(work)})
