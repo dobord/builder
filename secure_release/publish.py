@@ -127,6 +127,8 @@ def verify_result():
             if workflow_name == "build-windows-release.yml":
                 from . import windows_sdk
                 windows_sdk.validate_binding(evidence.get("windows_engine"), cfg)
+                from . import windows_runtime_isolation
+                windows_runtime_isolation.validate_archive(sdk, evidence.get("windows_runtime_isolation"))
             if workflow_name == "build-linux-release.yml":
                 from . import linux_sdk
                 if cfg.get("profile") != "static-third-party":

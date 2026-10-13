@@ -11,6 +11,7 @@ import sys
 
 from . import cef_build, cef_combined_smoke, cef_contract, cef_windows_iteration, crypto, safeio
 from . import cef_windows_source_repair as source_repair
+from . import windows_runtime_isolation
 from .github import Client
 
 RECIPE_CHECKOUT = {
@@ -98,6 +99,7 @@ def binding(cfg: dict) -> dict:
             "recipe_checkout": dict(RECIPE_CHECKOUT),
             "installer_source_sha256": INSTALLER_SOURCE_SHA256,
             "installer_profile": "qualified-checkout-and-python",
+            "runtime_isolation_profile": dict(windows_runtime_isolation.PROFILE),
             "base_build_key": cef_contract.build_key(cfg, "windows")}
 
 
@@ -132,7 +134,8 @@ def run_engine(root: Path, cfg: dict, execute, environment: dict, private: str) 
     # Both the semantic contract and repair proof are hashed by vcpkg before ABI lookup.
     with (port / "portfile.cmake").open("a", encoding="utf-8") as stream:
         stream.write('\nfile(INSTALL "${CURRENT_PORT_DIR}/windows-qualified-engine.json" '
-                     'DESTINATION "${CURRENT_PACKAGES_DIR}/share/cef-static")\n')
+                     'DESTINATION "${CURRENT_PACKAGES_DIR}/share/cef-static")\n'
+                     'file(WRITE "${CURRENT_PACKAGES_DIR}/share/cef-static/windows-runtime-isolation.json" "{}\\n")\n')
     recipe = root / "cef-recipe"
     cef_combined_smoke.prepare(root / "workspace/ci/smoke",
                                recipe / "vcpkg/ports/cef-static/smoke.c",

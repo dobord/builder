@@ -28,6 +28,13 @@ that file against the independently reconstructed binding. The final relocated
 combined consumer must pass the existing Windows browser/renderer module audit
 three times with the build, installed and engine workspaces hidden.
 
+Generated COFF engine archives are namespaced against the complete final static
+provider closure. The rewrite preserves ordered section bytes and checks every
+global definition/reference against one collision map. Provider archives and
+public CEF APIs are retained. The ABI-tracked profile and owned installed receipt
+bind all derivative/provider hashes; publication independently checks the actual
+SDK ZIP against that receipt before writing release assets.
+
 Assets are the Windows static-release SDK ZIP, `release-manifest.json` and
 `SHA256SUMS` under the separate `v0.2.5-windows` release in private `vcpkg-bin`.
 Only encrypted source, package-cache, SDK and diagnostic files leave builder jobs.

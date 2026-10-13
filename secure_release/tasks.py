@@ -431,6 +431,11 @@ def build():
     finally:
         _persist_binary_cache(binary_cache, cache_key, platform, input_private)
     input_private = None
+    windows_isolation = None
+    if workflow == "build-windows-release.yml" and cfg is not None:
+        from . import windows_runtime_isolation
+        windows_isolation = windows_runtime_isolation.install(
+            installed, Path(env("RUNNER_TEMP")) / "w/download/chromium/src", root / "windows-runtime-isolation")
     linux_review = None
     linux_publication = workflow == "build-linux-release.yml" and cfg is not None
     if linux_publication:
@@ -448,6 +453,8 @@ def build():
         source_review = linux_sdk.package(root, sdk, package, linux_review, platform_probe)
     else:
         safeio.sdk_zip(sdk, package)
+    if windows_isolation is not None:
+        windows_runtime_isolation.validate_archive(package, windows_isolation)
     safeio.extract_zip(package, root / "consumer-sdk")
     source = root / "workspace" / payload["plan"]["smoke_path"]
     smoke_fixture = root / "cef-recipe/vcpkg/ports/cef-static/smoke.c"
@@ -494,6 +501,7 @@ def build():
                             "profile": cfg["profile"], "consumer": cef_proof}
         if workflow == "build-windows-release.yml":
             manifest["cef"]["windows_engine"] = windows_sdk.binding(cfg)
+            manifest["cef"]["windows_runtime_isolation"] = windows_isolation
         if platform_preflight is not None:
             manifest["cef"]["platform_preflight"] = platform_preflight
         if cpp_proof is not None:
@@ -527,8 +535,8 @@ def diagnostics():
         for folder in sorted((root / "upstream/buildtrees").glob("*")):
             if folder.is_dir() and not folder.is_symlink():
                 candidates.extend(sorted(folder.glob("*.log")))
-        for folder in (root / "cef-logs", root / "cef-platform-probe/native-work/logs",
-                       root / "cef-consumer-evidence"):
+    for folder in (root / "cef-logs", root / "cef-platform-probe/native-work/logs",
+                   root / "cef-consumer-evidence", root / "windows-runtime-isolation"):
             if folder.is_dir() and not folder.is_symlink():
                 for pattern in ("*.log", "*.json", "*.txt"):
                     candidates.extend(sorted(folder.rglob(pattern)))
