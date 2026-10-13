@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import platform
 import re
 import shutil
 import stat
@@ -27,6 +28,291 @@ VCPKG = "39dccd415da14d8051559d66069019475d95787c"
 CEF = "03abd124ebe3b8a57fb78470a75b5aa3ce064e31"
 TRIPLET = "x64-windows-static-release"
 WORKFLOW = "cef-windows-engine-iteration.yml"
+
+# Hosted runner image labels roll independently of the pinned CEF source and
+# recipe. The private checkpoint codec intentionally binds ImageVersion. Permit
+# a legacy logical identity only after the current Windows host proves the exact
+# reviewed ABI/toolchain fingerprint; never edit the checkpoint manifest.
+LEGACY_CHECKPOINT_IMAGE_BY_RUN = {
+    37441180545: "20260927.320.1",
+}
+REVIEWED_LEGACY_IMAGE_MIGRATIONS = {
+    ("20260927.320.1", "20261004.326.1"): {
+        "schema": 1,
+        "os_build": "20348",
+        "ubr": 5622,
+        "machine": "amd64",
+        "python": "3.12.10",
+        "vc_tools": "14.44.35207",
+        "windows_sdk": "10.0.26100.0",
+        "ucrt": "10.0.26100.0",
+        "llvm": "20.1.8",
+    },
+}
+
+
+# The unchanged private checkpoint codec binds the absolute work path. Exact #51
+# was authenticated and restored at this hosted-runner path. Compile at a much
+# shorter same-volume path so Win32 GetFullPathNameA can resolve Blink's longest
+# generated union headers without weakening compiler or warning policy.
+REVIEWED_WINDOWS_RUNNER_TEMP = r"D:\a\_temp"
+LEGACY_WORK_BASENAME = "cef-windows-engine-work"
+SHORT_WORK_BASENAME = "w"
+LEGACY_CHECKPOINT_WORK = REVIEWED_WINDOWS_RUNNER_TEMP + "\\" + LEGACY_WORK_BASENAME
+CURRENT_CHECKPOINT_WORK = REVIEWED_WINDOWS_RUNNER_TEMP + "\\" + SHORT_WORK_BASENAME
+
+
+def _safe_workspace_root(path: Path) -> object:
+    info = path.lstat()
+    if (not stat.S_ISDIR(info.st_mode) or path.is_symlink()
+            or getattr(info, "st_file_attributes", 0) & 0x400):
+        raise ValueError("Windows CEF workspace root is redirected")
+    return info
+
+
+def checkpoint_workspace_paths(
+    temp: Path, selected: dict | None, producer_summary: dict | None,
+    current_build_key: str,
+) -> tuple[Path, Path]:
+    if os.name != "nt" or sys.platform != "win32":
+        raise ValueError("Windows checkpoint workspace review requires native Windows")
+    temp = temp.resolve(strict=True)
+    _safe_workspace_root(temp)
+    if str(temp).casefold() != REVIEWED_WINDOWS_RUNNER_TEMP.casefold():
+        raise ValueError("Unreviewed Windows runner temp path; refusing checkpoint reuse")
+    legacy = (temp / LEGACY_WORK_BASENAME).resolve()
+    short = (temp / SHORT_WORK_BASENAME).resolve()
+    if (str(legacy).casefold() != LEGACY_CHECKPOINT_WORK.casefold()
+            or str(short).casefold() != CURRENT_CHECKPOINT_WORK.casefold()):
+        raise ValueError("Windows checkpoint workspace path review changed")
+    if selected is None:
+        return short, short
+    if crypto.canonical(selected) == crypto.canonical(source_repair.UPGRADE_V14):
+        # Exact authenticated #51 predates the public work-path summary fields.
+        return legacy, short
+    if crypto.canonical(selected) == crypto.canonical(source_repair.UPGRADE_V26):
+        if (not isinstance(producer_summary, dict)
+                or producer_summary.get("workspace_path_verified") is not True
+                or producer_summary.get("checkpoint_work_identity") != str(short)):
+            raise ValueError("Reviewed V26 checkpoint lacks exact short-workspace proof")
+        return short, short
+    if crypto.canonical(selected) == crypto.canonical(source_repair.UPGRADE_V23):
+        if (not isinstance(producer_summary, dict)
+                or producer_summary.get("workspace_path_verified") is not True
+                or producer_summary.get("checkpoint_work_identity") != str(short)):
+            raise ValueError("Reviewed V23 checkpoint lacks exact short-workspace proof")
+        return short, short
+    if crypto.canonical(selected) == crypto.canonical(source_repair.UPGRADE_V21):
+        if (not isinstance(producer_summary, dict)
+                or producer_summary.get("workspace_path_verified") is not True
+                or producer_summary.get("checkpoint_work_identity") != str(short)):
+            raise ValueError("Reviewed V21 checkpoint lacks exact short-workspace proof")
+        return short, short
+    if crypto.canonical(selected) == crypto.canonical(source_repair.UPGRADE_V19):
+        if (not isinstance(producer_summary, dict)
+                or producer_summary.get("workspace_path_verified") is not True
+                or producer_summary.get("checkpoint_work_identity") != str(short)):
+            raise ValueError("Reviewed V19 checkpoint lacks exact short-workspace proof")
+        return short, short
+    if crypto.canonical(selected) == crypto.canonical(source_repair.UPGRADE_V16):
+        if (not isinstance(producer_summary, dict)
+                or producer_summary.get("workspace_path_verified") is not True
+                or producer_summary.get("checkpoint_work_identity") != str(short)):
+            raise ValueError("Reviewed V16 checkpoint lacks exact short-workspace proof")
+        return short, short
+    if crypto.canonical(selected) == crypto.canonical(source_repair.UPGRADE_V15):
+        if (not isinstance(producer_summary, dict)
+                or producer_summary.get("workspace_path_verified") is not True
+                or producer_summary.get("checkpoint_work_identity") != str(short)):
+            raise ValueError("Reviewed V15 checkpoint lacks exact short-workspace proof")
+        return short, short
+    if selected.get("build_key") == current_build_key:
+        if (not isinstance(producer_summary, dict)
+                or producer_summary.get("workspace_path_verified") is not True
+                or producer_summary.get("checkpoint_work_identity") != str(short)):
+            raise ValueError("Current Windows checkpoint lacks exact short-workspace proof")
+        return short, short
+    raise ValueError("No reviewed Windows checkpoint workspace transition")
+
+
+def relocate_workspace(source: Path, target: Path) -> bool:
+    source = source.resolve(strict=True)
+    target = target.resolve()
+    if source == target:
+        return False
+    if source.parent != target.parent:
+        raise ValueError("Windows CEF workspace relocation must stay in one directory")
+    if os.path.lexists(target):
+        raise ValueError("Windows CEF short workspace already exists")
+    before = _safe_workspace_root(source)
+    source.rename(target)
+    after = _safe_workspace_root(target)
+    if (os.path.lexists(source)
+            or (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino)):
+        raise ValueError("Windows CEF workspace relocation changed filesystem identity")
+    return True
+
+
+def _version_output(command: list[str], pattern: str) -> str:
+    output = subprocess.check_output(
+        command, text=True, stderr=subprocess.STDOUT, timeout=60
+    ).splitlines()
+    if not output:
+        raise ValueError("Critical Windows host tool returned no version")
+    match = re.search(pattern, output[0])
+    if not match:
+        raise ValueError("Critical Windows host tool version is unrecognized")
+    return match.group(1)
+
+
+def critical_windows_host_fingerprint() -> dict:
+    if os.name != "nt":
+        raise ValueError("Windows host fingerprint requires native Windows")
+    import winreg
+
+    with winreg.OpenKey(
+        winreg.HKEY_LOCAL_MACHINE,
+        r"SOFTWARE\Microsoft\Windows NT\CurrentVersion",
+    ) as key:
+        build = str(winreg.QueryValueEx(key, "CurrentBuildNumber")[0])
+        ubr = winreg.QueryValueEx(key, "UBR")[0]
+    if not re.fullmatch(r"[0-9]{4,6}", build) or type(ubr) is not int:
+        raise ValueError("Windows build identity is unrecognized")
+
+    program_files_x86 = Path(os.environ.get("ProgramFiles(x86)", ""))
+    if not program_files_x86.is_absolute():
+        raise ValueError("ProgramFiles(x86) is required for Windows host fingerprint")
+    vswhere = program_files_x86 / "Microsoft Visual Studio/Installer/vswhere.exe"
+    if not vswhere.is_file() or vswhere.is_symlink():
+        raise ValueError("Visual Studio discovery tool is missing")
+    installation = subprocess.check_output(
+        [
+            str(vswhere), "-latest", "-products", "*", "-version", "[17.0,18.0)",
+            "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+            "-property", "installationPath",
+        ],
+        text=True, timeout=60,
+    ).strip()
+    vs = Path(installation)
+    if not installation or not vs.is_absolute() or not vs.is_dir() or vs.is_symlink():
+        raise ValueError("Visual Studio installation is invalid")
+    vc_tools = (
+        vs / "VC/Auxiliary/Build/Microsoft.VCToolsVersion.default.txt"
+    ).read_text(encoding="utf-8-sig").strip()
+    if not re.fullmatch(r"14\.[0-9]+\.[0-9]+", vc_tools):
+        raise ValueError("MSVC toolset version is invalid")
+
+    vcvars = vs / "VC/Auxiliary/Build/vcvarsall.bat"
+    if not vcvars.is_file() or vcvars.is_symlink():
+        raise ValueError("vcvarsall.bat is missing")
+    with tempfile.TemporaryDirectory(prefix=".windows-host-fingerprint-") as folder:
+        batch = Path(folder) / "vcenv.cmd"
+        batch.write_text(
+            '@echo off\r\n'
+            f'call "{vcvars}" x64 >nul\r\n'
+            'if errorlevel 1 exit /b %errorlevel%\r\n'
+            'set\r\n',
+            encoding="utf-8",
+        )
+        environment_text = subprocess.check_output(
+            ["cmd.exe", "/d", "/c", str(batch)],
+            text=True, errors="replace", timeout=120,
+        )
+    vcenv = {}
+    for line in environment_text.splitlines():
+        if "=" in line:
+            key, value = line.split("=", 1)
+            vcenv[key.casefold()] = value.strip()
+    sdk = vcenv.get("windowssdkversion", "").rstrip("\\/")
+    ucrt = vcenv.get("ucrtversion", "").rstrip("\\/")
+    if (not re.fullmatch(r"10\.0\.[0-9]+\.0", sdk)
+            or not re.fullmatch(r"10\.0\.[0-9]+\.0", ucrt)
+            or vcenv.get("vctoolsversion") != vc_tools
+            or vcenv.get("vscmd_arg_tgt_arch", "").lower() != "x64"):
+        raise ValueError("Visual Studio x64 environment is inconsistent")
+
+    program_files = Path(os.environ.get("ProgramFiles", ""))
+    clang = program_files / "LLVM/bin/clang-cl.exe"
+    if not clang.is_file() or clang.is_symlink():
+        raise ValueError("Reviewed Windows LLVM installation is missing")
+    llvm = _version_output(
+        [str(clang), "--version"], r"clang version ([0-9]+\.[0-9]+\.[0-9]+)"
+    )
+    return {
+        "schema": 1,
+        "os_build": build,
+        "ubr": ubr,
+        "machine": platform.machine().lower(),
+        "python": platform.python_version(),
+        "vc_tools": vc_tools,
+        "windows_sdk": sdk,
+        "ucrt": ucrt,
+        "llvm": llvm,
+    }
+
+
+def _validate_windows_fingerprint(value: object) -> None:
+    fields = {
+        "schema", "os_build", "ubr", "machine", "python",
+        "vc_tools", "windows_sdk", "ucrt", "llvm",
+    }
+    if (not isinstance(value, dict) or set(value) != fields
+            or value.get("schema") != 1
+            or type(value.get("ubr")) is not int
+            or not 0 <= value["ubr"] < 100000
+            or not re.fullmatch(r"[0-9]{4,6}", str(value.get("os_build", "")))
+            or value.get("machine") != "amd64"):
+        raise ValueError("Invalid Windows checkpoint host fingerprint")
+    for key in ("python", "vc_tools", "windows_sdk", "ucrt", "llvm"):
+        item = value.get(key)
+        if not isinstance(item, str) or not re.fullmatch(r"[0-9]+(?:\.[0-9]+){2,3}", item):
+            raise ValueError("Invalid Windows checkpoint host fingerprint")
+
+
+def checkpoint_image_identity(selected: dict | None, producer_summary: dict | None,
+                              summary: dict) -> str:
+    actual = os.environ.get("ImageVersion")
+    if not actual or not re.fullmatch(r"[0-9.]{1,64}", actual):
+        raise ValueError("ImageVersion is required for Windows checkpoint qualification")
+    current = critical_windows_host_fingerprint()
+    _validate_windows_fingerprint(current)
+    summary["checkpoint_host_verified"] = False
+    if selected is None:
+        logical = actual
+    else:
+        logical = (
+            producer_summary.get("checkpoint_image_identity")
+            if isinstance(producer_summary, dict) else None
+        )
+        producer_fingerprint = (
+            producer_summary.get("critical_host_fingerprint")
+            if isinstance(producer_summary, dict) else None
+        )
+        if logical is None:
+            logical = LEGACY_CHECKPOINT_IMAGE_BY_RUN.get(selected["run"])
+        if not isinstance(logical, str) or not re.fullmatch(r"[0-9.]{1,64}", logical):
+            raise ValueError("Checkpoint producer image identity is unavailable")
+        if actual != logical:
+            if producer_fingerprint is not None:
+                _validate_windows_fingerprint(producer_fingerprint)
+                if producer_fingerprint != current:
+                    raise ValueError(
+                        "Critical Windows host fingerprint changed; refusing checkpoint reuse"
+                    )
+            else:
+                reviewed = REVIEWED_LEGACY_IMAGE_MIGRATIONS.get((logical, actual))
+                if reviewed != current:
+                    raise ValueError(
+                        "Windows runner image migration is not reviewed for this host fingerprint"
+                    )
+    summary.update({
+        "runner_image_actual": actual,
+        "checkpoint_image_identity": logical,
+        "critical_host_fingerprint": current,
+        "runner_image_migrated": actual != logical,
+        "checkpoint_host_verified": True,
+    })
+    return logical
 
 
 def git_head(path: Path) -> str:
@@ -195,6 +481,60 @@ def verify_producer_summary(api: Client, selected: dict) -> dict:
     return value
 
 
+CHECKPOINT_DOWNLOAD_ATTEMPTS = 2
+
+
+def _recheck_checkpoint_download(api: Client, selected: dict) -> None:
+    run_id, attempt, revision = (
+        selected["run"], selected["attempt"], selected["producer_sha"]
+    )
+    expected = f"cef-windows-engine-checkpoint-{run_id}-{attempt}"
+    matches = [
+        item for item in api.artifacts(BUILDER, run_id)
+        if item.get("id") == selected["artifact_id"]
+    ]
+    if len(matches) != 1:
+        raise ValueError("Selected Windows CEF checkpoint artifact changed during download")
+    artifact = matches[0]
+    if (artifact.get("name") != expected or artifact.get("expired") is not False
+            or artifact.get("digest") != "sha256:" + selected["artifact_sha256"]
+            or artifact.get("workflow_run", {}).get("id") != run_id
+            or artifact.get("workflow_run", {}).get("head_sha") != revision):
+        raise ValueError("Windows CEF checkpoint artifact changed during download")
+    current = api.get(f"/repos/{BUILDER}/actions/runs/{run_id}")
+    if (current.get("run_attempt") != attempt
+            or current.get("status") != "completed"
+            or current.get("conclusion") != "success"
+            or current.get("head_sha") != revision):
+        raise ValueError("Windows CEF checkpoint producer changed during download")
+
+
+def download_checkpoint_transport(
+    api: Client, selected: dict, target: Path
+) -> None:
+    endpoint = (
+        f"/repos/{BUILDER}/actions/artifacts/{selected['artifact_id']}/zip"
+    )
+    for index in range(CHECKPOINT_DOWNLOAD_ATTEMPTS):
+        try:
+            api.download(
+                endpoint, target, selected["artifact_sha256"],
+                max_size=cef_cache.MAX_TOTAL,
+            )
+            return
+        except ValueError as error:
+            if (str(error) != "download digest mismatch"
+                    or index + 1 >= CHECKPOINT_DOWNLOAD_ATTEMPTS):
+                raise
+            if os.path.lexists(target) or os.path.lexists(
+                    target.with_suffix(target.suffix + ".part")):
+                raise ValueError(
+                    "Failed Windows CEF checkpoint download published partial output"
+                ) from error
+            _recheck_checkpoint_download(api, selected)
+    raise AssertionError("unreachable")
+
+
 def restore_checkpoint(selected: dict, destination: Path, build_key: str,
                        private_key: str) -> dict:
     api = Client(os.environ["GITHUB_TOKEN"])
@@ -239,10 +579,7 @@ def restore_checkpoint(selected: dict, destination: Path, build_key: str,
             prefix=".windows-cef-fetch-", dir=destination.parent) as folder:
         root = Path(folder)
         archive = root / "artifact.zip"
-        api.download(
-            f"/repos/{BUILDER}/actions/artifacts/{artifact['id']}/zip",
-            archive, selected["artifact_sha256"], max_size=cef_cache.MAX_TOTAL,
-        )
+        download_checkpoint_transport(api, selected, archive)
         encrypted = root / "ciphertext"
         encrypted.mkdir()
         with zipfile.ZipFile(archive) as stream:
@@ -310,13 +647,15 @@ def main() -> None:
     selected = lock["checkpoint"]
     input_build_key, repair_origin = source_repair.restore_contract(selected, base_build_key)
 
-    engine_work = temp / "cef-windows-engine-work"
+    legacy_engine_work = temp / LEGACY_WORK_BASENAME
+    short_engine_work = temp / SHORT_WORK_BASENAME
+    engine_work = legacy_engine_work
     engine_logs = temp / "cef-windows-engine-logs"
     checkpoint = temp / "cef-windows-engine-checkpoint"
     encrypted = temp / "cef-windows-engine-checkpoint-encrypted"
     summary_path = temp / "cef-windows-engine-summary.json"
-    for path in (engine_work, engine_logs, checkpoint, encrypted):
-        if path.exists():
+    for path in (legacy_engine_work, short_engine_work, engine_logs, checkpoint, encrypted):
+        if os.path.lexists(path):
             raise ValueError("Windows CEF iteration requires fresh runner paths")
 
     summary = {
@@ -352,8 +691,29 @@ def main() -> None:
         "CEF_STATIC_BUILD_TIMEOUT_SECONDS": "18000",
         "CEF_STATIC_JOBS": "4",
     })
-    stage = "restore"
+    stage = "checkpoint-host-identity"
     try:
+        producer_summary = None
+        if selected is not None:
+            token = os.environ.get("GITHUB_TOKEN")
+            if not token:
+                raise ValueError("GITHUB_TOKEN is required to review checkpoint host compatibility")
+            producer_summary = verify_producer_summary(Client(token), selected)
+        checkpoint_image = checkpoint_image_identity(selected, producer_summary, summary)
+        # Keep the real runner identity in this process and public summary. Only
+        # the unchanged private recipe child receives the reviewed logical image
+        # so its strict checkpoint identity comparison remains exact.
+        recipe_env["ImageVersion"] = checkpoint_image
+        stage = "checkpoint-work-identity"
+        restore_work, engine_work = checkpoint_workspace_paths(
+            temp, selected, producer_summary, build_key
+        )
+        summary.update({
+            "checkpoint_work_identity": str(engine_work),
+            "workspace_path_migrated": False,
+            "workspace_path_verified": False,
+        })
+        stage = "restore"
         if selected is not None:
             restored = temp / "cef-windows-restored-checkpoint"
             restore_checkpoint(
@@ -363,7 +723,7 @@ def main() -> None:
             run(
                 [
                     sys.executable, recipe / "vcpkg/integration/driver.py", "restore",
-                    "--work", engine_work, "--logs", engine_logs,
+                    "--work", restore_work, "--logs", engine_logs,
                     "--contract", input_build_key,
                     "--state", temp / "cef-windows-restore.json",
                     "--checkpoint", restored,
@@ -372,8 +732,14 @@ def main() -> None:
                 log=temp / "cef-windows-restore.log", timeout=7200,
             )
             shutil.rmtree(restored)
+            if restore_work != engine_work:
+                if relocate_workspace(restore_work, engine_work) is not True:
+                    raise ValueError("Reviewed Windows workspace migration did not occur")
+                summary["workspace_path_migrated"] = True
+            summary["workspace_path_verified"] = True
             summary["mode"] = "checkpoint-resume"
         else:
+            summary["workspace_path_verified"] = True
             summary["mode"] = "source-fresh"
 
         stage = "source-prepare"
@@ -390,6 +756,8 @@ def main() -> None:
         stage = "source-repair"
         if git_head(engine_work / "download/chromium/src") != source_repair.CHROMIUM:
             raise ValueError("Windows source repair Chromium revision mismatch")
+        if git_head(engine_work / "download/chromium/src/third_party/pdfium") != source_repair.PDFIUM:
+            raise ValueError("Windows source repair PDFium revision mismatch")
         summary["source_repair_state"] = source_repair.apply(engine_work, build_key, repair_origin)
         summary["source_repair_verified"] = True
 
@@ -401,7 +769,9 @@ def main() -> None:
                 "--work", engine_work, "--logs", engine_logs,
                 "--contract", build_key, "--state", state,
                 "--checkpoint", checkpoint,
-                "--seconds", "9000", "--jobs", "4",
+                # Publish a safe progress checkpoint before another long slice
+                # can lose all outputs to a later compiler failure.
+                "--seconds", "6000", "--jobs", "4",
             ],
             cwd=recipe, env=recipe_env,
             log=temp / "cef-windows-engine-slice.log",
@@ -431,13 +801,16 @@ def main() -> None:
             stage = "engine-runtime"
             summary["ready"] = True
             output("ready", True)
+            # The pinned smoke reports third-party module proof only when its
+            # real browser/renderer module audit is explicitly enabled.
+            runtime_env = dict(recipe_env, CEF_STATIC_STRICT_THIRD_PARTY="1")
             run(
                 [
                     sys.executable,
                     recipe / "vcpkg/ports/cef-static/source_build.py", "build",
                     "--work", engine_work, "--logs", engine_logs, "--jobs", "4",
                 ],
-                cwd=recipe, env=recipe_env,
+                cwd=recipe, env=runtime_env,
                 log=temp / "cef-windows-engine-runtime.log", timeout=21600,
             )
             receipt = json.loads(

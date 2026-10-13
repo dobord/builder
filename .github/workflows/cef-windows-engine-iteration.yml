@@ -17,6 +17,12 @@ jobs:
   windows:
     runs-on: ${{ fromJSON(vars.CEF_STATIC_WINDOWS_RUNNER_LABELS || '["windows-2022"]') }}
     timeout-minutes: 340
+    env:
+      CEF_WINDOWS_PDFIUM_SOURCE_ROOT: ${{ github.workspace }}/public-pdfium
+      CEF_WINDOWS_VERTICAL_TAB_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+      CEF_WINDOWS_PROFILE_LAUNCH_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+      CEF_WINDOWS_WALLPAPER_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+      CEF_WINDOWS_SPEECH_CALLBACK_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -34,6 +40,73 @@ jobs:
           ref: 03abd124ebe3b8a57fb78470a75b5aa3ce064e31
           path: private-cef
           persist-credentials: false
+      - name: Preserve exact public fixture newlines
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: v8/v8
+          ref: 4323497a6a73839e6d5260f6acd7ec0212cb3321
+          path: public-v8
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /include/
+            /src/torque/implementation-visitor.cc
+            /src/objects/map.h
+            /src/objects/object-macros.h
+            /src/objects/js-interceptor-map.h
+            /src/objects/map.tq
+            /src/objects/js-interceptor-map.tq
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: chromium/chromium
+          ref: 79460ebecaa5625e57a5fb679a735659e73dc687
+          path: public-chromium
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /third_party/rust/cxx/v1/cxx.h
+            /third_party/rust/chromium_crates_io/vendor/cxx-v1/include/cxx.h
+            /base/containers/adapters.h
+            /base/containers/adapters_internal.h
+            /ui/accessibility/ax_node.h
+            /ui/accessibility/platform/browser_accessibility.h
+            /ui/accessibility/platform/browser_accessibility.cc
+            /ui/accessibility/platform/child_iterator.h
+            /ui/accessibility/platform/browser_accessibility_manager.cc
+            /third_party/blink/renderer/platform/wtf/text/wtf_string.h
+            /third_party/blink/renderer/platform/wtf/text/code_point_iterator.h
+            /third_party/blink/renderer/core/layout/inline/inline_items_data.cc
+            /third_party/blink/renderer/platform/wtf/text/text_offset_map.h
+            /base/no_destructor.h
+            /google_apis/common/api_key_request_util.h
+            /components/autofill/core/common/credit_card_number_validation.h
+            /content/browser/renderer_host/frame_tree.h
+            /content/browser/locks/lock_manager.h
+            /components/password_manager/core/browser/affiliation/affiliated_match_helper.cc
+            /components/password_manager/core/browser/password_store/stored_credential.h
+            /base/functional/bind_internal.h
+            /components/password_manager/core/browser/password_store/password_store_backend_error.h
+            /components/password_manager/core/browser/password_store/password_store_backend_error.cc
+            /components/permissions/permission_request_manager.h
+            /components/permissions/permission_request_manager.cc
+            /base/allocator/partition_allocator/src/partition_alloc/pointers/raw_ref.h
+            /chrome/browser/enterprise/watermark/settings.h
+            /chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+            /chrome/browser/ui/startup/profile_launch_observer.h
+            /chrome/browser/ui/startup/profile_launch_observer.cc
+            /base/allocator/partition_allocator/src/partition_alloc/pointers/raw_ptr.h
+            /chrome/browser/ui/webui/side_panel/customize_chrome/wallpaper_search/wallpaper_search_string_map.h
+            /chrome/browser/speech/on_device_speech_recognition_impl.h
+            /chrome/browser/speech/on_device_speech_recognition_impl.cc
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: chromium/pdfium
+          ref: 8f3e90282ef137adf7d380079c3178b24407104a
+          path: public-pdfium
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: /core/fxcrt/span.h
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
         with:
           python-version: '3.12'
@@ -46,20 +119,185 @@ jobs:
           $ErrorActionPreference = 'Stop'
           if ((git -C private-vcpkg rev-parse HEAD) -ne '39dccd415da14d8051559d66069019475d95787c') { throw 'vcpkg revision mismatch' }
           if ((git -C private-cef rev-parse HEAD) -ne '03abd124ebe3b8a57fb78470a75b5aa3ce064e31') { throw 'CEF revision mismatch' }
+          if ((git -C public-v8 rev-parse HEAD) -ne '4323497a6a73839e6d5260f6acd7ec0212cb3321') { throw 'V8 regression revision mismatch' }
+          if ((git -C public-chromium rev-parse HEAD) -ne '79460ebecaa5625e57a5fb679a735659e73dc687') { throw 'Chromium regression revision mismatch' }
+          if ((git -C public-pdfium rev-parse HEAD) -ne '8f3e90282ef137adf7d380079c3178b24407104a') { throw 'PDFium regression revision mismatch' }
           $drive = Get-PSDrive -Name C
           Write-Host ("CEF_WINDOWS_ITERATION_FREE_BYTES=" + $drive.Free)
           if ($drive.Free -lt 84825604096) { throw 'CEF_WINDOWS_ITERATION_CAPACITY_LT_79_GIB' }
       - name: Validate Windows iteration worker syntax
         run: |
           python -m py_compile secure_release/cef_windows_iteration.py
+      - name: Test reviewed Windows checkpoint host migration
+        env:
+          CEF_REPAIR_RECIPE_DIR: ${{ github.workspace }}/private-cef
+        run: python -m unittest tests.test_cef_windows_runner_image_migration -v
+      - name: Test reviewed Windows checkpoint workspace migration
+        env:
+          CEF_REPAIR_RECIPE_DIR: ${{ github.workspace }}/private-cef
+        run: python -m unittest tests.test_cef_windows_workspace_path_migration -v
+      - name: Test fail-closed Windows checkpoint transport retry
+        run: python -m unittest tests.test_cef_windows_checkpoint_transport_retry -v
       - name: Test reviewed Windows source repair and checkpoint transition
         env:
           CEF_REPAIR_RECIPE_DIR: ${{ github.workspace }}/private-cef
+          CEF_WINDOWS_LAYOUT_SOURCE_ROOT: ${{ github.workspace }}/public-v8
+          CEF_WINDOWS_CFUNCTION_SOURCE_ROOT: ${{ github.workspace }}/public-v8
+          CEF_WINDOWS_ACCESSIBILITY_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_DOM_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_STRING_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_INLINE_ITEMS_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_API_KEY_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_CREDIT_CARD_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_FRAME_TREE_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_LOCK_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_AFFILIATED_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_BACKEND_ERROR_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_PERMISSION_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_WATERMARK_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
         run: python -m unittest discover -s tests -p test_cef_windows_source_repair.py -v
+      - name: Test reviewed Windows watermark string V22 repair
+        env:
+          CEF_REPAIR_RECIPE_DIR: ${{ github.workspace }}/private-cef
+          CEF_WINDOWS_LAYOUT_SOURCE_ROOT: ${{ github.workspace }}/public-v8
+          CEF_WINDOWS_ACCESSIBILITY_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_STRING_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_LOCK_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_AFFILIATED_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_BACKEND_ERROR_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_PERMISSION_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_WATERMARK_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+        run: python -m unittest tests.test_cef_windows_watermark_string_repair -v
+      - name: Test reviewed Windows PDFium span V23 repair
+        env:
+          CEF_REPAIR_RECIPE_DIR: ${{ github.workspace }}/private-cef
+          CEF_WINDOWS_LAYOUT_SOURCE_ROOT: ${{ github.workspace }}/public-v8
+          CEF_WINDOWS_ACCESSIBILITY_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_STRING_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_LOCK_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_AFFILIATED_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_BACKEND_ERROR_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_PERMISSION_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+        run: python -m unittest tests.test_cef_windows_pdfium_span_repair -v
+      - name: Test reviewed Windows vertical-tab math V24 repair
+        env:
+          CEF_REPAIR_RECIPE_DIR: ${{ github.workspace }}/private-cef
+          CEF_WINDOWS_LAYOUT_SOURCE_ROOT: ${{ github.workspace }}/public-v8
+          CEF_WINDOWS_ACCESSIBILITY_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_STRING_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_LOCK_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_AFFILIATED_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_BACKEND_ERROR_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_PERMISSION_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+        run: python -m unittest tests.test_cef_windows_vertical_tab_math_repair -v
+      - name: Test reviewed Windows profile-launch V25 repair
+        env:
+          CEF_REPAIR_RECIPE_DIR: ${{ github.workspace }}/private-cef
+          CEF_WINDOWS_LAYOUT_SOURCE_ROOT: ${{ github.workspace }}/public-v8
+          CEF_WINDOWS_ACCESSIBILITY_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_STRING_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_LOCK_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_AFFILIATED_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_BACKEND_ERROR_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_PERMISSION_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+        run: python -m unittest tests.test_cef_windows_profile_launch_repair -v
+      - name: Test reviewed Windows wallpaper string V26 repair
+        env:
+          CEF_REPAIR_RECIPE_DIR: ${{ github.workspace }}/private-cef
+          CEF_WINDOWS_LAYOUT_SOURCE_ROOT: ${{ github.workspace }}/public-v8
+          CEF_WINDOWS_ACCESSIBILITY_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_STRING_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_LOCK_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_AFFILIATED_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_BACKEND_ERROR_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_PERMISSION_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+        run: python -m unittest tests.test_cef_windows_wallpaper_string_repair -v
+      - name: Test reviewed Windows speech-callback V27 repair
+        env:
+          CEF_REPAIR_RECIPE_DIR: ${{ github.workspace }}/private-cef
+          CEF_WINDOWS_LAYOUT_SOURCE_ROOT: ${{ github.workspace }}/public-v8
+          CEF_WINDOWS_ACCESSIBILITY_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_STRING_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_LOCK_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_AFFILIATED_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_BACKEND_ERROR_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_PERMISSION_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+        run: python -m unittest tests.test_cef_windows_speech_callback_repair -v
+      - name: Test reviewed Windows credit-card string repair
+        env:
+          CEF_REPAIR_RECIPE_DIR: ${{ github.workspace }}/private-cef
+          CEF_WINDOWS_CREDIT_CARD_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+        run: python -m unittest tests.test_cef_windows_credit_card_string_repair -v
+      - name: Test reviewed Windows frame-tree V17 repair
+        env:
+          CEF_REPAIR_RECIPE_DIR: ${{ github.workspace }}/private-cef
+          CEF_WINDOWS_LAYOUT_SOURCE_ROOT: ${{ github.workspace }}/public-v8
+          CEF_WINDOWS_ACCESSIBILITY_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_STRING_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_FRAME_TREE_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_LOCK_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_AFFILIATED_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_BACKEND_ERROR_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_PERMISSION_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+        run: python -m unittest tests.test_cef_windows_frame_tree_iterator_repair -v
+      - name: Test reviewed Windows lock-manager V18 repair
+        env:
+          CEF_REPAIR_RECIPE_DIR: ${{ github.workspace }}/private-cef
+          CEF_WINDOWS_LAYOUT_SOURCE_ROOT: ${{ github.workspace }}/public-v8
+          CEF_WINDOWS_ACCESSIBILITY_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_STRING_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_LOCK_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_AFFILIATED_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_BACKEND_ERROR_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_PERMISSION_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+        run: python -m unittest tests.test_cef_windows_lock_manager_repair -v
+      - name: Test reviewed Windows affiliated-result V19 repair
+        env:
+          CEF_REPAIR_RECIPE_DIR: ${{ github.workspace }}/private-cef
+          CEF_WINDOWS_LAYOUT_SOURCE_ROOT: ${{ github.workspace }}/public-v8
+          CEF_WINDOWS_ACCESSIBILITY_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_STRING_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_LOCK_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_AFFILIATED_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_BACKEND_ERROR_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_PERMISSION_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+        run: python -m unittest tests.test_cef_windows_affiliated_result_repair -v
+      - name: Test reviewed Windows backend-error V20 repair
+        env:
+          CEF_REPAIR_RECIPE_DIR: ${{ github.workspace }}/private-cef
+          CEF_WINDOWS_LAYOUT_SOURCE_ROOT: ${{ github.workspace }}/public-v8
+          CEF_WINDOWS_ACCESSIBILITY_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_STRING_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_LOCK_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_AFFILIATED_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_BACKEND_ERROR_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_PERMISSION_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+        run: python -m unittest tests.test_cef_windows_backend_error_repair -v
+      - name: Test reviewed Windows permission-source V21 repair
+        env:
+          CEF_REPAIR_RECIPE_DIR: ${{ github.workspace }}/private-cef
+          CEF_WINDOWS_LAYOUT_SOURCE_ROOT: ${{ github.workspace }}/public-v8
+          CEF_WINDOWS_ACCESSIBILITY_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_STRING_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_LOCK_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_AFFILIATED_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_BACKEND_ERROR_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_PERMISSION_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+        run: python -m unittest tests.test_cef_windows_permission_source_repair -v
       - name: Test bounded Windows diagnostics
         run: python -m unittest discover -s tests -p test_cef_windows_diagnostics.py -v
       - name: Test authenticated ciphertext-only diagnostic transport
         run: python -m unittest discover -s tests -p test_encrypted_logs.py -v
+      - name: Test strict Windows runtime module gate
+        env:
+          CEF_WINDOWS_LAYOUT_SOURCE_ROOT: ${{ github.workspace }}/public-v8
+          CEF_WINDOWS_ACCESSIBILITY_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_STRING_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_LOCK_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_AFFILIATED_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_BACKEND_ERROR_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+          CEF_WINDOWS_PERMISSION_SOURCE_ROOT: ${{ github.workspace }}/public-chromium
+        run: python -m unittest tests.test_cef_windows_runtime_gate -v
       - name: Run exact Windows CEF compilation slice with bounded header identity
         id: iteration
         env:

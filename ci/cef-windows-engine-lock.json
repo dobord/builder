@@ -4,20 +4,21 @@
   "vcpkg_commit": "39dccd415da14d8051559d66069019475d95787c",
   "cef_recipe_commit": "03abd124ebe3b8a57fb78470a75b5aa3ce064e31",
   "checkpoint": {
-    "run": 37007852614,
+    "run": 38151290234,
     "attempt": 1,
-    "producer_sha": "312f6ca48ab6a26982a4bb21ec0e1514af38e859",
-    "artifact_id": 11237383883,
-    "artifact_sha256": "3a3788d8b2c6ed29daeba5ac357f751aa374a6b05ba9aab94591001165ea402f",
-    "summary_artifact_id": 11237488572,
-    "summary_artifact_sha256": "343ce6fe1876f7cf5bf295ad626c2f88a52973667dc6d92797421d004af518e3",
-    "build_key": "60a369f6b051ba651cb301af299e7dadcc99608d0db6894bccab87b953817602"
+    "producer_sha": "018afd803bc1cd122c901ece9ff337b06fc37f01",
+    "artifact_id": 11711079044,
+    "artifact_sha256": "0fd843b550e0e9ccb864f5943d451781863120c23f37c9a92f14eb6c95c2d1f4",
+    "summary_artifact_id": 11710903902,
+    "summary_artifact_sha256": "0ff9b3f74e738ac3f797c2d8cbe944692ae89d6ef7bdeeeacdf002d864b3e0fe",
+    "build_key": "c7faca3bf619f421bd57137ce6f71f63dd0ba8bf18bb51ecef031118579335bb"
   },
   "source_repair": {
     "schema": 2,
-    "id": "windows-v8-atomic-ref-v5",
+    "id": "windows-speech-callback-node-map-v27",
     "chromium_commit": "79460ebecaa5625e57a5fb679a735659e73dc687",
     "v8_commit": "4323497a6a73839e6d5260f6acd7ec0212cb3321",
+    "pdfium_commit": "8f3e90282ef137adf7d380079c3178b24407104a",
     "corrections": [
       {
         "path": "net/websockets/websocket_handshake_challenge.h",
@@ -43,8 +44,123 @@
         "path": "v8/src/heap/cppgc-internal/heap-object-header.h",
         "before_sha256": "397f2555d0498e92eb5d40872e8066b1a08a9cba993a4457256b8fb0375251ee",
         "after_sha256": "901a8ce9d296f6d3b701d348fc09478f31465e659e9925696dd358871757d94d"
+      },
+      {
+        "path": "v8/src/torque/implementation-visitor.cc",
+        "before_sha256": "bb857f343d860a65c111e9e178df67d3f9cf251f92eaa017202265a533c63abe",
+        "after_sha256": "c53c5fda569a1d033cbdeb6213fb49474b714afa8fb1d750243e3193f1b951a3"
+      },
+      {
+        "path": "v8/include/v8-template.h",
+        "before_sha256": "5ff060cc76e892c0c345a699c0438fe09e23f643a64572f738ec9ff1cfd2d122",
+        "after_sha256": "f4d4c4515727cedb7a5fba1a1b496a35bd9c6a9ee255cb7b23ed35ea8625b164"
+      },
+      {
+        "path": "v8/src/base/functional/bind-internal.h",
+        "before_sha256": "0848488073fd36b6b75088d66518cd7b9bbe0f60190b47e12590d1748abae796",
+        "after_sha256": "e08f2225e93df5a1afc02a1c375e87645449fd7e82b5d7b520c4e7aa31ce501b"
+      },
+      {
+        "path": "ui/accessibility/platform/browser_accessibility.h",
+        "before_sha256": "4892eaa5acd222a0c672d9b5990f0a77009a210649fa8c775bc80e803cfd5f1d",
+        "after_sha256": "ce013afbf9a06a045260b9b38c2aacfe645090e4fb6e110429903a3f6cd725c1"
+      },
+      {
+        "path": "ui/accessibility/platform/browser_accessibility.cc",
+        "before_sha256": "f7e3cf4414bf31a8de222ea1a40b147f9fa4014d7e7604192ba3963e307f629a",
+        "after_sha256": "2db1d2329a419e61c4409b630447c3c56e63987c76a1c76c34bbfac6e097ffe8"
+      },
+      {
+        "path": "third_party/blink/renderer/platform/wtf/text/wtf_string.h",
+        "before_sha256": "1b4a503d160ffc0480c49710f65d3b6656c498e8ac23dbaaedee491e92ae71ef",
+        "after_sha256": "cfe2cf6bbb93d0ef053d0c8cf51d8d8071d54876fc53ca5f1f57d00231925d57"
+      },
+      {
+        "path": "third_party/blink/renderer/core/layout/inline/inline_node.h",
+        "before_sha256": "2aa20d294ebe0a6ae3c7d3a168bb9763d5ce73c0916f7270fde93eb967aebfcc",
+        "after_sha256": "3fa4cfb6be4f52f090fbc4c05e0958c120b72065fca623473cf53faa0d888019"
+      },
+      {
+        "path": "services/data_decoder/xml/dom_builder.h",
+        "before_sha256": "969acc87746001c86ef0d98eeb2a15de80e02e56b6a2727d0d3b7dc73cc37882",
+        "after_sha256": "596393505d3d16f2ffe7bd3cd6b7c51c7c534d16896028739bcbd05c48bc0e4a"
+      },
+      {
+        "path": "third_party/blink/renderer/core/layout/inline/inline_items_data.cc",
+        "before_sha256": "efe6e5d17a2d676a4c7868ff496b95a90c11bb77aa964738a517e1329934661f",
+        "after_sha256": "f2c8be99df3cbd16e07e7b1d9a377570b1884b3e5debe081d97f444d3616dccb"
+      },
+      {
+        "path": "google_apis/common/api_key_request_util.h",
+        "before_sha256": "acccec39b6828f168e8f51c523cd8a07479094f46de3854c6fbf6697bc6bdfbc",
+        "after_sha256": "02b32aaf140ccaa8feb78159aef9f8c2a199d91714aa8cd3a552731617838269"
+      },
+      {
+        "path": "components/autofill/core/common/credit_card_number_validation.h",
+        "before_sha256": "c53deafa5e5e2ec30949db20be0dec9f46493d49f9555a155a6c419bdb2607f4",
+        "after_sha256": "e11c6be830cbd52303ea11826a84bccf1838746276b25809bdf878c7aa7d3a50"
+      },
+      {
+        "path": "content/browser/renderer_host/frame_tree.h",
+        "before_sha256": "6dff457016eb06cc710a53012c80884d089665bbf1346cf8933b4535c060b17f",
+        "after_sha256": "968192391f2275c7732e37b1547261e01a424df9633db7e1993d1ff899ecbd77"
+      },
+      {
+        "path": "content/browser/locks/lock_manager.h",
+        "before_sha256": "5da1667d945bccc542dcef1268139f1c923dae0d1d2cd6559840055d1c78a2fd",
+        "after_sha256": "e5bc278ffcaf644f3741e7d6d7102d50b533a1c6eede695647b9010524a4f6f0"
+      },
+      {
+        "path": "components/password_manager/core/browser/affiliation/affiliated_match_helper.cc",
+        "before_sha256": "efeb49da7d34594d877dad553efab6a14aef33e209b0aa48780e810785e1301b",
+        "after_sha256": "ce5b8a9575fd441afef0b6416af40596d3d0e040d40b28457a031831870d03f7"
+      },
+      {
+        "path": "components/password_manager/core/browser/password_store/password_store_backend_error.h",
+        "before_sha256": "670caf88a0a98fc25d516d672ca7d3a28d56f9d414580efa9bd057d1e239f291",
+        "after_sha256": "61f89eaf1043c024a3605ee38a33fa67e7a95f60b479129edeb26db293235ad2"
+      },
+      {
+        "path": "components/password_manager/core/browser/password_store/password_store_backend_error.cc",
+        "before_sha256": "4b19a74de291fd09caf9e516033114f5ae8348fdd69e81eecbacacd4658b6cdf",
+        "after_sha256": "8b99f25b7c099934136e7d337c2ba8b4420ecb92fca5d52ba7762896c5ef3833"
+      },
+      {
+        "path": "components/permissions/permission_request_manager.h",
+        "before_sha256": "bc14a8e3f644138477b2450cafa2931061f583dcdf244e644546e1e913018289",
+        "after_sha256": "a021f5322a869f393d2077313e8ef26f3167b9677efc7e92596ec71227b4c570"
+      },
+      {
+        "path": "chrome/browser/enterprise/watermark/settings.h",
+        "before_sha256": "d7a0cd34ef3fc8bd33a1d13c88699d5ec5a31ee614c12dedc1b72a08cd9c3233",
+        "after_sha256": "2810e40f606ff37a20ebccfa00610b2fae1d5377fcea20c08d2b7be39e8676a8"
+      },
+      {
+        "path": "third_party/pdfium/core/fxcrt/span.h",
+        "before_sha256": "98a34192c186cbfb1524b61e0f9ed213e14f8d1d011e7834d240baa7e87bf394",
+        "after_sha256": "88ab22d160c1324129049a1e01bf0355b6aff26a83691d9e60e8ea7cb6a08e3c"
+      },
+      {
+        "path": "chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc",
+        "before_sha256": "a1bee63d0203242f2de5c936ef64b93e0281a519376c7b3ea0612629b0b8e9df",
+        "after_sha256": "9a8b40ad18393c4d5dd8a145cbd0588d1f5310314f651eb449662243747774f9"
+      },
+      {
+        "path": "chrome/browser/ui/startup/profile_launch_observer.h",
+        "before_sha256": "78665a0bfc54bd50a687f9d1fef8dcf843d95ed1a04e6036a7d9241a0051abb5",
+        "after_sha256": "394006c22407286d64a06ab01c39a1e5564d9f7ffc902f1b79baaf193195fc4d"
+      },
+      {
+        "path": "chrome/browser/ui/webui/side_panel/customize_chrome/wallpaper_search/wallpaper_search_string_map.h",
+        "before_sha256": "3629a32178863d181a06f66a64e09d4f3af0ca139dcc693c896355e345700005",
+        "after_sha256": "66ec5e52f118ffa9ec87755b963a5da111e6671421d5e394664939ed5d070a7c"
+      },
+      {
+        "path": "chrome/browser/speech/on_device_speech_recognition_impl.h",
+        "before_sha256": "692bef4ce9786292bf93d602c6fcc01a6e14542ea2acb8a4ccde5ff5fa2a340c",
+        "after_sha256": "0f4ab5ce2fd7a6bfb5bccec0b92aa77ae2fa01519774e7c7dbdbc9e0555bb84f"
       }
     ],
-    "implementation_sha256": "65919555d64211c29a5b47e6e638f8fcc3edc76f37073a827d804fe8726ed061"
+    "implementation_sha256": "f8adbcbb537e187c9ef3a60c6712b3d06de25663fe93e4fc387c3f126662eb0c"
   }
 }

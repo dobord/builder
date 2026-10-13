@@ -138,16 +138,17 @@ def request():
         raise ValueError("unsupported release request event")
     source_sha = sha(env("GITHUB_SHA"))
     builder_sha = sha(env("BUILDER_COMMIT_SHA"))
+    scope = os.environ.get("SDK_RELEASE_PLATFORMS", "all")
+    if scope not in {"all", "linux", "windows"}:
+        raise ValueError("unsupported requested release scope")
+    workflow = "build-release.yml" if scope == "all" else f"build-{scope}-release.yml"
+    platforms = BUILD_WORKFLOWS[workflow]
     client = Client(env("SOURCE_TOKEN"))
-    record = client.get(f"/repos/{SOURCE}/contents/ci/release-plan.json?ref={source_sha}")
+    plan_path = "ci/release-windows-plan.json" if scope == "windows" else "ci/release-plan.json"
+    record = client.get(f"/repos/{SOURCE}/contents/{plan_path}?ref={source_sha}")
     plan = crypto.parse(crypto.unb64(record["content"].replace("\n", "")))
     validate_plan(plan)
     builder = Client(env("BUILDER_DISPATCH_TOKEN"))
-    scope = os.environ.get("SDK_RELEASE_PLATFORMS", "all")
-    if scope not in {"all", "linux"}:
-        raise ValueError("unsupported requested release scope")
-    workflow = "build-linux-release.yml" if scope == "linux" else "build-release.yml"
-    platforms = BUILD_WORKFLOWS[workflow]
     if continuation_inputs is not None and any(
         str(continuation_inputs.get(p + suffix, "")).strip()
         for p in cef_contract.TRIPLETS for suffix in ("_builder_run", "_builder_attempt")
@@ -165,8 +166,8 @@ def request():
                "builder_sha": builder_sha, "output_key": crypto.fingerprint(env("ARTIFACT_ENCRYPTION_PUBLIC_KEY")),
                "input_key": crypto.fingerprint(env("BUILDER_INPUT_PUBLIC_KEY")), "created": created, "expires": created + 172800,
                 "source_id": IDS[SOURCE], "builder_id": IDS[BUILDER], "bin_id": IDS[BIN], "plan": plan}
-    if scope == "linux":
-        payload.update(version=2, platforms=["linux"])
+    if scope != "all":
+        payload.update(version=2, platforms=[scope])
     document = crypto.sign(payload, env("REQUEST_SIGNING_PRIVATE_KEY"))
     encrypted = crypto.seal_message(crypto.canonical(document), env("BUILDER_INPUT_PUBLIC_KEY"), message_context(rid, salt))
     answer = builder.dispatch(BUILDER, workflow, {"release_id": rid, "salt": salt, "request": encrypted})
@@ -227,7 +228,8 @@ def prepare():
     requester_event = requester.get("event")
     if requester_event not in {"push", "workflow_dispatch"}:
         raise ValueError("unsupported requester event")
-    check_run(requester, SOURCE, "release-request.yml", payload["source_sha"],
+    request_workflow = "release-windows-request.yml" if release_platforms(payload) == ("windows",) else "release-request.yml"
+    check_run(requester, SOURCE, request_workflow, payload["source_sha"],
               payload["request_attempt"], requester_event, success=False)
     ref = client.get(f"/repos/{SOURCE}/git/ref/tags/{payload['source_tag']}")["object"]
     for _ in range(5):
@@ -379,8 +381,14 @@ def build():
             root, cfg, platform, execute, executable, args, binary_cache)
         platform_sha256 = platform_probe["sha256"] if platform_probe is not None else None
         profile_args = {"linux_sdk_profile": True} if linux_sources is not None else {}
-        if not cef_build.run_engine(root, cfg, platform, execute, environment, input_private,
-                                    env("GITHUB_SHA"), platform_probe, **profile_args):
+        if workflow == "build-windows-release.yml":
+            from . import windows_sdk
+            windows_sdk.run_engine(root, cfg, execute, environment, input_private)
+            engine_ready = True
+        else:
+            engine_ready = cef_build.run_engine(root, cfg, platform, execute, environment, input_private,
+                                                env("GITHUB_SHA"), platform_probe, **profile_args)
+        if not engine_ready:
             _persist_binary_cache(binary_cache, cache_key, platform, input_private)
             return  # Persisted checkpoint + completed packages; never an installed/published SDK.
         if linux_sources is not None:
@@ -453,7 +461,9 @@ def build():
                 "image_os": os.environ.get("ImageOS", ""), "image_version": os.environ.get("ImageVersion", "")}
     if cfg is not None:
         manifest["cef"] = {"build_contract_sha256": cef_contract.build_key(cfg, platform, platform_sha256),
-                           "profile": cfg["profile"], "consumer": cef_proof}
+                            "profile": cfg["profile"], "consumer": cef_proof}
+        if workflow == "build-windows-release.yml":
+            manifest["cef"]["windows_engine"] = windows_sdk.binding(cfg)
         if platform_preflight is not None:
             manifest["cef"]["platform_preflight"] = platform_preflight
         if cpp_proof is not None:
@@ -517,3 +527,5 @@ def cleanup():
     temporary = Path(env("RUNNER_TEMP"))
     process.remove_tree(temporary / "encrypted-release-private")
     process.remove_tree(temporary / "verified-release")
+    if os.environ.get("SDK_BUILD_WORKFLOW") == "build-windows-release.yml":
+        process.remove_tree(temporary / "w")

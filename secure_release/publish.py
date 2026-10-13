@@ -124,6 +124,9 @@ def verify_result():
         cfg = payload["plan"].get("cef")
         if cfg is not None:
             evidence = manifest.get("cef", {})
+            if workflow_name == "build-windows-release.yml":
+                from . import windows_sdk
+                windows_sdk.validate_binding(evidence.get("windows_engine"), cfg)
             if workflow_name == "build-linux-release.yml":
                 from . import linux_sdk
                 if cfg.get("profile") != "static-third-party":
@@ -144,9 +147,14 @@ def verify_result():
                     raise ValueError("CEF package lacks its ABI-tracked build contract")
                 if crypto.parse(archive.read(path)) != expected_contract:
                     raise ValueError("Installed CEF package differs from the signed build plan")
+                if workflow_name == "build-windows-release.yml":
+                    repair_path = f"installed/{triplet}/share/cef-static/windows-qualified-engine.json"
+                    if repair_path not in names or archive.getinfo(repair_path).file_size > 65536:
+                        raise ValueError("Installed Windows SDK lacks its source repair binding")
+                    windows_sdk.validate_binding(crypto.parse(archive.read(repair_path)), cfg)
         elif "cef" in manifest or any(n.startswith(f"installed/{triplet}/share/cef-static/") for n in names):
             raise ValueError("Unrequested CEF package or evidence")
-        filename = f"vcpkg-{payload['source_tag']}-{platform}-x64-static-release.zip"
+        filename = sdk_filename(payload['source_tag'], platform)
         shutil.copyfile(sdk, staging / filename)
         files[filename] = manifest["sdk_sha256"]
         manifests[platform] = manifest
@@ -188,7 +196,7 @@ def publish_release():
             or manifest.get("build_attempt") != attempt):
         raise ValueError("invalid publication manifest")
     expected_names = {"release-manifest.json", "SHA256SUMS"} | {
-        f"vcpkg-{tag}-{platform}-x64-static-release.zip" for platform in platforms}
+        sdk_filename(tag, platform) for platform in platforms}
     if set(files) != expected_names or set(p.name for p in root.iterdir()) != expected_names:
         raise ValueError("unexpected publication assets")
     api = Client(env("PUBLISH_TOKEN"))

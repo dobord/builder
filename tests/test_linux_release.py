@@ -75,7 +75,7 @@ class LinuxReleaseTests(unittest.TestCase):
         self.assertEqual(protocol.release_platforms({'version': 1}), ('linux', 'windows'))
         self.assertEqual(protocol.release_platforms({'version': 2, 'platforms': ['linux']}), ('linux',))
         for payload in ({'version': 2}, {'version': 1, 'platforms': ['linux']},
-                        {'version': 2, 'platforms': ['windows']},
+                        {'version': 2, 'platforms': ['windows', 'linux']},
                         {'version': 2, 'platforms': ['linux', 'windows']}, {'version': True}):
             with self.assertRaises(ValueError):
                 protocol.release_platforms(payload)

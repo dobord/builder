@@ -14,12 +14,13 @@ BIN = "dobord/vcpkg-bin"
 IDS = {SOURCE: 1347237568, BUILDER: 1372874997, BIN: 1372873784}
 OWNER = 5323024
 SHA = re.compile(r"[0-9a-f]{40}")
-TAG = re.compile(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
+TAG = re.compile(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-windows)?")
 NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 PACKAGE = re.compile(r"[a-z0-9-]+(?:\[[a-z0-9,-]+\])?")
 BUILD_WORKFLOWS = {
     "build-release.yml": ("linux", "windows"),
     "build-linux-release.yml": ("linux",),
+    "build-windows-release.yml": ("windows",),
 }
 
 
@@ -30,6 +31,8 @@ def release_platforms(payload: dict) -> tuple[str, ...]:
         return BUILD_WORKFLOWS["build-release.yml"]
     if payload["version"] == 2 and payload.get("platforms") == ["linux"]:
         return BUILD_WORKFLOWS["build-linux-release.yml"]
+    if payload["version"] == 2 and payload.get("platforms") == ["windows"]:
+        return BUILD_WORKFLOWS["build-windows-release.yml"]
     raise ValueError("invalid signed platform selection")
 
 
@@ -38,6 +41,16 @@ def build_workflow(path: str) -> str:
         if path.split("@", 1)[0] == ".github/workflows/" + name:
             return name
     raise ValueError("unsupported builder workflow")
+
+
+def sdk_filename(tag: str, platform: str) -> str:
+    if not TAG.fullmatch(tag) or platform not in {"linux", "windows"}:
+        raise ValueError("invalid SDK asset identity")
+    if tag.endswith("-windows"):
+        if platform != "windows":
+            raise ValueError("Windows release cannot contain a Linux SDK")
+        tag = tag[:-len("-windows")]
+    return f"vcpkg-{tag}-{platform}-x64-static-release.zip"
 
 
 def env(name: str) -> str:
@@ -133,6 +146,8 @@ def verified(document: dict, public: str, *, allow_expired: bool = False) -> dic
     if set(payload) != required:
         raise ValueError("invalid request schema")
     release_platforms(payload)
+    if str(payload.get("source_tag", "")).endswith("-windows") and release_platforms(payload) != ("windows",):
+        raise ValueError("Windows release tag requires a signed Windows-only request")
     identifiers(payload["release_id"], payload["salt"])
     sha(payload["source_sha"]); sha(payload["builder_sha"])
     if not TAG.fullmatch(payload["source_tag"]) or (payload["source_id"], payload["builder_id"], payload["bin_id"]) != (IDS[SOURCE], IDS[BUILDER], IDS[BIN]):
