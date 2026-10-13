@@ -21,6 +21,7 @@ import sys
 import tarfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 import zipfile
@@ -53,7 +54,9 @@ def key_env(name):
 
 
 def api(path, token, *, data=None, limit=MAX_ARCHIVE):
-    if not path.startswith("repos/") or ".." in path:
+    decoded = urllib.parse.unquote(path)
+    if (not path.startswith("repos/") or any(part in {".", ".."} for part in decoded.split("?", 1)[0].split("/")) or
+            any(ord(character) < 32 for character in decoded) or "#" in decoded):
         raise ValueError("unsafe API path")
     headers = {"Authorization": "Bearer " + token, "Accept": "application/vnd.github+json",
                "X-GitHub-Api-Version": "2022-11-28"}
