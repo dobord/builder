@@ -145,6 +145,21 @@ class ProjectCiTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             runner.condition("__import__('os').system('unsafe')", context, True)
 
+    def test_explicit_matrix_conditions_keep_implicit_success_guard(self):
+        context = {"matrix.name": "Windows native"}
+        self.assertFalse(runner.condition("matrix.name == 'Windows native'", context, False))
+        self.assertTrue(runner.condition("always() && matrix.name == 'Windows native'", context, False))
+
+    def test_windows_bash_uses_git_bash_instead_of_the_wsl_launcher(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bash = root / "Git/bin/bash.exe"
+            bash.parent.mkdir(parents=True)
+            bash.write_bytes(b"PUBLIC_SYNTHETIC_TOOL")
+            command = runner.shell_command("bash", root / "script.sh", {"PROGRAMFILES": str(root)}, "Windows")
+            self.assertEqual(command[0], str(bash))
+            self.assertNotEqual(command[0], "bash")
+
     def test_report_archive_rejects_linked_payload(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
