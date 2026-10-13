@@ -223,7 +223,7 @@ def package(args, credential):
 class preflight_policy:
     """Temporarily supply local preflight configuration, never source execution."""
     def __init__(self, policy):
-        self.values = {"CI_SOURCE_POLICY": crypto.canonical(policy).decode(), "GITHUB_ACTOR_ID": str(policy["operator_id"])}
+        self.values = {"CI_SOURCE_POLICY_B64": crypto.b64(crypto.canonical(policy)), "GITHUB_ACTOR_ID": str(policy["operator_id"])}
 
     def __enter__(self):
         self.old = {key: os.environ.get(key) for key in self.values}

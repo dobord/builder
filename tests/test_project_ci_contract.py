@@ -146,6 +146,15 @@ class RecipeContractTests(unittest.TestCase):
 
 
 class OperatorPolicyTests(unittest.TestCase):
+    def test_opaque_source_policy_preserves_short_values_and_never_falls_back(self):
+        policy = {"request_schemas": [2], "operator_id": 5323024, "repository_id": 1}
+        encoded = ci.crypto.b64(json.dumps(policy).encode())
+        with patch.dict(os.environ, {"CI_SOURCE_POLICY_B64": encoded, "CI_SOURCE_POLICY": "{}"}):
+            self.assertEqual(ci.source_policy(), policy)
+        for encoded in ("NOT_BASE64!", ci.crypto.b64(b"[]"), ci.crypto.b64(b"broken-json")):
+            with patch.dict(os.environ, {"CI_SOURCE_POLICY_B64": encoded, "CI_SOURCE_POLICY": json.dumps(policy)}), self.assertRaises(ValueError):
+                ci.source_policy()
+
     @unittest.skipUnless(os.name == "posix", "local client uses POSIX file ownership")
     def test_dispatch_and_wait_cli_accept_owner_controlled_0644_signing_public(self):
         with tempfile.TemporaryDirectory() as tmp:
