@@ -23,6 +23,7 @@ def condition(text, context, succeeded):
     if text is None:
         return succeeded
     text = str(text).removeprefix("${{").removesuffix("}}").strip()
+    explicit_status = bool(re.search(r"\b(?:always|success|failure|cancelled)\(\)", text))
     for call, value in (("always()", True), ("success()", succeeded),
                         ("failure()", not succeeded), ("cancelled()", False)):
         text = text.replace(call, repr(value))
@@ -34,7 +35,28 @@ def condition(text, context, succeeded):
                  ast.And, ast.Or, ast.Not, ast.Eq, ast.NotEq)
     if any(not isinstance(node, permitted) for node in ast.walk(expression)):
         raise ValueError("unsupported condition")
-    return bool(eval(compile(expression, "<condition>", "eval"), {"__builtins__": {}}, {}))
+    result = bool(eval(compile(expression, "<condition>", "eval"), {"__builtins__": {}}, {}))
+    return result and (succeeded or explicit_status)
+
+
+def shell_command(shell, script, env, runner_os):
+    """Select the hosted native shell, never Windows' unrelated WSL launcher."""
+    if shell == "pwsh":
+        return ["pwsh", "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(script)]
+    if shell != "bash":
+        raise ValueError("unsupported shell")
+    bash = "bash"
+    if runner_os == "Windows":
+        values = {name.upper(): value for name, value in env.items()}
+        candidates = [Path(values.get("PROGRAMFILES", "C:/Program Files")) / "Git/bin/bash.exe"]
+        git = shutil.which("git", path=values.get("PATH", ""))
+        if git:
+            candidates.extend((Path(git).parent.parent / "bin/bash.exe", Path(git).parent.parent / "usr/bin/bash.exe"))
+        selected = next((path for path in candidates if path.is_file()), None)
+        if selected is None:
+            raise ValueError("native Git Bash unavailable")
+        bash = str(selected)
+    return [bash, "--noprofile", "--norc", "-e", "-o", "pipefail", str(script)]
 
 
 def import_channels(env, paths):
@@ -220,12 +242,11 @@ def run():
         if shell == "pwsh":
             script.write_text("$ErrorActionPreference = 'Stop'\n" + body +
                               "\nif (Test-Path variable:LASTEXITCODE) { exit $LASTEXITCODE }\n", encoding="utf-8")
-            command = ["pwsh", "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(script)]
         elif shell == "bash":
             script.write_text(body + "\n", encoding="utf-8")
-            command = ["bash", "--noprofile", "--norc", "-e", "-o", "pipefail", str(script)]
         else:
             raise ValueError("unsupported shell")
+        command = shell_command(shell, script, local, ci.required("RUNNER_OS"))
         remaining = min(deadline - time.monotonic(), int(step.get("timeout-minutes", 350)) * 60)
         if remaining <= 0:
             raise ValueError("lane timeout")
