@@ -42,6 +42,10 @@ LLVM symbol reader and COFF librarian verify the reconstructed archive.
 The collision map includes the transitive COFF weak-alias closure whenever a
 default target is namespaced, keeping engine aliases separate from consumer STL
 aliases while retaining every auxiliary-record index.
+The Windows engine and consumer share the independently checked native MSVC STL
+toolset 14.44.35207. Its process-wide COMDATs and default aliases are retained;
+third-party runtime providers remain isolated. This differs from Linux's separate
+Chromium libc++ and GCC runtime boundary.
 
 Assets are the Windows static-release SDK ZIP, `release-manifest.json` and
 `SHA256SUMS` under the separate `v0.2.5-windows` release in private `vcpkg-bin`.

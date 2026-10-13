@@ -22,7 +22,8 @@ NAMESPACE = "CEF_CHROMIUM_RUNTIME_"
 PROFILE = {"schema": 1, "kind": "windows-coff-runtime-isolation",
            "namespace": NAMESPACE, "method": "complete-final-provider-collisions",
            "coff_rewrite": "symbol-names-and-appended-strings-only",
-           "weak_aliases": "transitive-namespaced-default-targets"}
+           "weak_aliases": "transitive-namespaced-default-targets",
+           "msvc_stl": "shared-reviewed-native-toolset-14.44.35207"}
 ENGINE = re.compile(r"lib/cef-static/(?:cef_objects|cef_[0-9]{4}_[0-9a-f]{12})\.lib\Z")
 ANCHORS = {"SSL_new", "SSL_use_certificate", "PEM_read_PrivateKey"}
 MAX_SYMBOLS = 20_000_000
@@ -78,6 +79,15 @@ def _defined(table: Counter) -> set[str]:
     # COFF's DEL-prefixed null-thunk records are linker metadata, not runtime
     # providers. Retain their exact symbols/payloads without namespacing OS ABI.
     return {name for name, kind in table if kind not in {"U", "w", "v"} and not name.startswith("\x7f")}
+
+
+def _shared_msvc_stl(name: str) -> bool:
+    # Unlike Linux's libc++/GCC boundary, the qualified Windows graph uses the
+    # SAME native MSVC STL. Its COMDATs/default aliases must remain process-wide.
+    # Limit sharing to decorated names whose leading qualified scope is std;
+    # a std type appearing later in another function's signature is not its owner.
+    end = name.find("@@")
+    return name.startswith("?") and end >= 0 and name[:end].endswith("@std")
 
 
 def _sections(archive: Path) -> str:
@@ -356,7 +366,7 @@ def install(installed: Path, source: Path, diagnostics: Path, *, tools=None) -> 
     engine_defs = set()
     for path in engine:
         engine_defs.update(_defined(symbols(nm, path)))
-    collisions = set(engine_defs & provider_defs)
+    collisions = {name for name in engine_defs & provider_defs if not _shared_msvc_stl(name)}
     aliases = set()
     for path in engine:
         aliases.update(_archive_aliases(path))
