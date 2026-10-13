@@ -39,6 +39,9 @@ The COFF operation changes only eight-byte symbol-name fields, appends the new
 strings and updates the string-table length. NASM values/classes/auxiliary
 records, relocations, code and virtual BSS headers are retained; the independent
 LLVM symbol reader and COFF librarian verify the reconstructed archive.
+The collision map includes the transitive COFF weak-alias closure whenever a
+default target is namespaced, keeping engine aliases separate from consumer STL
+aliases while retaining every auxiliary-record index.
 
 Assets are the Windows static-release SDK ZIP, `release-manifest.json` and
 `SHA256SUMS` under the separate `v0.2.5-windows` release in private `vcpkg-bin`.

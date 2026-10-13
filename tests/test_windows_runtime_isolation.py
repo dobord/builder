@@ -38,6 +38,9 @@ class WindowsCoffIsolationTests(unittest.TestCase):
                 "crypto": "int PEM_read_PrivateKey(void){return 11;}",
                 "os_fixture": "int PUBLIC_OS_FUNCTION(void){return 0;}",
                 "app": "extern int cef_engine_probe(void); extern int vcpkg_tls_probe(void); int mainCRTStartup(void){return cef_engine_probe()+vcpkg_tls_probe()-77;}"}
+            weak = '__asm__(".weak SSL_weak_probe\\n.set SSL_weak_probe, SSL_new");'
+            sources["engine"] += weak
+            sources["app"] += weak
             for name, text in sources.items():
                 (root / (name + ".c")).write_text(text)
                 result = subprocess.run([str(clang), "/nologo", "/c", "/GS-", "/Fo" + str(root / (name + ".obj")),
@@ -76,6 +79,9 @@ class WindowsCoffIsolationTests(unittest.TestCase):
             self.assertIn((subject.NAMESPACE + "SSL_new", "T"), symbols)
             self.assertIn((subject.NAMESPACE + "SSL_new", "U"), symbols)
             self.assertNotIn(("SSL_new", "U"), symbols)
+            self.assertIn("SSL_weak_probe", receipt["collisions"])
+            self.assertNotIn("SSL_weak_probe", {name for name, kind in symbols})
+            self.assertIn(subject.NAMESPACE + "SSL_weak_probe", {name for name, kind in symbols})
             raw = bytearray(engine.read_bytes())
             cursor, corrupted = 8, False
             while cursor < len(raw) and not corrupted:

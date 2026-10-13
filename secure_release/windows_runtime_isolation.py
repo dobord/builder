@@ -21,7 +21,8 @@ TRIPLET = "x64-windows-static-release"
 NAMESPACE = "CEF_CHROMIUM_RUNTIME_"
 PROFILE = {"schema": 1, "kind": "windows-coff-runtime-isolation",
            "namespace": NAMESPACE, "method": "complete-final-provider-collisions",
-           "coff_rewrite": "symbol-names-and-appended-strings-only"}
+           "coff_rewrite": "symbol-names-and-appended-strings-only",
+           "weak_aliases": "transitive-namespaced-default-targets"}
 ENGINE = re.compile(r"lib/cef-static/(?:cef_objects|cef_[0-9]{4}_[0-9a-f]{12})\.lib\Z")
 ANCHORS = {"SSL_new", "SSL_use_certificate", "PEM_read_PrivateKey"}
 MAX_SYMBOLS = 20_000_000
@@ -244,6 +245,63 @@ def _rename_member(payload: bytes, mapping: dict) -> bytes:
     return bytes(result)
 
 
+def _weak_aliases(payload: bytes) -> set[tuple[str, str]]:
+    if payload[:4] == b"\0\0\xff\xff":
+        if struct.unpack_from("<H", payload, 4)[0] == 0:
+            return set()
+        _, pointer, count = struct.unpack_from("<III", payload, 44)
+        width = 20
+    else:
+        pointer, count = struct.unpack_from("<II", payload, 8)
+        width = 18
+    strings = pointer + count * width
+    checked.require(strings <= len(payload), "COFF weak-symbol table escapes object")
+    names, links = {}, []
+    index = 0
+    while index < count:
+        entry = pointer + index * width
+        raw = payload[entry:entry + 8]
+        if raw[:4] == b"\0" * 4 and raw != b"\0" * 8:
+            offset = strings + struct.unpack_from("<I", raw, 4)[0]
+            end = payload.find(b"\0", offset)
+            checked.require(strings <= offset < end <= len(payload), "Invalid COFF weak-symbol name")
+            raw = payload[offset:end]
+        else:
+            raw = raw.rstrip(b"\0")
+        names[index] = raw.decode("ascii") if raw.isascii() else None
+        auxiliary = payload[entry + width - 1]
+        if payload[entry + width - 2] == 105:
+            checked.require(auxiliary >= 1 and entry + 2 * width <= strings, "Missing COFF weak auxiliary record")
+            target = struct.unpack_from("<I", payload, entry + width)[0]
+            links.append((index, target))
+        index += 1 + auxiliary
+        checked.require(index <= count, "Invalid COFF weak-symbol boundary")
+    result = set()
+    for index, target in links:
+        checked.require(target in names and names[index] and names[target], "Invalid COFF weak default target")
+        result.add((names[index], names[target]))
+    return result
+
+
+def _archive_aliases(archive: Path) -> set[tuple[str, str]]:
+    result = set()
+    with archive.open("rb") as stream:
+        checked.require(stream.read(8) == b"!<arch>\n", "Expected regular COFF alias archive")
+        while header := stream.read(60):
+            checked.require(len(header) == 60 and header[58:] == b"`\n", "Malformed COFF alias archive")
+            size = int(header[48:58].strip())
+            if header[:16].rstrip(b" ") in (b"/", b"//", b"/SYM64/"):
+                stream.seek(size, os.SEEK_CUR)
+            else:
+                checked.require(20 <= size <= 256 * 1024**2, "Invalid COFF alias object size")
+                payload = stream.read(size)
+                checked.require(len(payload) == size, "Truncated COFF alias object")
+                result.update(_weak_aliases(payload))
+            if size & 1:
+                checked.require(stream.read(1) == b"\n", "Invalid COFF alias archive padding")
+    return result
+
+
 def _rewrite_members(librarian: Path, archive: Path, output: Path,
                      mapping: dict, diagnostics: Path) -> None:
     """Rewrite symbol fields in regular objects; copy native imports byte-for-byte."""
@@ -298,7 +356,17 @@ def install(installed: Path, source: Path, diagnostics: Path, *, tools=None) -> 
     engine_defs = set()
     for path in engine:
         engine_defs.update(_defined(symbols(nm, path)))
-    collisions = sorted(engine_defs & provider_defs)
+    collisions = set(engine_defs & provider_defs)
+    aliases = set()
+    for path in engine:
+        aliases.update(_archive_aliases(path))
+    while True:
+        added = {name for name, target in aliases if target in collisions} - collisions
+        if not added:
+            break
+        collisions.update(added)
+        checked.require(len(collisions) <= MAX_COLLISIONS, "Windows weak alias closure exceeds limit")
+    collisions = sorted(collisions)
     checked.require(ANCHORS <= set(collisions) and 0 < len(collisions) <= MAX_COLLISIONS,
                     "Incomplete Windows runtime collision closure")
     checked.require(not any(n.startswith("cef_") or n.startswith(NAMESPACE) for n in collisions),
