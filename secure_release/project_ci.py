@@ -11,6 +11,7 @@ import base64
 import hashlib
 import itertools
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -35,6 +36,19 @@ WORKFLOW = "encrypted-project-ci.yml"
 SHA = re.compile(r"[0-9a-f]{40}")
 HASH = re.compile(r"[0-9a-f]{64}")
 MAX_ARCHIVE = 2 * 1024**3
+MAX_GIT_INPUT = 90 * 1024**2  # Below GitHub's 100 MB blob API limit.
+MAX_RECIPE = 1024 * 1024
+MAX_LANES = 100
+MAX_MATRIX_DIMENSIONS = 16
+# Builder-owned, reviewed byte contract. No request, policy, environment or
+# candidate recipe may replace these pins; changes require a reviewed revision.
+RELEASE_RECIPE_DIGESTS = {
+    "ci": "62e43aa051f7da623c0a655f68e3a2eee92ea4a27a58e3f9b3f0894fa732f57d",
+    "wasm-async": "d3f5f2bb2641333c4b68337ec723379746fe701ae06307b1099946d64080082c",
+    "nightly-stress": "6399682b004cde5f7b724d46594644edf6b7130e42440fa6f022d97303c79160",
+    "performance": "f34215c2364d7f705c162f3f66378b4ca49c1116d1317cc552a26c298e96e93a",
+    "vcpkg-port": "0559a53ce1d5377304e54c2f61cbf4c5a22f2f4fa8318a22a629590a0cbed500",
+}
 SUITES = {"ci": ("ci", "wasm-async"), "async": ("wasm-async",),
           "nightly": ("nightly-stress",), "performance": ("performance",),
           "vcpkg": ("vcpkg-port",),
@@ -52,6 +66,23 @@ def required(name):
 
 def key_env(name):
     return crypto.unb64(required(name)).decode("utf-8")
+
+
+def source_policy():
+    """Decode opaque secret transport privately; malformed encodings fail closed."""
+    if "CI_SOURCE_POLICY_B64" in os.environ:
+        encoded = required("CI_SOURCE_POLICY_B64")
+        if len(encoded) > 1024 * 1024:
+            raise ValueError("source policy exceeds bound")
+        raw = crypto.unb64(encoded)
+    else:
+        raw = required("CI_SOURCE_POLICY").encode()
+    if len(raw) > 1024 * 1024:
+        raise ValueError("source policy exceeds bound")
+    policy = crypto.parse(raw)
+    if not isinstance(policy, dict):
+        raise ValueError("invalid source policy object")
+    return policy
 
 
 def api(path, token, *, data=None, limit=MAX_ARCHIVE):
@@ -175,14 +206,65 @@ def digest_bytes(data):
     return hashlib.sha256(data).hexdigest()
 
 
-def message_context(request_id):
+def git_blob_sha(data):
+    return hashlib.sha1(b"blob " + str(len(data)).encode("ascii") + b"\0" + data).hexdigest()
+
+
+def fetch_operator_input(payload, token, target):
+    """Fixed public builder transport; publish output only after all checks pass."""
+    prefix = f"repos/{BUILDER}/git/"
+    path = prefix + "ref/" + payload["input_ref"].removeprefix("refs/")
+    def check_ref():
+        reference = api_json(path, token, limit=16384)
+        if (reference["ref"] != payload["input_ref"] or reference["object"]["type"] != "commit" or
+                reference["object"]["sha"] != payload["input_commit"]):
+            raise ValueError("moved operator input ref")
+    check_ref()
+    commit = api_json(prefix + "commits/" + payload["input_commit"], token, limit=16384)
+    if (commit["sha"] != payload["input_commit"] or commit["parents"] or
+            not SHA.fullmatch(commit["tree"]["sha"])):
+        raise ValueError("invalid isolated input commit")
+    tree = api_json(prefix + "trees/" + commit["tree"]["sha"], token, limit=16384)
+    entries = tree["tree"]
+    if tree["sha"] != commit["tree"]["sha"] or tree["truncated"] is not False or len(entries) != 1:
+        raise ValueError("invalid input tree")
+    entry = entries[0]
+    if (entry["path"] != "sources.enc" or entry["mode"] != "100644" or entry["type"] != "blob" or
+            entry["sha"] != payload["input_blob"] or type(entry["size"]) is not int or
+            not 0 < entry["size"] <= MAX_GIT_INPUT):
+        raise ValueError("invalid input blob entry")
+    blob = api_json(prefix + "blobs/" + payload["input_blob"], token, limit=MAX_GIT_INPUT * 2)
+    if (blob["sha"] != payload["input_blob"] or blob["encoding"] != "base64" or
+            type(blob["size"]) is not int or blob["size"] != entry["size"] or
+            not isinstance(blob["content"], str) or len(blob["content"]) > MAX_GIT_INPUT * 2):
+        raise ValueError("invalid Git blob identity or encoding")
+    # GitHub wraps base64 at newlines; reject other non-alphabet bytes.
+    raw = crypto.unb64(blob["content"].replace("\n", ""))
+    if (len(raw) != blob["size"] or git_blob_sha(raw) != payload["input_blob"] or
+            digest_bytes(raw) != payload["source_cipher_digest"]):
+        raise ValueError("input ciphertext digest mismatch")
+    check_ref()
+    with target.open("xb") as stream:
+        stream.write(raw)
+
+
+def message_context(request_id, schema=1, builder_sha=None):
     if str(uuid.UUID(request_id)) != request_id:
         raise ValueError("invalid request ID")
-    return {"schema": 1, "purpose": "project-ci-request", "request_id": request_id,
-            "builder_id": BUILDER_ID}
+    if type(schema) is not int or schema not in {1, 2}:
+        raise ValueError("invalid explicit transport schema")
+    if schema == 2:
+        if not isinstance(builder_sha, str) or not SHA.fullmatch(builder_sha):
+            raise ValueError("invalid builder revision")
+        return {"schema": 2, "purpose": "project-ci-operator-request", "request_id": request_id,
+                "builder_id": BUILDER_ID, "builder_sha": builder_sha}
+    return {"schema": 1, "purpose": "project-ci-request", "request_id": request_id, "builder_id": BUILDER_ID}
 
 
 def source_context(payload):
+    if payload["schema"] == 2:
+        return {"schema": 2, "purpose": "project-ci-operator-sources", "request_id": payload["request_id"],
+                "builder_id": BUILDER_ID, "builder_sha": payload["builder_sha"]}
     return {"schema": 1, "purpose": "project-ci-sources", "request_id": payload["request_id"],
             "source_id": payload["source_id"], "source_run": payload["source_run"],
             "source_attempt": payload["source_attempt"], "builder_sha": payload["builder_sha"]}
@@ -193,27 +275,36 @@ def validate_payload(payload):
               "source_run", "source_attempt", "source_event", "pr", "builder_sha", "suite",
               "created", "expires", "artifact_id", "artifact_digest", "source_cipher_digest", "baseline_run",
               "baseline_tag", "baseline_sha"}
-    if set(payload) != fields or type(payload["schema"]) is not int or payload["schema"] != 1:
+    schema = payload.get("schema")
+    if type(schema) is not int or schema not in {1, 2}:
         raise ValueError("invalid CI request schema")
-    message_context(payload["request_id"])
+    if schema == 2:
+        fields -= {"source_run", "source_attempt", "source_event", "artifact_id", "artifact_digest", "baseline_run"}
+        fields |= {"origin", "operator_id", "input_commit", "input_blob", "input_ref"}
+    if set(payload) != fields:
+        raise ValueError("invalid CI request fields")
+    message_context(payload["request_id"], schema, payload["builder_sha"])
     if not re.fullmatch(r"dobord/[A-Za-z0-9_.-]+", payload["source"]):
         raise ValueError("invalid source repository")
-    for name in ("source_sha", "base_sha", "builder_sha", "baseline_sha"):
+    for name in ("source_sha", "base_sha", "builder_sha", "baseline_sha") + (("input_commit", "input_blob") if schema == 2 else ()):
         if not isinstance(payload[name], str) or not SHA.fullmatch(payload[name]):
             raise ValueError("invalid exact revision")
-    for name in ("source_id", "source_run", "source_attempt", "artifact_id"):
+    for name in (("source_id", "operator_id") if schema == 2 else ("source_id", "source_run", "source_attempt", "artifact_id")):
         if type(payload[name]) is not int or not 1 <= payload[name] < 2**63:
             raise ValueError("invalid identity")
-    for name in ("pr", "baseline_run"):
+    for name in (("pr",) if schema == 2 else ("pr", "baseline_run")):
         if type(payload[name]) is not int or not 0 <= payload[name] < 2**63:
             raise ValueError("invalid optional identity")
-    if payload["suite"] not in SUITES or payload["source_event"] not in {"push", "workflow_dispatch", "schedule"}:
+    if payload["suite"] not in SUITES or (schema == 1 and payload["source_event"] not in {"push", "workflow_dispatch", "schedule"}):
         raise ValueError("unsupported CI profile or authorizer")
-    if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", payload["baseline_tag"]) or payload["baseline_run"]:
+    if schema == 2 and (payload["origin"] != "local-operator" or
+                        payload["input_ref"] != "refs/tags/project-ci-input-" + payload["request_id"]):
+        raise ValueError("invalid operator origin or input ref")
+    if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", payload["baseline_tag"]) or (schema == 1 and payload["baseline_run"]):
         raise ValueError("hosted comparisons require an immutable release tag, not a rolling runner baseline")
     if payload["suite"] in {"performance", "release"} and payload["baseline_sha"] == payload["source_sha"]:
         raise ValueError("benchmark baseline must differ from candidate")
-    if not HASH.fullmatch(payload["artifact_digest"]) or not HASH.fullmatch(payload["source_cipher_digest"]):
+    if (schema == 1 and not HASH.fullmatch(payload["artifact_digest"])) or not HASH.fullmatch(payload["source_cipher_digest"]):
         raise ValueError("invalid artifact digest")
     now = int(time.time())
     if any(type(payload[name]) is not int for name in ("created", "expires")):
@@ -234,39 +325,103 @@ def expand(text, context):
     return EXPRESSION.sub(replacement, text)
 
 
-def expand_recipe(profile, recipe):
+def matrix_key(value):
+    return isinstance(value, str) and bool(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]{0,63}", value))
+
+
+def matrix_value(value):
+    return (type(value) in {bool, int} or
+            (type(value) is float and math.isfinite(value)) or
+            (isinstance(value, str) and len(value) <= 4096))
+
+
+def expand_recipe(profile, recipe, *, limit=MAX_LANES):
+    """Validate bounded matrix shapes/cardinality before producing any rows."""
+    if (type(limit) is not int or not 0 <= limit <= MAX_LANES or
+            not isinstance(recipe, dict) or not isinstance(recipe.get("jobs"), dict) or
+            not 1 <= len(recipe["jobs"]) <= MAX_LANES + len(AGGREGATES)):
+        raise ValueError("invalid recipe shape or lane budget")
     lanes = []
     for job_id, job in recipe["jobs"].items():
+        if not isinstance(job_id, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]{0,127}", job_id) or not isinstance(job, dict):
+            raise ValueError("invalid job shape")
         if job_id in AGGREGATES:
             continue
-        matrix = job.get("strategy", {}).get("matrix", {})
+        strategy = job.get("strategy", {})
+        if not isinstance(strategy, dict) or not isinstance(strategy.get("matrix", {}), dict):
+            raise ValueError("invalid strategy or matrix shape")
+        matrix = strategy.get("matrix", {})
+        remaining = limit - len(lanes)
         if "include" in matrix:
-            if set(matrix) != {"include"}:
+            if (set(matrix) != {"include"} or not isinstance(matrix["include"], list) or
+                    not 1 <= len(matrix["include"]) <= remaining):
                 raise ValueError("unsupported mixed matrix")
+            if any(not isinstance(row, dict) or len(row) > MAX_MATRIX_DIMENSIONS or
+                   any(not matrix_key(key) or not matrix_value(value) for key, value in row.items())
+                   for row in matrix["include"]):
+                raise ValueError("invalid include row")
             rows = matrix["include"]
         elif matrix:
-            rows = [dict(zip(matrix, values)) for values in itertools.product(*matrix.values())]
+            if len(matrix) > MAX_MATRIX_DIMENSIONS:
+                raise ValueError("matrix dimension bound exceeded")
+            cardinality = 1
+            for key, values in matrix.items():
+                if (not matrix_key(key) or key == "exclude" or not isinstance(values, list) or
+                        not 1 <= len(values) <= MAX_LANES or any(not matrix_value(value) for value in values)):
+                    raise ValueError("invalid matrix dimension")
+                # Division checks the budget before multiplication/expansion.
+                if cardinality > remaining // len(values):
+                    raise ValueError("matrix cardinality exceeds remaining lane budget")
+                cardinality *= len(values)
+            rows = (dict(zip(matrix, values)) for values in itertools.product(*matrix.values()))
         else:
+            if remaining < 1:
+                raise ValueError("lane budget exhausted")
             rows = [{}]
+        runner = job.get("runs-on")
+        if (not isinstance(runner, (str, list)) or
+                (isinstance(runner, str) and not 0 < len(runner) <= 4096) or
+                (isinstance(runner, list) and (not 1 <= len(runner) <= 16 or
+                 any(not isinstance(label, str) or not 0 < len(label) <= 4096 for label in runner)))):
+            raise ValueError("invalid runner labels")
         for index, row in enumerate(rows):
             context = {"matrix." + key: value for key, value in row.items()}
-            runner = job["runs-on"]
-            labels = runner if isinstance(runner, list) else [expand(runner, context)]
+            labels = [expand(label, context) for label in (runner if isinstance(runner, list) else [runner])]
             lanes.append({"id": f"{profile}-{job_id}-{index}", "runner": labels,
                           "profile": profile, "job": job, "matrix": row})
     return lanes
 
 
-def recipes(root, suite):
+def expand_recipes(suite, raw_recipes):
+    """Authenticate all release bytes before YAML parsing or matrix expansion."""
     import yaml
+    if (suite not in SUITES or not isinstance(raw_recipes, dict) or set(raw_recipes) != set(SUITES[suite]) or
+            any(not isinstance(raw, bytes) or not 0 < len(raw) <= MAX_RECIPE for raw in raw_recipes.values())):
+        raise ValueError("incomplete or oversized recipe inventory")
+    if suite == "release":
+        if (set(RELEASE_RECIPE_DIGESTS) != set(SUITES["release"]) or
+                any(digest_bytes(raw_recipes[profile]) != digest for profile, digest in RELEASE_RECIPE_DIGESTS.items())):
+            raise ValueError("release recipe differs from reviewed builder contract")
     lanes = []
     for profile in SUITES[suite]:
-        path = root / "ci/builder" / (profile + ".yml")
-        document = yaml.safe_load(path.read_text(encoding="utf-8"))
-        lanes.extend(expand_recipe(profile, document))
-    if not 1 <= len(lanes) <= 100 or len({lane["id"] for lane in lanes}) != len(lanes):
+        document = yaml.safe_load(raw_recipes[profile])
+        lanes.extend(expand_recipe(profile, document, limit=MAX_LANES - len(lanes)))
+    if not 1 <= len(lanes) <= MAX_LANES or len({lane["id"] for lane in lanes}) != len(lanes):
         raise ValueError("invalid lane inventory")
+    if suite == "release" and len(lanes) != 39:
+        raise ValueError("release requires the complete 39-lane qualification")
     return lanes
+
+
+def recipes(root, suite):
+    raw_recipes = {}
+    for profile in SUITES[suite]:
+        path = root / "ci/builder" / (profile + ".yml")
+        if path.is_symlink() or not path.is_file():
+            raise ValueError("missing or linked recipe")
+        with path.open("rb") as stream:
+            raw_recipes[profile] = stream.read(MAX_RECIPE + 1)
+    return expand_recipes(suite, raw_recipes)
 
 
 def unwrap_artifact(archive, target, member="sources.enc"):
@@ -335,13 +490,18 @@ def package():
     output("request_id", request_id)
 
 
-def validate_run(run, revision, request_digest, attempt):
+def validate_execution(run, revision, request_digest, attempt):
     if (run["repository"]["id"] != BUILDER_ID or run["head_repository"]["id"] != BUILDER_ID or
             run["path"].split("@", 1)[0] != ".github/workflows/" + WORKFLOW or
             run["head_sha"] != revision or run["event"] != "workflow_dispatch" or
             run["run_attempt"] != attempt or
-            run["display_title"] != "Encrypted qualification " + request_digest or
-            run["status"] != "completed" or run["conclusion"] != "success"):
+            run["display_title"] != "Encrypted qualification " + request_digest):
+        raise ValueError("untrusted builder execution")
+
+
+def validate_run(run, revision, request_digest, attempt):
+    validate_execution(run, revision, request_digest, attempt)
+    if run["status"] != "completed" or run["conclusion"] != "success":
         raise ValueError("untrusted or unsuccessful builder run")
 
 
@@ -386,11 +546,32 @@ def dispatch():
     print("BUILDER_QUALIFICATION_SUCCESS " + run["html_url"])
 
 
+def verify_request_schema(policy, schema):
+    """An explicit allowlist rejects legacy origins before any admission API."""
+    if "request_schemas" not in policy:
+        return  # Existing schema-1 policies retain their original behavior.
+    allowed = policy["request_schemas"]
+    if (not isinstance(allowed, list) or not 1 <= len(allowed) <= 2 or
+            any(type(item) is not int or item not in {1, 2} for item in allowed) or
+            len(set(allowed)) != len(allowed) or schema not in allowed):
+        raise ValueError("request schema denied by source policy")
+
+
 def verify_source_policy(payload, token):
-    policy = crypto.parse(required("CI_SOURCE_POLICY"))
+    policy = source_policy()
+    verify_request_schema(policy, payload["schema"])
     if payload["source"] != policy["repository"] or payload["source_id"] != policy["repository_id"]:
         raise ValueError("source not authorized")
-    if payload["suite"] in {"performance", "release"}:
+    if payload["schema"] == 2:
+        if (policy.get("operator_origin") != "local-operator" or
+                type(policy.get("operator_id")) is not int or
+                payload["operator_id"] != policy["operator_id"] or
+                int(required("GITHUB_ACTOR_ID")) != policy["operator_id"]):
+            raise ValueError("unauthorized operator")
+        repository = api_json(f"repos/{payload['source']}", token)
+        if repository["id"] != payload["source_id"] or repository["full_name"] != payload["source"]:
+            raise ValueError("source identity mismatch")
+    if payload["schema"] == 2 or payload["suite"] in {"performance", "release"}:
         released = api_json(f"repos/{payload['source']}/releases/tags/{payload['baseline_tag']}", token)
         if released["draft"] or released["prerelease"] or released["tag_name"] != payload["baseline_tag"] or not released["published_at"]:
             raise ValueError("baseline is not a published stable release")
@@ -403,21 +584,29 @@ def verify_source_policy(payload, token):
             reference = api_json(f"repos/{payload['source']}/git/tags/{reference['sha']}", token)["object"]
         if reference["type"] != "commit" or reference["sha"] != payload["baseline_sha"]:
             raise ValueError("released baseline identity mismatch")
-    run = api_json(f"repos/{payload['source']}/actions/runs/{payload['source_run']}", token)
-    if (run["repository"]["id"] != payload["source_id"] or
-            run["head_repository"]["id"] != payload["source_id"] or
-            run["path"].split("@", 1)[0] != ".github/workflows/builder-ci.yml" or
-            run["run_attempt"] != payload["source_attempt"] or
-            run["event"] != payload["source_event"] or
-            run["head_branch"] != policy["authorizer_branch"]):
-        raise ValueError("untrusted source authorizer")
+    if payload["schema"] == 1:
+        run = api_json(f"repos/{payload['source']}/actions/runs/{payload['source_run']}", token)
+        if (run["repository"]["id"] != payload["source_id"] or
+                run["head_repository"]["id"] != payload["source_id"] or
+                run["path"].split("@", 1)[0] != ".github/workflows/builder-ci.yml" or
+                run["run_attempt"] != payload["source_attempt"] or
+                run["event"] != payload["source_event"] or
+                run["head_branch"] != policy["authorizer_branch"]):
+            raise ValueError("untrusted source authorizer")
     if not payload["pr"]:
-        if payload["source_sha"] != run["head_sha"]:
+        if payload["schema"] == 2:
+            reference = api_json(f"repos/{payload['source']}/git/ref/heads/main", token)["object"]
+            if (reference["type"] != "commit" or reference["sha"] != payload["source_sha"] or
+                    payload["base_sha"] != payload["source_sha"]):
+                raise ValueError("non-PR request must qualify exact current main")
+        elif payload["source_sha"] != run["head_sha"]:
             raise ValueError("non-PR request must qualify the authorizer tree")
         return
     pr = api_json(f"repos/{payload['source']}/pulls/{payload['pr']}", token)
     if (pr["head"]["sha"] != payload["source_sha"] or pr["base"]["sha"] != payload["base_sha"] or
-            pr["head"]["repo"]["id"] != payload["source_id"] or pr["state"] != "open"):
+            pr["head"]["repo"]["id"] != payload["source_id"] or pr["state"] != "open" or
+            (payload["schema"] == 2 and (pr["base"]["repo"]["id"] != payload["source_id"] or
+             pr["base"]["ref"] != policy["authorizer_branch"]))):
         raise ValueError("stale or foreign PR")
     # The release profile is authorized by the protected signer and complete
     # exact-SHA CI qualification, without a separate manual approval gate.
@@ -450,33 +639,45 @@ def prepare():
     request = required("CI_REQUEST")
     if digest_bytes(request.encode("ascii")) != required("CI_REQUEST_DIGEST"):
         raise ValueError("request hash mismatch")
+    schema = int(os.environ.get("CI_REQUEST_SCHEMA", "1"))
+    verify_request_schema(source_policy(), schema)
     previous = pages(f"repos/{BUILDER}/actions/workflows/{WORKFLOW}/runs?head_sha={required('GITHUB_SHA')}",
                      required("BUILDER_READ_TOKEN"), "workflow_runs")
     matches = [run for run in previous if run["display_title"] == "Encrypted qualification " + required("CI_REQUEST_DIGEST")]
     if len(matches) != 1 or matches[0]["id"] != int(required("GITHUB_RUN_ID")):
         raise ValueError("CI request replay or ambiguous execution")
     document = crypto.parse(crypto.open_message(request, key_env("CI_INPUT_PRIVATE_KEY_B64"),
-                            message_context(required("CI_REQUEST_ID"))))
+                            message_context(required("CI_REQUEST_ID"), schema, required("GITHUB_SHA"))))
     payload = crypto.verify(document, key_env("CI_VERIFY_PUBLIC_KEY_B64"))
     validate_payload(payload)
-    if payload["request_id"] != required("CI_REQUEST_ID") or payload["builder_sha"] != required("GITHUB_SHA"):
+    if (payload["schema"] != schema or payload["request_id"] != required("CI_REQUEST_ID") or
+            payload["builder_sha"] != required("GITHUB_SHA")):
         raise ValueError("request identity mismatch")
+    if schema == 2 and (matches[0].get("actor", {}).get("id") != payload["operator_id"] or
+                        matches[0].get("triggering_actor", {}).get("id") != payload["operator_id"] or
+                        matches[0].get("run_attempt") != 1):
+        raise ValueError("builder operator identity mismatch")
+    if schema == 2:
+        validate_execution(matches[0], payload["builder_sha"], required("CI_REQUEST_DIGEST"), 1)
     token = required("SOURCE_READ_TOKEN")
     verify_source_policy(payload, token)
-    artifact = api_json(f"repos/{payload['source']}/actions/artifacts/{payload['artifact_id']}", token)
-    if (artifact["expired"] or artifact["workflow_run"]["id"] != payload["source_run"] or
-            artifact["name"] != "encrypted-sources-" + payload["request_id"] or
-            not 1 <= artifact["size_in_bytes"] <= MAX_ARCHIVE):
-        raise ValueError("source artifact provenance mismatch")
     work = Path(required("RUNNER_TEMP")) / "project-ci-prepare"
     work.mkdir(mode=0o700)
-    zipped = api(f"repos/{payload['source']}/actions/artifacts/{payload['artifact_id']}/zip", token)
-    if digest_bytes(zipped) != payload["artifact_digest"]:
-        raise ValueError("source artifact digest mismatch")
-    archive = work / "input.zip"
-    archive.write_bytes(zipped)
-    unwrap_artifact(archive, work / "sources.enc")
-    archive.unlink()
+    if schema == 2:
+        fetch_operator_input(payload, required("BUILDER_READ_TOKEN"), work / "sources.enc")
+    else:
+        artifact = api_json(f"repos/{payload['source']}/actions/artifacts/{payload['artifact_id']}", token)
+        if (artifact["expired"] or artifact["workflow_run"]["id"] != payload["source_run"] or
+                artifact["name"] != "encrypted-sources-" + payload["request_id"] or
+                not 1 <= artifact["size_in_bytes"] <= MAX_ARCHIVE):
+            raise ValueError("source artifact provenance mismatch")
+        zipped = api(f"repos/{payload['source']}/actions/artifacts/{payload['artifact_id']}/zip", token)
+        if digest_bytes(zipped) != payload["artifact_digest"]:
+            raise ValueError("source artifact digest mismatch")
+        archive = work / "input.zip"
+        archive.write_bytes(zipped)
+        unwrap_artifact(archive, work / "sources.enc")
+        archive.unlink()
     if crypto.digest(work / "sources.enc") != payload["source_cipher_digest"]:
         raise ValueError("signed ciphertext digest mismatch")
     crypto.decrypt_file(work / "sources.enc", work / "repository.bundle", key_env("CI_INPUT_PRIVATE_KEY_B64"),
@@ -486,12 +687,14 @@ def prepare():
     log = work / "prepare.log"
     checked(["git", "clone", "--no-checkout", str(work / "repository.bundle"), str(root)], work, env, log)
     checked(["git", "-C", str(root), "-c", "core.autocrlf=false", "checkout", "--detach", payload["source_sha"]], work, env, log)
+    # Authenticate the independently reviewed recipe contract before any
+    # dependency extractor parses candidate-controlled recipe YAML.
+    lanes = recipes(root, payload["suite"])
     from . import project_dependency_review
     receipt = project_dependency_review.verify(root, payload, env)
     (work / "dependency-review.json").write_bytes(crypto.canonical(receipt))
     crypto.encrypt_file(work / "dependency-review.json", Path(required("RUNNER_TEMP")) / "cipher-dependency/dependency-review.enc",
                         crypto.public_text(key_env("CI_INPUT_PRIVATE_KEY_B64")), builder_context("dependency-review"))
-    lanes = recipes(root, payload["suite"])
     (work / "request.json").write_bytes(crypto.canonical(document))
     # Re-encrypt for this builder run/attempt before distributing to native jobs.
     archive = work / "prepared.tar"

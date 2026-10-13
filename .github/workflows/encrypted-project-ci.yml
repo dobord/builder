@@ -3,6 +3,12 @@ run-name: Encrypted qualification ${{ inputs.request_digest }}
 on:
   workflow_dispatch:
     inputs:
+      request_schema:
+        description: Explicit transport protocol (1 Actions artifact, 2 local operator Git blob)
+        default: '1'
+        required: true
+        type: choice
+        options: ['1', '2']
       request_id:
         required: true
         type: string
@@ -19,6 +25,7 @@ concurrency:
   cancel-in-progress: false
 env:
   CI_REQUEST_ID: ${{ inputs.request_id }}
+  CI_REQUEST_SCHEMA: ${{ inputs.request_schema }}
   CI_REQUEST_DIGEST: ${{ inputs.request_digest }}
   CI_BUILDER_SHA: ${{ vars.PROJECT_CI_BUILDER_SHA }}
 jobs:
@@ -51,7 +58,7 @@ jobs:
           CI_REQUEST: ${{ inputs.request }}
           CI_INPUT_PRIVATE_KEY_B64: ${{ secrets.PROJECT_CI_INPUT_PRIVATE_KEY_B64 }}
           CI_VERIFY_PUBLIC_KEY_B64: ${{ secrets.PROJECT_CI_VERIFY_PUBLIC_KEY_B64 }}
-          CI_SOURCE_POLICY: ${{ secrets.PROJECT_CI_SOURCE_POLICY }}
+          CI_SOURCE_POLICY_B64: ${{ secrets.PROJECT_CI_SOURCE_POLICY_B64 }}
           SOURCE_READ_TOKEN: ${{ secrets.PROJECT_CI_SOURCE_READ_TOKEN }}
           BUILDER_READ_TOKEN: ${{ github.token }}
         run: python -m secure_release.project_ci prepare
@@ -73,6 +80,7 @@ jobs:
         if: always()
         run: python -m secure_release.project_ci cleanup
   qualify:
+    name: Encrypted lane ${{ matrix.lane }}
     needs: prepare
     concurrency:
       group: ${{ matrix.lane == 'performance-fixed-runner-benchmarks-0' && 'project-ci-fixed-performance' || format('project-ci-{0}-{1}', github.run_id, matrix.lane) }}
