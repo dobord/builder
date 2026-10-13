@@ -29,7 +29,8 @@ combined consumer must pass the existing Windows browser/renderer module audit
 three times with the build, installed and engine workspaces hidden.
 
 Generated COFF engine archives are namespaced against the complete final static
-provider closure. The rewrite preserves ordered section bytes and checks every
+provider closure. The rewrite preserves ordered initialized section bytes,
+section flags and zero-initialized BSS extents, and checks every
 global definition/reference against one collision map. Provider archives and
 public CEF APIs are retained. The ABI-tracked profile and owned installed receipt
 bind all derivative/provider hashes; publication independently checks the actual

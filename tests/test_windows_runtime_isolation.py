@@ -2,6 +2,7 @@ import copy
 from pathlib import Path
 import shutil
 import subprocess
+import struct
 import sys
 import tempfile
 import unittest
@@ -30,9 +31,9 @@ class WindowsCoffIsolationTests(unittest.TestCase):
             info = installed / "vcpkg/info"
             info.mkdir(parents=True)
             sources = {
-                "engine": "int SSL_new(void){return 17;} int SSL_use_certificate(void){return 3;} int PEM_read_PrivateKey(void){return 5;}",
+                "engine": "int OPENSSL_state[16]; int SSL_new(void){return 17+OPENSSL_state[0];} int SSL_use_certificate(void){return 3;} int PEM_read_PrivateKey(void){return 5;}",
                 "caller": "extern int SSL_new(void); int cef_engine_probe(void){return SSL_new();}",
-                "openssl": "int SSL_new(void){return 29;} int SSL_use_certificate(void){return 7;} int vcpkg_tls_probe(void){return SSL_new();}",
+                "openssl": "int OPENSSL_state[16]; int SSL_new(void){return 29+OPENSSL_state[0];} int SSL_use_certificate(void){return 7;} int vcpkg_tls_probe(void){return SSL_new();}",
                 "crypto": "int PEM_read_PrivateKey(void){return 11;}",
                 "os_fixture": "int PUBLIC_OS_FUNCTION(void){return 0;}",
                 "app": "extern int cef_engine_probe(void); extern int vcpkg_tls_probe(void); int mainCRTStartup(void){return cef_engine_probe()+vcpkg_tls_probe()-46;}"}
@@ -72,6 +73,27 @@ class WindowsCoffIsolationTests(unittest.TestCase):
             self.assertIn((subject.NAMESPACE + "SSL_new", "T"), symbols)
             self.assertIn((subject.NAMESPACE + "SSL_new", "U"), symbols)
             self.assertNotIn(("SSL_new", "U"), symbols)
+            raw = bytearray(engine.read_bytes())
+            cursor, corrupted = 8, False
+            while cursor < len(raw) and not corrupted:
+                header = raw[cursor:cursor + 60]
+                size = int(header[48:58].strip())
+                start = cursor + 60
+                payload = raw[start:start + size]
+                if header[:16].rstrip(b" ") not in (b"/", b"//") and payload[:2] == b"\x64\x86":
+                    for index in range(struct.unpack_from("<H", payload, 2)[0]):
+                        offset = 20 + 40 * index
+                        flags = struct.unpack_from("<I", payload, offset + 36)[0]
+                        length, pointer = struct.unpack_from("<II", payload, offset + 16)
+                        if flags & 0x80 and length and pointer:
+                            raw[start + pointer] = 1
+                            corrupted = True
+                            break
+                cursor = start + size + (size & 1)
+            self.assertTrue(corrupted, "LLVM must materialize the fixture's zero BSS")
+            (root / "corrupt.lib").write_bytes(raw)
+            with self.assertRaisesRegex(ValueError, "BSS unexpectedly"):
+                subject._sections(root / "corrupt.lib")
             sdk = root / "sdk.zip"
             with zipfile.ZipFile(sdk, "w") as archive:
                 for path in prefix.rglob("*"):
