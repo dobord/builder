@@ -272,7 +272,14 @@ def install(installed: Path, source: Path, diagnostics: Path, *, tools=None) -> 
             expected = Counter()
             for (name, kind), count in before.items():
                 expected[mapping.get(name, name), kind] += count
-            checked.require(symbols(nm, output) == expected,
+            actual = symbols(nm, output)
+            if actual != expected:
+                with (diagnostics / "objcopy.log").open("a", encoding="utf-8") as log:
+                    log.write("\nSYMBOL_PROFILE_MISMATCH " + path.name + "\n")
+                    for label, delta in (("missing", expected - actual), ("extra", actual - expected)):
+                        for (name, kind), count in sorted(delta.items())[:20]:
+                            log.write(f"{label} {name!r} {kind} {count}\n")
+            checked.require(actual == expected,
                             "Windows runtime rewrite lost symbol definitions or references")
             checked.require(_sections(output) == section_hash,
                             "Windows runtime rewrite changed ordered COFF section bytes, extents or flags")
