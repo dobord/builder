@@ -34,16 +34,23 @@ class WindowsCoffIsolationTests(unittest.TestCase):
                 "caller": "extern int SSL_new(void); int cef_engine_probe(void){return SSL_new();}",
                 "openssl": "int SSL_new(void){return 29;} int SSL_use_certificate(void){return 7;} int vcpkg_tls_probe(void){return SSL_new();}",
                 "crypto": "int PEM_read_PrivateKey(void){return 11;}",
+                "os_fixture": "int PUBLIC_OS_FUNCTION(void){return 0;}",
                 "app": "extern int cef_engine_probe(void); extern int vcpkg_tls_probe(void); int mainCRTStartup(void){return cef_engine_probe()+vcpkg_tls_probe()-46;}"}
             for name, text in sources.items():
                 (root / (name + ".c")).write_text(text)
                 result = subprocess.run([str(clang), "/nologo", "/c", "/GS-", "/Fo" + str(root / (name + ".obj")),
                                          str(root / (name + ".c"))], capture_output=True)
                 self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
+            subprocess.run([str(linker), "/dll", "/noentry", "/nodefaultlib", "/export:PUBLIC_OS_FUNCTION",
+                            "/out:" + str(root / "PUBLIC_FIXTURE.dll"),
+                            "/implib:" + str(root / "PUBLIC_FIXTURE.lib"), str(root / "os_fixture.obj")], check=True)
+            imported = subject.symbols(nm, root / "PUBLIC_FIXTURE.lib")
+            self.assertIn(("PUBLIC_OS_FUNCTION", "T"), imported)
             engine = prefix / "lib/cef-static/cef_0000_aaaaaaaaaaaa.lib"
             ssl, crypt = prefix / "lib/libssl.lib", prefix / "lib/libcrypto.lib"
-            for target, members in ((engine, ("engine", "caller")), (ssl, ("openssl",)), (crypt, ("crypto",))):
-                subprocess.run([str(librarian), "/out:" + str(target), *[str(root / (n + ".obj")) for n in members]], check=True)
+            for target, members in ((engine, ("engine", "caller", "PUBLIC_FIXTURE.lib")), (ssl, ("openssl",)), (crypt, ("crypto",))):
+                subprocess.run([str(librarian), "/out:" + str(target),
+                                *[str(root / (n if n.endswith(".lib") else n + ".obj")) for n in members]], check=True)
             for package, members in (("cef-static", (engine,)), ("openssl", (ssl, crypt))):
                 (info / f"{package}_1_{subject.TRIPLET}.list").write_text("".join(
                     subject.TRIPLET + "/" + p.relative_to(prefix).as_posix() + "\n" for p in members))
@@ -54,7 +61,7 @@ class WindowsCoffIsolationTests(unittest.TestCase):
             self.assertIn(b"duplicate symbol", failed.stderr)
             section_hash = subject._sections(engine)
             provider_hashes = {p: crypto.digest(p) for p in (ssl, crypt)}
-            receipt = subject.install(installed, root, root / "diagnostics", tools=(nm, objcopy))
+            receipt = subject.install(installed, root, root / "diagnostics", tools=(nm, objcopy, librarian))
             self.assertEqual(subject._sections(engine), section_hash)
             self.assertTrue(all(crypto.digest(p) == h for p, h in provider_hashes.items()))
             succeeded = subprocess.run(command, capture_output=True)
