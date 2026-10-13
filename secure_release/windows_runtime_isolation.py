@@ -259,7 +259,9 @@ def install(installed: Path, source: Path, diagnostics: Path, *, tools=None) -> 
     checked.require(not targets.intersection(engine_defs | provider_defs), "Windows runtime namespace already exists")
     mapping = dict(zip(collisions, (NAMESPACE + n for n in collisions)))
     mapping_file = diagnostics / "symbols.map"
-    mapping_file.write_text("".join(f"{old} {new}\n" for old, new in mapping.items()), encoding="ascii")
+    # The receipt validator reconstructs canonical ASCII/LF bytes. Text-mode
+    # newline translation on Windows must not change their signed digest.
+    mapping_file.write_bytes("".join(f"{old} {new}\n" for old, new in mapping.items()).encode("ascii"))
     records = {}
     for index, path in enumerate(engine):
         print(f"WINDOWS_COFF_ISOLATION phase=archive index={index + 1} count={len(engine)}", flush=True)

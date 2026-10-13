@@ -284,6 +284,15 @@ The source transport client verifies the exact external workflow/run/attempt and
 request digest before mirroring an exact-source success status. Local diagnostic
 decryption and a successful dispatch response are not release authorization.
 
+When source Actions are disabled, the explicit [local operator schema-2
+transport](docs/project-ci-operator.md) packages without executing source, publishes
+only an encrypted input Git blob in builder, and dispatches the same native
+qualification workflow. Its local verifier checks the complete exact-run lane
+aggregate before mirroring source status. Schema 1 remains independently strict.
+Release recipes must match builder-owned byte digests for all five profiles,
+and matrix cardinality is bounded before expansion. An explicit source-policy
+`request_schemas: [2]` disables legacy origin admission for that project.
+
 ## SDK operational limits
 
 Initial release profile is x64, Release-only. Each compressed SDK is capped at
