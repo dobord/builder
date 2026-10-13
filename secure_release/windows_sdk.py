@@ -19,6 +19,27 @@ RECIPE_CHECKOUT = {
     "files": 37,
     "newlines": "windows-crlf",
 }
+INSTALLER_SOURCE_SHA256 = "16515e5de784e84d13c900ac892d01516df6c51f9b88be29c91a05e125fd63c5"
+
+
+def materialize_installer(port: Path, recipe: Path) -> None:
+    """Keep vcpkg on the exact restored recipe and independently checked Python."""
+    source = recipe / "vcpkg/integration/install.cmake"
+    data = source.read_bytes()
+    if hashlib.sha256(data).hexdigest() != INSTALLER_SOURCE_SHA256:
+        raise ValueError("Pinned Windows CEF installer changed")
+    acquisition = b"vcpkg_find_acquire_program(PYTHON3)"
+    if data.count(acquisition) != 1:
+        raise ValueError("Windows CEF Python acquisition anchor changed")
+    result = data.replace(acquisition, b'set(PYTHON3 "$ENV{CEF_STATIC_RELEASE_PYTHON}")')
+    text = (port / "portfile.cmake").read_text(encoding="utf-8")
+    anchor = 'include("${CEF_RECIPE_SOURCE}/vcpkg/integration/install.cmake")'
+    if text.count(anchor) != 1:
+        raise ValueError("Windows CEF port installer anchor changed")
+    replacement = ('set(CEF_RECIPE_SOURCE "$ENV{CEF_STATIC_RELEASE_RECIPE}")\n'
+                   'include("${CURRENT_PORT_DIR}/windows-native-install.cmake")')
+    (port / "windows-native-install.cmake").write_bytes(result)
+    (port / "portfile.cmake").write_text(text.replace(anchor, replacement), encoding="utf-8")
 
 
 def prepare_recipe_checkout(recipe: Path) -> None:
@@ -75,6 +96,8 @@ def binding(cfg: dict) -> dict:
     return {"schema": 1, "kind": "windows-qualified-source-engine",
             "checkpoint": selected, "source_repair": source_repair.profile(),
             "recipe_checkout": dict(RECIPE_CHECKOUT),
+            "installer_source_sha256": INSTALLER_SOURCE_SHA256,
+            "installer_profile": "qualified-checkout-and-python",
             "base_build_key": cef_contract.build_key(cfg, "windows")}
 
 
@@ -112,10 +135,13 @@ def run_engine(root: Path, cfg: dict, execute, environment: dict, private: str) 
                      'DESTINATION "${CURRENT_PACKAGES_DIR}/share/cef-static")\n')
     recipe = root / "cef-recipe"
     prepare_recipe_checkout(recipe)
+    materialize_installer(port, recipe)
     logs = root / "cef-logs"
     logs.mkdir()
     environment.update(cef_build.worker_environment(environment, cfg["recipe_commit"]))
     environment.update({"ImageVersion": image, "CEF_STATIC_WORK": str(work),
+                        "CEF_STATIC_RELEASE_RECIPE": str(recipe),
+                        "CEF_STATIC_RELEASE_PYTHON": sys.executable,
                         "GITHUB_REF": "refs/heads/feature/cef-static-integration",
                         "CEF_STATIC_STRICT_THIRD_PARTY": "1", "CEF_STATIC_JOBS": str(cfg["jobs"]),
                         "CEF_STATIC_BUILD_TIMEOUT_SECONDS": "18000"})

@@ -19,6 +19,8 @@ The native Windows recipe identity includes checkout bytes: its 37 pinned inputs
 are reconstructed from exact Git-archive LF bytes to the exact producer CRLF hash
 before invoking the unchanged checkpoint adapter. Neither ciphertext nor native
 checkpoint identity is modified.
+The ABI-tracked installer points to that same qualified checkout and checked
+Python, rather than reacquiring a differently formatted recipe or Python tool.
 
 The repair binding is part of the vcpkg overlay before ABI computation and is
 installed as `share/cef-static/windows-qualified-engine.json`. Publication checks
