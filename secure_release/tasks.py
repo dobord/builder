@@ -451,6 +451,9 @@ def build():
     safeio.extract_zip(package, root / "consumer-sdk")
     source = root / "workspace" / payload["plan"]["smoke_path"]
     smoke_fixture = root / "cef-recipe/vcpkg/ports/cef-static/smoke.c"
+    if workflow == "build-windows-release.yml" and cfg is not None:
+        source = root / "windows-smoke-project"
+        smoke_fixture = source / "smoke.c"
     if linux_review is not None:
         from . import cef_combined_smoke
         source = cef_combined_smoke.prepare(source, smoke_fixture, root / "linux-smoke-project")

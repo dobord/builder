@@ -9,7 +9,7 @@ from pathlib import Path
 import shutil
 import sys
 
-from . import cef_build, cef_contract, cef_windows_iteration, crypto, safeio
+from . import cef_build, cef_combined_smoke, cef_contract, cef_windows_iteration, crypto, safeio
 from . import cef_windows_source_repair as source_repair
 from .github import Client
 
@@ -134,6 +134,9 @@ def run_engine(root: Path, cfg: dict, execute, environment: dict, private: str) 
         stream.write('\nfile(INSTALL "${CURRENT_PORT_DIR}/windows-qualified-engine.json" '
                      'DESTINATION "${CURRENT_PACKAGES_DIR}/share/cef-static")\n')
     recipe = root / "cef-recipe"
+    cef_combined_smoke.prepare(root / "workspace/ci/smoke",
+                               recipe / "vcpkg/ports/cef-static/smoke.c",
+                               root / "windows-smoke-project")
     prepare_recipe_checkout(recipe)
     materialize_installer(port, recipe)
     logs = root / "cef-logs"
