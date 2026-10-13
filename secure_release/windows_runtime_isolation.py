@@ -20,25 +20,26 @@ from . import cef_boringssl_isolation as checked, crypto, safeio
 TRIPLET = "x64-windows-static-release"
 NAMESPACE = "CEF_CHROMIUM_RUNTIME_"
 PROFILE = {"schema": 1, "kind": "windows-coff-runtime-isolation",
-           "namespace": NAMESPACE, "method": "complete-final-provider-collisions"}
+           "namespace": NAMESPACE, "method": "complete-final-provider-collisions",
+           "coff_rewrite": "symbol-names-and-appended-strings-only"}
 ENGINE = re.compile(r"lib/cef-static/(?:cef_objects|cef_[0-9]{4}_[0-9a-f]{12})\.lib\Z")
 ANCHORS = {"SSL_new", "SSL_use_certificate", "PEM_read_PrivateKey"}
 MAX_SYMBOLS = 20_000_000
 MAX_COLLISIONS = 65536
 
 
-def _tools(source: Path) -> tuple[Path, Path, Path]:
+def _tools(source: Path) -> tuple[Path, Path]:
     paths = source / "third_party/llvm-build/Release+Asserts/bin"
-    nm, objcopy, librarian = paths / "llvm-nm.exe", paths / "llvm-objcopy.exe", paths / "lld-link.exe"
-    if not all(t.is_file() for t in (nm, objcopy, librarian)):
+    nm, librarian = paths / "llvm-nm.exe", paths / "lld-link.exe"
+    if not all(t.is_file() for t in (nm, librarian)):
         paths = Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "LLVM/bin"
-        nm, objcopy, librarian = paths / "llvm-nm.exe", paths / "llvm-objcopy.exe", paths / "lld-link.exe"
-        for tool in (nm, objcopy, librarian):
+        nm, librarian = paths / "llvm-nm.exe", paths / "lld-link.exe"
+        for tool in (nm, librarian):
             result = subprocess.check_output([str(tool), "--version"], text=True, timeout=30)
             checked.require(re.search(r"(?:LLVM version|LLD) 20\.1\.8\b", result) is not None,
                             "Reviewed Windows LLVM runtime-isolation tool changed")
-    checked.require(all(safeio.regular(t) for t in (nm, objcopy, librarian)), "Missing Windows LLVM isolation tools")
-    return nm, objcopy, librarian
+    checked.require(all(safeio.regular(t) for t in (nm, librarian)), "Missing Windows LLVM isolation tools")
+    return nm, librarian
 
 
 def symbols(nm: Path, archive: Path) -> Counter:
@@ -173,6 +174,10 @@ def _member_mapping(payload: bytes, mapping: dict) -> dict:
     while index < count:
         entry = pointer + index * width
         name = payload[entry:entry + 8]
+        if name == b"\0" * 8:
+            index += 1 + payload[entry + width - 1]
+            checked.require(index <= count, "Invalid unnamed COFF symbol boundary")
+            continue
         if name[:4] == b"\0" * 4:
             offset = strings + struct.unpack_from("<I", name, 4)[0]
             end = payload.find(b"\0", offset)
@@ -188,9 +193,60 @@ def _member_mapping(payload: bytes, mapping: dict) -> dict:
     return result
 
 
-def _rewrite_members(objcopy: Path, librarian: Path, archive: Path, output: Path,
+def _rename_member(payload: bytes, mapping: dict) -> bytes:
+    """Keep NASM weak/auxiliary records intact; change only symbol name fields.
+
+    COFF names are inline eight-byte fields or offsets in an appendable string
+    table. Symbol values, classes, auxiliary records, relocations, initialized
+    sections and BSS headers are preserved byte-for-byte.
+    """
+    if payload[:4] == b"\0\0\xff\xff":
+        checked.require(struct.unpack_from("<H", payload, 4)[0] == 2, "Cannot rename native import metadata")
+        _, pointer, count = struct.unpack_from("<III", payload, 44)
+        width = 20
+    else:
+        pointer, count = struct.unpack_from("<II", payload, 8)
+        width = 18
+    strings = pointer + count * width
+    checked.require(strings + 4 <= len(payload), "Missing COFF string table")
+    size = struct.unpack_from("<I", payload, strings)[0]
+    checked.require(size >= 4 and strings + size <= len(payload), "Invalid COFF string table size")
+    result = bytearray(payload[:strings + size])
+    offsets = {}
+    index = 0
+    while index < count:
+        entry = pointer + index * width
+        name = payload[entry:entry + 8]
+        if name == b"\0" * 8:
+            index += 1 + payload[entry + width - 1]
+            checked.require(index <= count, "Invalid unnamed COFF symbol boundary")
+            continue
+        if name[:4] == b"\0" * 4:
+            offset = struct.unpack_from("<I", name, 4)[0]
+            checked.require(4 <= offset < size, "Invalid COFF symbol-name offset")
+            end = payload.find(b"\0", strings + offset, strings + size)
+            checked.require(end >= 0, "Unterminated COFF symbol name")
+            name = payload[strings + offset:end]
+        else:
+            name = name.rstrip(b"\0")
+        old = name.decode("ascii") if name.isascii() else None
+        if old in mapping:
+            new = mapping[old].encode("ascii")
+            if new not in offsets:
+                offsets[new] = len(result) - strings
+                result.extend(new + b"\0")
+            struct.pack_into("<II", result, entry, 0, offsets[new])
+        index += 1 + payload[entry + width - 1]
+        checked.require(index <= count, "Invalid COFF auxiliary symbol boundary")
+    checked.require(len(result) - strings < 2**32, "COFF string table exceeds offset range")
+    struct.pack_into("<I", result, strings, len(result) - strings)
+    result.extend(payload[strings + size:])
+    return bytes(result)
+
+
+def _rewrite_members(librarian: Path, archive: Path, output: Path,
                      mapping: dict, diagnostics: Path) -> None:
-    """Rewrite regular objects only; LLVM objcopy cannot read COFF import members."""
+    """Rewrite symbol fields in regular objects; copy native imports byte-for-byte."""
     with tempfile.TemporaryDirectory(prefix="coff-members-", dir=diagnostics) as folder:
         root = Path(folder)
         members = []
@@ -206,16 +262,8 @@ def _rewrite_members(objcopy: Path, librarian: Path, archive: Path, output: Path
                     payload = stream.read(size)
                     checked.require(len(payload) == size, "Truncated Windows object")
                     path = root / f"member{len(members):06d}.obj"
-                    path.write_bytes(payload)
                     subset = _member_mapping(payload, mapping)
-                    if subset:
-                        selected = root / "symbols.map"
-                        selected.write_bytes("".join(f"{old} {new}\n" for old, new in sorted(subset.items())).encode("ascii"))
-                        rewritten = root / "rewritten.obj"
-                        result = subprocess.run([str(objcopy), "--redefine-syms=" + str(selected), str(path), str(rewritten)],
-                                                stdout=log, stderr=log, timeout=900)
-                        checked.require(result.returncode == 0, "Windows COFF object rewrite failed")
-                        rewritten.replace(path)
+                    path.write_bytes(_rename_member(payload, subset) if subset else payload)
                     members.append(path)
                 if size & 1:
                     checked.require(stream.read(1) == b"\n", "Invalid Windows archive padding")
@@ -232,7 +280,7 @@ def _rewrite_members(objcopy: Path, librarian: Path, archive: Path, output: Path
 
 def install(installed: Path, source: Path, diagnostics: Path, *, tools=None) -> dict:
     prefix = installed / TRIPLET
-    nm, objcopy, librarian = tools or _tools(source)
+    nm, librarian = tools or _tools(source)
     paths = sorted(p for p in (prefix / "lib").rglob("*.lib") if safeio.regular(p))
     engine = [p for p in paths if ENGINE.fullmatch(p.relative_to(prefix).as_posix())]
     providers = [p for p in paths if p not in engine]
@@ -270,7 +318,7 @@ def install(installed: Path, source: Path, diagnostics: Path, *, tools=None) -> 
         section_hash = _sections(path)
         if any(name in mapping for name, kind in before):
             output = diagnostics / path.name
-            _rewrite_members(objcopy, librarian, path, output, mapping, diagnostics)
+            _rewrite_members(librarian, path, output, mapping, diagnostics)
             expected = Counter()
             for (name, kind), count in before.items():
                 expected[mapping.get(name, name), kind] += count
@@ -293,8 +341,7 @@ def install(installed: Path, source: Path, diagnostics: Path, *, tools=None) -> 
                     "Windows final providers changed during engine isolation")
     receipt = {**PROFILE, "status": "success", "collisions": collisions,
                "mapping_sha256": crypto.digest(mapping_file), "archives": records, "providers": provider_hashes,
-               "tools": {"nm_sha256": crypto.digest(nm), "objcopy_sha256": crypto.digest(objcopy),
-                         "librarian_sha256": crypto.digest(librarian)}}
+               "tools": {"nm_sha256": crypto.digest(nm), "librarian_sha256": crypto.digest(librarian)}}
     (prefix / "share/cef-static/windows-runtime-isolation.json").write_bytes(crypto.canonical(receipt))
     print("WINDOWS_COFF_ISOLATION phase=verified", flush=True)
     return receipt
@@ -320,7 +367,7 @@ def validate_archive(archive: Path, receipt: dict) -> None:
     for record in records.values():
         checked.require(set(record) == {"input_sha256", "output_sha256", "sections_sha256"}, "Invalid Windows engine record")
         checked.require(all(re.fullmatch(r"[0-9a-f]{64}", v) for v in record.values()), "Invalid Windows engine digest")
-    checked.require(set(receipt["tools"]) == {"nm_sha256", "objcopy_sha256", "librarian_sha256"}
+    checked.require(set(receipt["tools"]) == {"nm_sha256", "librarian_sha256"}
                     and all(re.fullmatch(r"[0-9a-f]{64}", v) for v in receipt["tools"].values()), "Invalid Windows tool record")
     with zipfile.ZipFile(archive) as sdk:
         root = "installed/" + TRIPLET + "/"

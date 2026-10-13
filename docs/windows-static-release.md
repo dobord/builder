@@ -35,6 +35,10 @@ global definition/reference against one collision map. Provider archives and
 public CEF APIs are retained. The ABI-tracked profile and owned installed receipt
 bind all derivative/provider hashes; publication independently checks the actual
 SDK ZIP against that receipt before writing release assets.
+The COFF operation changes only eight-byte symbol-name fields, appends the new
+strings and updates the string-table length. NASM values/classes/auxiliary
+records, relocations, code and virtual BSS headers are retained; the independent
+LLVM symbol reader and COFF librarian verify the reconstructed archive.
 
 Assets are the Windows static-release SDK ZIP, `release-manifest.json` and
 `SHA256SUMS` under the separate `v0.2.5-windows` release in private `vcpkg-bin`.
