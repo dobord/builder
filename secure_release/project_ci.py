@@ -68,6 +68,23 @@ def key_env(name):
     return crypto.unb64(required(name)).decode("utf-8")
 
 
+def source_policy():
+    """Decode opaque secret transport privately; malformed encodings fail closed."""
+    if "CI_SOURCE_POLICY_B64" in os.environ:
+        encoded = required("CI_SOURCE_POLICY_B64")
+        if len(encoded) > 1024 * 1024:
+            raise ValueError("source policy exceeds bound")
+        raw = crypto.unb64(encoded)
+    else:
+        raw = required("CI_SOURCE_POLICY").encode()
+    if len(raw) > 1024 * 1024:
+        raise ValueError("source policy exceeds bound")
+    policy = crypto.parse(raw)
+    if not isinstance(policy, dict):
+        raise ValueError("invalid source policy object")
+    return policy
+
+
 def api(path, token, *, data=None, limit=MAX_ARCHIVE):
     decoded = urllib.parse.unquote(path)
     if (not path.startswith("repos/") or any(part in {".", ".."} for part in decoded.split("?", 1)[0].split("/")) or
@@ -541,7 +558,7 @@ def verify_request_schema(policy, schema):
 
 
 def verify_source_policy(payload, token):
-    policy = crypto.parse(required("CI_SOURCE_POLICY"))
+    policy = source_policy()
     verify_request_schema(policy, payload["schema"])
     if payload["source"] != policy["repository"] or payload["source_id"] != policy["repository_id"]:
         raise ValueError("source not authorized")
@@ -623,7 +640,7 @@ def prepare():
     if digest_bytes(request.encode("ascii")) != required("CI_REQUEST_DIGEST"):
         raise ValueError("request hash mismatch")
     schema = int(os.environ.get("CI_REQUEST_SCHEMA", "1"))
-    verify_request_schema(crypto.parse(required("CI_SOURCE_POLICY")), schema)
+    verify_request_schema(source_policy(), schema)
     previous = pages(f"repos/{BUILDER}/actions/workflows/{WORKFLOW}/runs?head_sha={required('GITHUB_SHA')}",
                      required("BUILDER_READ_TOKEN"), "workflow_runs")
     matches = [run for run in previous if run["display_title"] == "Encrypted qualification " + required("CI_REQUEST_DIGEST")]

@@ -13,7 +13,12 @@ operations only, never source scripts, builds or tests. Builder prepare owns
 signature, source-policy, baseline and automated OSV admission. Native builder
 jobs own all authoritative qualification. Local tests are diagnostic evidence.
 
-The independently configured `PROJECT_CI_SOURCE_POLICY` JSON in builder must
+The independently configured policy JSON in builder is stored as opaque Base64
+under `PROJECT_CI_SOURCE_POLICY_B64`, passed as `CI_SOURCE_POLICY_B64` and
+decoded only inside trusted prepare. This prevents Actions' structured-secret masking from
+classifying short schema values such as `2` as secrets in the public matrix.
+Masking remains enabled; no private policy data is exposed through job outputs.
+The policy must
 retain its repository, repository ID, authorizer branch and ordinary CI approval
 boundaries, and explicitly add:
 

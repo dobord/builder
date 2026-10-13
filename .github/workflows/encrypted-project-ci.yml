@@ -58,7 +58,7 @@ jobs:
           CI_REQUEST: ${{ inputs.request }}
           CI_INPUT_PRIVATE_KEY_B64: ${{ secrets.PROJECT_CI_INPUT_PRIVATE_KEY_B64 }}
           CI_VERIFY_PUBLIC_KEY_B64: ${{ secrets.PROJECT_CI_VERIFY_PUBLIC_KEY_B64 }}
-          CI_SOURCE_POLICY: ${{ secrets.PROJECT_CI_SOURCE_POLICY }}
+          CI_SOURCE_POLICY_B64: ${{ secrets.PROJECT_CI_SOURCE_POLICY_B64 }}
           SOURCE_READ_TOKEN: ${{ secrets.PROJECT_CI_SOURCE_READ_TOKEN }}
           BUILDER_READ_TOKEN: ${{ github.token }}
         run: python -m secure_release.project_ci prepare
