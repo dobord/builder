@@ -23,6 +23,7 @@ PROFILE = {"schema": 1, "kind": "windows-coff-runtime-isolation",
            "namespace": NAMESPACE, "method": "complete-final-provider-collisions",
            "coff_rewrite": "symbol-names-and-appended-strings-only",
            "weak_aliases": "transitive-namespaced-default-targets",
+           "native_import_names": "preserved-original-dll-member-identities",
            "msvc_stl": "shared-reviewed-native-toolset-14.44.35207"}
 ENGINE = re.compile(r"lib/cef-static/(?:cef_objects|cef_[0-9]{4}_[0-9a-f]{12})\.lib\Z")
 ANCHORS = {"SSL_new", "SSL_use_certificate", "PEM_read_PrivateKey"}
@@ -312,20 +313,67 @@ def _archive_aliases(archive: Path) -> set[tuple[str, str]]:
     return result
 
 
+def _restore_import_member_names(archive: Path, originals: list[bytes]) -> None:
+    """Restore native long-import DLL identities without changing index offsets."""
+    with archive.open("r+b") as stream:
+        checked.require(stream.read(8) == b"!<arch>\n", "Invalid reconstructed COFF archive")
+        table, table_position, index = b"", 0, 0
+        while True:
+            header_position = stream.tell()
+            header = stream.read(60)
+            if not header:
+                break
+            checked.require(len(header) == 60 and header[58:] == b"`\n", "Invalid reconstructed member header")
+            size = int(header[48:58].strip())
+            name = header[:16].rstrip(b" ")
+            next_position = stream.tell() + size + (size & 1)
+            if name == b"//":
+                table_position = stream.tell()
+                table = stream.read(size)
+            elif name not in (b"/", b"/SYM64/"):
+                checked.require(index < len(originals), "Reconstructed COFF member inventory changed")
+                original = originals[index]
+                index += 1
+                if re.fullmatch(rb"[A-Za-z0-9_.-]+\.(?:dll|drv)", original, re.I):
+                    checked.require(name.startswith(b"/") and name[1:].isdigit(), "Native import member lacks a name-table reference")
+                    offset = int(name[1:])
+                    ends = [p for p in (table.find(b"\0", offset), table.find(b"/\n", offset)) if p >= 0]
+                    checked.require(ends and offset < min(ends) and len(original) < min(ends) - offset,
+                                    "Native DLL member identity exceeds reserved name-table space")
+                    replacement = original + b"\0" + b"\0" * (min(ends) - offset - len(original) - 1)
+                    stream.seek(table_position + offset)
+                    stream.write(replacement)
+            stream.seek(next_position)
+        checked.require(index == len(originals), "Reconstructed COFF member count changed")
+
+
 def _rewrite_members(librarian: Path, archive: Path, output: Path,
                      mapping: dict, diagnostics: Path) -> None:
     """Rewrite symbol fields in regular objects; copy native imports byte-for-byte."""
     with tempfile.TemporaryDirectory(prefix="coff-members-", dir=diagnostics) as folder:
         root = Path(folder)
         members = []
+        originals, longnames = [], b""
         with archive.open("rb") as stream, (diagnostics / "objcopy.log").open("ab") as log:
             checked.require(stream.read(8) == b"!<arch>\n", "Expected regular Windows engine archive")
             while header := stream.read(60):
                 checked.require(len(header) == 60 and header[58:] == b"`\n", "Invalid Windows archive member")
                 size = int(header[48:58].strip())
-                if header[:16].rstrip(b" ") in (b"/", b"//", b"/SYM64/"):
+                member_name = header[:16].rstrip(b" ")
+                if member_name == b"//":
+                    longnames = stream.read(size)
+                elif member_name in (b"/", b"/SYM64/"):
                     stream.seek(size, os.SEEK_CUR)
                 else:
+                    if member_name.startswith(b"/"):
+                        checked.require(member_name[1:].isdigit(), "Invalid native archive name reference")
+                        offset = int(member_name[1:])
+                        ends = [p for p in (longnames.find(b"\0", offset), longnames.find(b"/\n", offset)) if p >= 0]
+                        checked.require(ends and offset < min(ends), "Invalid native archive long member name")
+                        member_name = longnames[offset:min(ends)]
+                    else:
+                        member_name = member_name.removesuffix(b"/")
+                    originals.append(member_name)
                     checked.require(20 <= size <= 256 * 1024**2, "Invalid Windows object size")
                     payload = stream.read(size)
                     checked.require(len(payload) == size, "Truncated Windows object")
@@ -344,6 +392,7 @@ def _rewrite_members(librarian: Path, archive: Path, output: Path,
             command += ["/nologo", "/out:" + str(output), "@" + str(response)]
             result = subprocess.run(command, stdout=log, stderr=log, timeout=1800)
             checked.require(result.returncode == 0, "Windows COFF archive reconstruction failed")
+            _restore_import_member_names(output, originals)
 
 
 def install(installed: Path, source: Path, diagnostics: Path, *, tools=None) -> dict:

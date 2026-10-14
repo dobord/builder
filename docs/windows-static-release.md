@@ -43,6 +43,9 @@ The COFF operation changes only eight-byte symbol-name fields, appends the new
 strings and updates the string-table length. NASM values/classes/auxiliary
 records, relocations, code and virtual BSS headers are retained; the independent
 LLVM symbol reader and COFF librarian verify the reconstructed archive.
+Native DLL/DRV member identities are restored from the original archive into
+reserved name-table space, without moving member or symbol-index offsets. Long
+native OS import records retain their strict audit evidence after repacking.
 The collision map includes the transitive COFF weak-alias closure whenever a
 default target is namespaced, keeping engine aliases separate from consumer STL
 aliases while retaining every auxiliary-record index.

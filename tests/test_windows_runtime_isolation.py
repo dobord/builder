@@ -8,7 +8,7 @@ import tempfile
 import unittest
 import zipfile
 
-from secure_release import crypto, windows_runtime_isolation as subject
+from secure_release import crypto, static_audit, windows_runtime_isolation as subject
 
 
 class WindowsCoffIsolationTests(unittest.TestCase):
@@ -60,7 +60,7 @@ class WindowsCoffIsolationTests(unittest.TestCase):
             (root / "assembly.asm").write_text("bits 64\nsection .text\nglobal SSL_ASM_PROBE\nSSL_ASM_PROBE:\nmov eax,31\nret\n")
             subprocess.run([str(nasm), "-f", "win64", "-o", str(root / "assembly.obj"), str(root / "assembly.asm")], check=True)
             subprocess.run([str(linker), "/dll", "/noentry", "/nodefaultlib", "/export:PUBLIC_OS_FUNCTION",
-                            "/out:" + str(root / "PUBLIC_FIXTURE.dll"),
+                            "/out:" + str(root / "bcryptprimitives.dll"),
                             "/implib:" + str(root / "PUBLIC_FIXTURE.lib"), str(root / "os_fixture.obj")], check=True)
             imported = subject.symbols(nm, root / "PUBLIC_FIXTURE.lib")
             self.assertIn(("PUBLIC_OS_FUNCTION", "T"), imported)
@@ -70,6 +70,20 @@ class WindowsCoffIsolationTests(unittest.TestCase):
                                     (ssl, ("openssl", "sdk_stl")), (crypt, ("crypto",))):
                 subprocess.run([str(librarian), "/out:" + str(target),
                                 *[str(root / (n if n.endswith(".lib") else n + ".obj")) for n in members]], check=True)
+            # Model Rust's native OS import members: their original archive
+            # identities are DLL basenames, including the long .idata objects.
+            original_names = []
+            with engine.open("rb") as stream:
+                stream.read(8)
+                while header := stream.read(60):
+                    size = int(header[48:58].strip())
+                    payload = stream.read(size)
+                    if header[:16].rstrip(b" ") not in (b"/", b"//", b"/SYM64/"):
+                        original_names.append(b"bcryptprimitives.dll" if static_audit.coff_kind(payload) == "coff-import"
+                                              else f"public{len(original_names)}.obj".encode())
+                    if size & 1:
+                        stream.read(1)
+            subject._restore_import_member_names(engine, original_names)
             for package, members in (("cef-static", (engine,)), ("openssl", (ssl, crypt))):
                 (info / f"{package}_1_{subject.TRIPLET}.list").write_text("".join(
                     subject.TRIPLET + "/" + p.relative_to(prefix).as_posix() + "\n" for p in members))
@@ -82,6 +96,10 @@ class WindowsCoffIsolationTests(unittest.TestCase):
             provider_hashes = {p: crypto.digest(p) for p in (ssl, crypt)}
             receipt = subject.install(installed, root, root / "diagnostics", tools=(nm, linker))
             self.assertEqual(subject._sections(engine), section_hash)
+            with engine.open("rb") as stream:
+                audit = static_audit.inspect_archive(stream, engine.stat().st_size, "windows", allow_windows_os_imports=True)
+            self.assertTrue(audit["qualified_objects_only"], audit)
+            self.assertIn("bcryptprimitives.dll", audit["system_imports"])
             self.assertTrue(all(crypto.digest(p) == h for p, h in provider_hashes.items()))
             succeeded = subprocess.run(command, capture_output=True)
             self.assertEqual(succeeded.returncode, 0, succeeded.stderr.decode(errors="replace"))
