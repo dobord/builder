@@ -76,6 +76,17 @@ def import_channels(env, paths):
                 env[name] = value
 
 
+def windows_preflight(root, work, env, body, host, runner_os, shell, deadline, index, done):
+    """Gate Visual Studio configuration once per selected compiler identity."""
+    if runner_os != "Windows" or shell != "pwsh":
+        return
+    from . import project_ci_windows as windows
+    identity = windows.configuration(root, body, env, host)
+    if identity is not None and identity not in done:
+        windows.probe(work / f"windows-compiler-{index}", env, identity, deadline)
+        done.add(identity)  # Failed primary probes never become cached success.
+
+
 def artifact_archive(root, paths, target, payload, lane):
     """Preserve reports/corpora as ciphertext; reject links, escape, and overflow."""
     work = Path(ci.required("RUNNER_TEMP")) / "project-ci"
@@ -199,6 +210,7 @@ def run():
         root = prepare_vcpkg(root, env, work / "vcpkg-prepare.log", payload)
         env["GITHUB_WORKSPACE"] = context["github.workspace"] = str(root)
     deadline = time.monotonic() + min(int(job.get("timeout-minutes", 350)), 350) * 60
+    compiler_probes = set()
     succeeded = True
     for index, step in enumerate(job["steps"]):
         action = step.get("uses")
@@ -239,6 +251,8 @@ def run():
         if payload["suite"] == "release":
             body = body.replace(" --allow-missing-baseline", "")
         shell = step.get("shell", "pwsh" if ci.required("RUNNER_OS") == "Windows" else "bash")
+        windows_preflight(root, work, local, body, lane["runner"], ci.required("RUNNER_OS"),
+                          shell, deadline, index, compiler_probes)
         script = work / (f"step-{index}.ps1" if shell == "pwsh" else f"step-{index}.sh")
         if shell == "pwsh":
             script.write_text("$ErrorActionPreference = 'Stop'\n" + body +

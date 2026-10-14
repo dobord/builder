@@ -19,23 +19,53 @@ class StageFailure(RuntimeError):
         super().__init__(f"stage={stage}; category={kind}; code={code}")
 
 
-def terminate_tree(process: subprocess.Popen) -> None:
-    # Called while the parent is still alive, before killing it loses the PID tree.
+def spawn(args, *, cwd, env, stdout):
+    """Own Windows descendants before approved source commands can execute."""
     if os.name == "nt":
-        killer = str(Path(os.environ["SystemRoot"]) / "System32/taskkill.exe")
+        from .windows_job import spawn_owned
+        return spawn_owned(args, cwd=cwd, env=env, stdout=stdout)
+    return subprocess.Popen(args, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+                            stdout=stdout, stderr=subprocess.STDOUT, start_new_session=True)
+
+
+def terminate_tree(process: subprocess.Popen) -> None:
+    error = None
+    try:
+        if os.name == "nt":
+            job = getattr(process, "_builder_job", None)
+            if job is not None:
+                # The job outlives the root process and diagnostic observers.
+                job.terminate(timeout=30)
+            else:
+                # Compatibility for external, unowned Popen instances. This
+                # PID lookup cannot guarantee descendants after parent exit.
+                killer = os.path.join(os.environ["SystemRoot"], "System32", "taskkill.exe")
+                result = subprocess.run([killer, "/PID", str(process.pid), "/T", "/F"],
+                                        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                        stderr=subprocess.DEVNULL, timeout=30, check=False)
+                if result.returncode:
+                    raise RuntimeError("unowned Windows process-tree retirement failed")
+        else:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+    except BaseException as failure:
+        error = failure
+    finally:
         try:
-            subprocess.run([killer, "/PID", str(process.pid), "/T", "/F"],
-                           stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                           stderr=subprocess.DEVNULL, timeout=30, check=False)
-        finally:
-            if process.poll() is None:
+            if os.name == "nt" and process.poll() is None:
                 process.kill()
-    else:
+        except BaseException as failure:
+            if error is None:
+                error = failure
         try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-    process.wait(timeout=30)
+            process.wait(timeout=30)  # Always attempt bounded reaping, even on error.
+        except BaseException as failure:
+            if error is None:
+                error = failure
+    if error is not None:
+        raise error
 
 
 def run(args: list[str], log: Path, *, cwd: Path | None = None,
@@ -51,16 +81,13 @@ def run(args: list[str], log: Path, *, cwd: Path | None = None,
     with log.open("ab", buffering=0) as sink:
         sink.write(("\nSUPERVISOR " + json.dumps({"stage": stage, "state": "start"}) + "\n").encode())
         try:
-            p = subprocess.Popen(args, cwd=cwd, env=environment, stdin=subprocess.DEVNULL,
-                                 stdout=sink, stderr=subprocess.STDOUT,
-                                 start_new_session=(os.name != "nt"))
+            p = spawn(args, cwd=cwd, env=environment, stdout=sink)
         except Exception:
             raise StageFailure(stage, "start") from None
         try:
             while True:
                 remaining = timeout - (time.monotonic() - start)
                 if remaining <= 0:
-                    terminate_tree(p)
                     raise StageFailure(stage, "timeout")
                 try:
                     code = p.wait(timeout=min(heartbeat, remaining))
@@ -71,10 +98,22 @@ def run(args: list[str], log: Path, *, cwd: Path | None = None,
             if code:
                 raise StageFailure(stage, "exit", code)
         except BaseException:
-            if p.poll() is None:
+            # Do not poll outside this protected cleanup path: a poll failure
+            # must not replace the supervision exception either.
+            try:
                 terminate_tree(p)
-            sink.write(("\nSUPERVISOR " + json.dumps({"stage": stage, "state": "failed", "elapsed_seconds": int(time.monotonic() - start)}) + "\n").encode())
+            except BaseException:
+                try:
+                    sink.write(b"\nSUPERVISOR_RETIREMENT_FAILED\n")
+                except BaseException:
+                    pass
+            try:
+                sink.write(("\nSUPERVISOR " + json.dumps({"stage": stage, "state": "failed", "elapsed_seconds": int(time.monotonic() - start)}) + "\n").encode())
+            except BaseException:
+                pass
             raise
+        if os.name == "nt":
+            terminate_tree(p)  # Retire reusable/background nodes on normal exit too.
         sink.write(("\nSUPERVISOR " + json.dumps({"stage": stage, "state": "complete", "elapsed_seconds": int(time.monotonic() - start)}) + "\n").encode())
 
 

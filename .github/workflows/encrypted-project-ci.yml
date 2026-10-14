@@ -106,6 +106,10 @@ jobs:
         run: >-
           python -m pip install --disable-pip-version-check --require-hashes
           --only-binary=:all: -r project-ci-requirements.lock
+      - name: Require native Windows process ownership before materialization
+        if: runner.os == 'Windows'
+        timeout-minutes: 3
+        run: python -m secure_release.windows_ownership_gate
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: sources-${{ github.run_id }}-${{ github.run_attempt }}
