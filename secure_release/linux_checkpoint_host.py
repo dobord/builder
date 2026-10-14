@@ -6,9 +6,10 @@ from . import cef_cache, cef_strict_iteration
 # Public runner-images inventories reviewed at these immutable commits:
 # ubuntu24/20260927.320: 1275e33f5019b02660b81ecc5622fe196211fa89
 # ubuntu24/20261012.334: 7e7dc1bcc0ef464e5e315a2b4c33609590c6cffe
+# ubuntu24/20261004.327: e3fe113a581eb9a44ca43f479b69f9c93f36df34
 # Chromium uses its captured compiler/sysroot; frozen target inputs and the
 # complete recipe/contract/path identity must still compare exactly.
-IMAGES = ("20260927.320.1", "20261012.334.1")
+IMAGES = ("20260927.320.1", "20261012.334.1", "20261004.327.1")
 HOST = {"os_id": "ubuntu", "os_version_id": "24.04", "machine": "x86_64",
         "glibc": "2.39", "gcc14": "14.2.0", "gxx14": "14.2.0",
         "binutils": "2.42", "pkg_config": "1.8.1", "bison": "3.8.2", "ninja": "1.13.2"}

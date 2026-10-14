@@ -26,3 +26,8 @@ class LinuxCheckpointHostTests(unittest.TestCase):
                     host.prepare(selected, expected, original, {})
             with self.assertRaises(ValueError):
                 host.prepare(dict(selected, artifact_sha256='0'*64), expected, original, {})
+            with patch.dict('os.environ', ImageVersion=host.IMAGES[2]):
+                host.prepare(selected, dict(expected, image=host.IMAGES[2]), original, {})
+            with patch.dict('os.environ', ImageVersion='20990101.1.1'):
+                with self.assertRaises(ValueError):
+                    host.prepare(selected, dict(expected, image='20990101.1.1'), original, {})
