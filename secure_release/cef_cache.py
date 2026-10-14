@@ -109,6 +109,18 @@ WINDOWS_RELEASE_BINARY_CACHE = {
     "artifact_id": 11878152631,
     "artifact_sha256": "3e27b98fdd2428867ed3ee1016d4c5033e290e6b252b64c86a9a8dadf1928a4d",
 }
+JOINT_COMPLETED_BINARY_CACHES = {
+    "linux": {"run": 38583556953, "attempt": 1,
+              "revision": "b5f3e49d92af4e525786a80726d2140fe7bdd811",
+              "artifact_id": 11909950724,
+              "artifact_sha256": "ab85d570542f153bb829bc77e98067861be9729b7a5b6c6e2574e75b480f7fc6",
+              "image": "20261004.327.1"},
+    "windows": {"run": 38583556953, "attempt": 1,
+                "revision": "b5f3e49d92af4e525786a80726d2140fe7bdd811",
+                "artifact_id": 11906429533,
+                "artifact_sha256": "cb1ce3974f74a849166e835b67cffdf470b0b14196cbbf7358b5e0d680f3d7a1",
+                "image": "20261004.326.1"},
+}
 
 
 def continuation_record(run: int) -> dict | None:
@@ -131,6 +143,12 @@ def producer_revision(platform: str, kind: str, run: int, attempt: int, revision
 def selected_revision(selected: dict | None, platform: str, kind: str, revision: str) -> str:
     if selected is None:
         return revision
+    if selected["run"] == 38583556953:
+        record = JOINT_COMPLETED_BINARY_CACHES.get(platform)
+        require(record is not None and kind == "vcpkg-binaries"
+                and all(selected[name] == record[name] for name in ("run", "attempt", "artifact_id", "artifact_sha256")),
+                "Reviewed joint completed-package cache selector changed")
+        return record["revision"]
     if selected["run"] == WINDOWS_RELEASE_BINARY_CACHE["run"]:
         record = WINDOWS_RELEASE_BINARY_CACHE
         require(platform == "windows" and kind == "vcpkg-binaries"
@@ -148,6 +166,8 @@ def selected_revision(selected: dict | None, platform: str, kind: str, revision:
 
 def binary_cache_image(selected: dict, platform: str, revision: str) -> str | None:
     selected_revision(selected, platform, "vcpkg-binaries", revision)
+    if selected["run"] == 38583556953:
+        return JOINT_COMPLETED_BINARY_CACHES[platform]["image"]
     if selected["run"] == LINUX_RELEASE_CONTINUATION["run"]:
         return "20260927.320.1"
     if selected["run"] == WINDOWS_RELEASE_BINARY_CACHE["run"]:
@@ -280,6 +300,8 @@ def fetch(api, selected: dict, directory: Path, *, platform: str, kind: str, key
     producer = api.get(f"/repos/{BUILDER}/actions/runs/{run}/attempts/{attempt}")
     workflow = build_workflow(producer.get("path", ""))
     require(platform in BUILD_WORKFLOWS[workflow], "Cache platform differs from producer workflow")
+    if run == 38583556953:
+        require(workflow == "build-combined-release.yml", "Reviewed completed-package cache workflow changed")
     if continuation_record(run) is not None:
         require(workflow == "build-linux-release.yml", "Reviewed Linux continuation workflow changed")
     check_run(producer, BUILDER, workflow, revision, attempt, "workflow_dispatch", success=False)

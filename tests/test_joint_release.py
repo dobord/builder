@@ -84,6 +84,15 @@ class JointReleaseTests(unittest.TestCase):
 
     def test_reviewed_binary_cache_cannot_cross_platform_or_digest(self):
         record = cef_cache.WINDOWS_RELEASE_BINARY_CACHE
+        for platform, completed in cef_cache.JOINT_COMPLETED_BINARY_CACHES.items():
+            selected = {name: completed[name] for name in ('run', 'attempt', 'artifact_id', 'artifact_sha256')}
+            self.assertEqual(cef_cache.selected_revision(selected, platform, 'vcpkg-binaries', 'a'*40), completed['revision'])
+            self.assertEqual(cef_cache.binary_cache_image(selected, platform, 'a'*40), completed['image'])
+            for other, purpose in ((platform, 'cef-checkpoint'), ('windows' if platform == 'linux' else 'linux', 'vcpkg-binaries')):
+                with self.assertRaises(ValueError):
+                    cef_cache.selected_revision(selected, other, purpose, 'a'*40)
+            with self.assertRaises(ValueError):
+                cef_cache.selected_revision(dict(selected, artifact_sha256='0'*64), platform, 'vcpkg-binaries', 'a'*40)
         selected = {k:record[k] for k in ('run','attempt','artifact_id','artifact_sha256')}
         self.assertEqual(cef_cache.selected_revision(selected,'windows','vcpkg-binaries','a'*40),record['revision'])
         with self.assertRaises(ValueError):
