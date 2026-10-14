@@ -127,6 +127,10 @@ def verify_result():
             if workflow_name == "build-windows-release.yml":
                 from . import windows_sdk
                 windows_sdk.validate_binding(evidence.get("windows_engine"), cfg)
+                linker = evidence.get("windows_consumer_linker", {})
+                if linker.get("kind") != "qualified-native-lld" or linker.get("invocation_verified") is not True:
+                    raise ValueError("Windows consumer lacks its qualified native linker evidence")
+                cef_contract.digest(linker.get("sha256"))
                 from . import windows_runtime_isolation
                 windows_runtime_isolation.validate_archive(sdk, evidence.get("windows_runtime_isolation"))
             if workflow_name == "build-linux-release.yml":

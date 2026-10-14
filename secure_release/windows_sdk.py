@@ -101,6 +101,7 @@ def binding(cfg: dict) -> dict:
             "installer_source_sha256": INSTALLER_SOURCE_SHA256,
             "installer_profile": "qualified-checkout-and-python",
             "runtime_isolation_profile": dict(windows_runtime_isolation.PROFILE),
+            "consumer_linker": "qualified-native-lld",
             "base_build_key": cef_contract.build_key(cfg, "windows")}
 
 

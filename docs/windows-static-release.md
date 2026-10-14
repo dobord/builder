@@ -27,6 +27,10 @@ installed as `share/cef-static/windows-qualified-engine.json`. Publication check
 that file against the independently reconstructed binding. The final relocated
 combined consumer must pass the existing Windows browser/renderer module audit
 three times with the build, installed and engine workspaces hidden.
+The consumer uses the exact restored Chromium LLD through MSBuild's explicit
+link-tool properties. Its actual build invocation and tool digest are recorded
+and required by publication, retaining the qualified native import/delay-import
+linker boundary as well as the MSVC compiler/STL boundary.
 
 Generated COFF engine archives are namespaced against the complete final static
 provider closure. The rewrite preserves ordered initialized section bytes,

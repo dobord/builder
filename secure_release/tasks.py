@@ -475,7 +475,22 @@ def build():
             from . import cef_consumer_linker
             configure.append(cef_consumer_linker.cmake_flag())
     execute(configure, stage="consumer-configure", timeout=600)
-    execute(["cmake", "--build", str(out), "--config", "Release", "--parallel", "2"], stage="consumer-build", timeout=1800)
+    build_consumer = ["cmake", "--build", str(out), "--config", "Release", "--parallel", "2"]
+    if workflow == "build-windows-release.yml" and cfg is not None:
+        linker = Path(env("RUNNER_TEMP")) / "w/download/chromium/src/third_party/llvm-build/Release+Asserts/bin/lld-link.exe"
+        if not safeio.regular(linker):
+            raise ValueError("Qualified native Windows LLD consumer linker is missing")
+        build_consumer += ["--", "/p:LinkToolExe=lld-link.exe", "/p:LinkToolPath=" + str(linker.parent), "/v:normal"]
+    linker_log_offset = log.stat().st_size if log.exists() else 0
+    execute(build_consumer, stage="consumer-build", timeout=1800)
+    if workflow == "build-windows-release.yml" and cfg is not None:
+        with log.open("rb") as stream:
+            stream.seek(linker_log_offset)
+            invocation = stream.read(64 * 1024**2).decode("utf-8", errors="replace").replace("\\", "/").lower()
+        if linker.as_posix().lower() not in invocation:
+            raise ValueError("Windows consumer build did not invoke the qualified native LLD")
+        (root / "windows-consumer-linker.json").write_bytes(crypto.canonical({
+            "kind": "qualified-native-lld", "sha256": crypto.digest(linker), "invocation_verified": True}))
     execute(["ctest", "--test-dir", str(out), "-C", "Release", "--output-on-failure", "--timeout", "60"], stage="consumer-test", timeout=180)
     cef_proof = cef_build.verify_consumer(
         root, cfg, platform, execute, platform_sha256, platform_probe,
@@ -504,6 +519,7 @@ def build():
         if workflow == "build-windows-release.yml":
             manifest["cef"]["windows_engine"] = windows_sdk.binding(cfg)
             manifest["cef"]["windows_runtime_isolation"] = windows_isolation
+            manifest["cef"]["windows_consumer_linker"] = crypto.parse((root / "windows-consumer-linker.json").read_bytes())
         if platform_preflight is not None:
             manifest["cef"]["platform_preflight"] = platform_preflight
         if cpp_proof is not None:
