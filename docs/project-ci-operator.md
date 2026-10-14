@@ -47,6 +47,76 @@ source commit-status write, and builder contents/actions read/write permission.
 Its token is captured in memory and never printed, saved or passed to build/test
 commands. Existing cryptographic roles and SDK backups are unchanged.
 
+## Noninteractive execution and Windows compiler diagnostics
+
+Approved source commands always receive null stdin. Output remains in private
+files. Wait errors and interruption trigger retirement while preserving the
+original exception, even when cleanup or cleanup logging fails. A bounded timeout
+observer may collect private diagnostics before retirement; observer failure
+cannot bypass the retirement attempt or expose its exception text.
+
+On Windows, both project CI and SDK supervision own each command through a
+non-inherited kill-on-close Job Object. An absolute trusted launcher runs under
+the official Python runtime with `-I -S` and blocks on a private one-byte handoff.
+The supervisor assigns the launcher to the job before sending that byte; only
+then may the launcher execute the approved command, with null stdin. The handoff
+contains no environment, keys or credentials. No breakaway permission is granted.
+Nested-job support requires Windows 8 or newer, including the hosted Windows
+runners. Failed assignment fails closed; it never launches source unowned.
+
+Job ownership survives root/launcher exit and timeout observers. Retirement
+terminates the job, bounds observation of its active-process count, closes the
+job handle, and reaps the parent. Normal Windows command completion also retires
+remaining background nodes. An external unowned `Popen` compatibility path still
+uses `taskkill`; its failures are reported and parent reaping is always attempted
+with a bounded wait. This PID-based path does not guarantee descendants after
+parent exit. Admitted
+commands use the owned-job path. Real nested-job, parent-exit and SDK-consumer
+behavior requires native Windows qualification; synthetic mocks are insufficient.
+
+Every Windows `qualify` lane has a mandatory pre-materialization native ownership
+gate. It uses only the standard library and the reviewed public
+`NativeWindowsOwnershipTests`, under an allowlisted credential-free environment.
+Exactly the two required tests must run and succeed: cancellation before first
+wait (including source stdin EOF), and grandchild retirement after parent exit.
+Skips, expected failures, missing tests and other failures block materialization
+and qualification. No extra job is introduced; the required 39-lane inventory
+and lane names remain unchanged.
+
+The gate's unittest output and summary stay under
+`runner.temp/project-ci-native-contract/`, separate from source staging so failed
+preflight does not create or decrypt a source checkout. Existing always-run
+encrypted diagnostics collect this directory, and existing cleanup removes it.
+Public output is limited to fixed gate status. The gate has a three-minute step
+deadline and cannot silently substitute mocked results for native execution.
+
+Before recognized PowerShell Visual Studio configuration steps, the admitted
+runner performs one public synthetic C++ compiler-identification smoke check per
+generator/architecture. Generator and architecture come from the admitted command
+and bounded local preset inheritance; the unqualified default is selected only
+for `windows-2022`. MinGW, Ninja and non-Windows commands retain their own paths.
+Preset includes, external architectures and toolset overrides require explicit
+probe support before use; they are not silently replaced by another toolchain.
+
+The primary smoke check has a 90-second cap. On failure, controls compare
+`WINDIR`, explicitly allowlisted Windows host inputs, and direct CMake execution;
+successful host-input controls permit bounded single-variable comparisons.
+All use null stdin. Controls have 45-second caps, single-variable checks 10 seconds,
+and the complete probe shares a 300-second budget within the existing lane
+deadline, reserving 130 seconds for snapshot and worst-case process-tree retirement
+(30 seconds for each native killer and each child wait). Controls may be omitted
+or shortened when this reserve would otherwise be consumed. A failed
+primary check always fails the lane, even if a control succeeds. Controls never
+modify the original recipe environment, feature options, recipe bytes or pins.
+
+The private `project-ci/windows-compiler-<step>/` directory retains a summary,
+configure logs, installed-CMake compiler-module tracing without expression
+expansion, and timeout process names/PIDs/parent PIDs. No environment dump,
+process command line or owner is queried. Existing authenticated encrypted-log
+collection carries these files; no plaintext artifact or public report is added.
+This is diagnostic hardening, not proof that a historical Windows hang is fixed.
+Native exact-SHA qualification and all 39 release lanes remain mandatory.
+
 ## Signed transport
 
 The strict schema-2 field set is:
