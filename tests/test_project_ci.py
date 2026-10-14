@@ -26,6 +26,76 @@ def payload():
 
 
 class ProjectCiTests(unittest.TestCase):
+    def test_wait_interruption_retires_child_and_preserves_original_exception(self):
+        for error in (KeyboardInterrupt(), RuntimeError("SYNTHETIC_WAIT_FAILURE")):
+            child = unittest.mock.Mock()
+            child.wait.side_effect = error
+            with self.subTest(error=type(error).__name__), tempfile.TemporaryDirectory() as tmp, patch("secure_release.process.spawn", return_value=child), patch("secure_release.process.terminate_tree", side_effect=OSError("SYNTHETIC_CLEANUP_FAILURE")) as retire:
+                with self.assertRaises(type(error)) as caught:
+                    ci.quiet(["PUBLIC_TOOL"], Path(tmp), {}, Path(tmp) / "command.log", timeout=1)
+                self.assertIs(caught.exception, error)
+                retire.assert_called_once_with(child)
+
+    def test_cleanup_logging_failure_cannot_mask_interruption(self):
+        error = KeyboardInterrupt()
+        child = unittest.mock.Mock()
+        child.wait.side_effect = error
+        log = unittest.mock.MagicMock()
+        log.open.return_value.__enter__.return_value.write.side_effect = OSError("SYNTHETIC_LOG_FAILURE")
+        with patch("secure_release.process.spawn", return_value=child), patch("secure_release.process.terminate_tree", side_effect=OSError("SYNTHETIC_CLEANUP_FAILURE")):
+            with self.assertRaises(KeyboardInterrupt) as caught:
+                ci.quiet(["PUBLIC_TOOL"], Path("."), {}, log, timeout=1)
+        self.assertIs(caught.exception, error)
+
+    def test_windows_timeout_observer_parent_exit_keeps_job_ownership(self):
+        import subprocess
+        child = unittest.mock.Mock()
+        child.wait.side_effect = [subprocess.TimeoutExpired("PUBLIC_TOOL", 1), 0]
+        child.poll.return_value = 0
+        log = unittest.mock.MagicMock()
+        def observe(pid):
+            self.assertEqual(pid, child.pid)
+            self.assertEqual(child.poll(), 0)
+        with patch.object(ci.os, "name", "nt"), patch("secure_release.process.spawn", return_value=child), patch.object(ci.subprocess, "run") as killer:
+            with self.assertRaisesRegex(ValueError, "private subprocess timed out"):
+                ci.quiet(["PUBLIC_TOOL"], ".", {}, log, timeout=1, on_timeout=observe)
+        child._builder_job.terminate.assert_called_once_with(timeout=30)
+        killer.assert_not_called()
+
+    @unittest.skipIf(os.name == "nt", "Windows source EOF is checked by the required native ownership gate")
+    def test_posix_private_commands_receive_null_stdin(self):
+        import subprocess
+        with tempfile.TemporaryDirectory() as tmp, patch.object(ci.subprocess, "Popen") as spawn:
+            spawn.return_value.wait.return_value = 0
+            ci.quiet(["PUBLIC_TOOL"], Path(tmp), {}, Path(tmp) / "command.log", timeout=5)
+            self.assertEqual(spawn.call_args.kwargs.get("stdin"), subprocess.DEVNULL)
+
+    def test_timeout_observer_runs_before_termination_and_cannot_prevent_it(self):
+        import subprocess
+        order = []
+        child = unittest.mock.Mock()
+        child.wait.side_effect = [subprocess.TimeoutExpired("PUBLIC_TOOL", 1), 0]
+        def observe(pid):
+            order.append("observe")
+            self.assertEqual(pid, child.pid)
+            raise RuntimeError("PRIVATE_SYNTHETIC_EXCEPTION")
+        with tempfile.TemporaryDirectory() as tmp, patch("secure_release.process.spawn", return_value=child), patch("secure_release.process.terminate_tree", side_effect=lambda child: order.append("terminate")):
+            log = Path(tmp) / "command.log"
+            with self.assertRaisesRegex(ValueError, "private subprocess timed out"):
+                ci.quiet(["PUBLIC_TOOL"], Path(tmp), {}, log, timeout=1, on_timeout=observe)
+            self.assertNotIn("PRIVATE_SYNTHETIC_EXCEPTION", log.read_text())
+        self.assertEqual(order, ["observe", "terminate"])
+
+    def test_interrupted_timeout_observer_still_retires_child(self):
+        import subprocess
+        child = unittest.mock.Mock()
+        child.wait.side_effect = [subprocess.TimeoutExpired("PUBLIC_TOOL", 1), 0]
+        with tempfile.TemporaryDirectory() as tmp, patch("secure_release.process.spawn", return_value=child), patch("secure_release.process.terminate_tree") as retire:
+            with self.assertRaises(KeyboardInterrupt):
+                ci.quiet(["PUBLIC_TOOL"], Path(tmp), {}, Path(tmp) / "command.log", timeout=1,
+                         on_timeout=unittest.mock.Mock(side_effect=KeyboardInterrupt))
+            retire.assert_called_once_with(child)
+
     def test_lane_expansion_preserves_matrix_and_aggregates_are_not_jobs(self):
         recipe = {"jobs": {"build": {"runs-on": "${{ matrix.os }}", "strategy": {
             "matrix": {"include": [{"os": "ubuntu-24.04"}, {"os": "macos-14"}]}},

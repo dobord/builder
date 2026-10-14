@@ -16,7 +16,6 @@ import os
 from pathlib import Path
 import re
 import shutil
-import signal
 import stat
 import subprocess
 import sys
@@ -134,21 +133,40 @@ def pages(path, token, field=None):
     raise ValueError("pagination limit exceeded")
 
 
-def quiet(command, cwd, env, log, *, timeout=21600):
+def quiet(command, cwd, env, log, *, timeout=21600, on_timeout=None):
+    from .process import spawn, terminate_tree
     log.parent.mkdir(parents=True, exist_ok=True)
     with log.open("ab") as output:
-        child = subprocess.Popen(command, cwd=cwd, env=env, stdout=output,
-                                 stderr=subprocess.STDOUT, start_new_session=os.name != "nt")
+        # Approved recipes are noninteractive. Never inherit the privileged
+        # caller's input stream, even when stdout/stderr are private files.
+        child = spawn(command, cwd=cwd, env=env, stdout=output)
         try:
-            return child.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            if os.name == "nt":
-                subprocess.run(["taskkill", "/PID", str(child.pid), "/T", "/F"], stdout=output,
-                               stderr=subprocess.STDOUT, check=False, timeout=30)
-            else:
-                os.killpg(child.pid, signal.SIGKILL)
-            child.wait(timeout=30)
-            raise ValueError("private subprocess timed out") from None
+            try:
+                code = child.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                if on_timeout is not None:
+                    try:
+                        on_timeout(child.pid)
+                    except Exception:
+                        try:
+                            output.write(b"\nPRIVATE_TIMEOUT_OBSERVER_FAILED\n")
+                        except BaseException:
+                            pass
+                raise ValueError("private subprocess timed out") from None
+        except BaseException:
+            # Ordinary wait failures, cancellation and observers all preserve
+            # their original exception even when retirement itself fails.
+            try:
+                terminate_tree(child)
+            except BaseException:
+                try:
+                    output.write(b"\nPRIVATE_PROCESS_RETIREMENT_FAILED\n")
+                except BaseException:
+                    pass
+            raise
+        if os.name == "nt":
+            terminate_tree(child)
+        return code
 
 
 def checked(command, cwd, env, log):
@@ -820,13 +838,15 @@ def main():
             from . import project_ci_runner
             project_ci_runner.collect_reports()
         elif args.stage == "diagnostics":
-            roots = [Path(required("RUNNER_TEMP")) / "project-ci", Path(required("GITHUB_WORKSPACE")) / "private-source"]
+            roots = [Path(required("RUNNER_TEMP")) / "project-ci", Path(required("GITHUB_WORKSPACE")) / "private-source",
+                     Path(required("RUNNER_TEMP")) / "project-ci-native-contract"]
             roots = [root for root in roots if root.exists()]
             target = Path(required("RUNNER_TEMP")) / "cipher-logs/diagnostics.enc"
             key = (Path(__file__).resolve().parents[1] / "ci/builder-logs-public-key.b64").read_text().strip()
             encrypted_logs.collect(roots, target, crypto.unb64(key).decode(), encrypted_logs.github_context())
         elif args.stage == "cleanup":
-            for root in (Path(required("RUNNER_TEMP")) / "project-ci", Path(required("RUNNER_TEMP")) / "project-ci-prepare",
+            for root in (Path(required("RUNNER_TEMP")) / "project-ci", Path(required("RUNNER_TEMP")) / "project-ci-native-contract",
+                         Path(required("RUNNER_TEMP")) / "project-ci-prepare",
                          Path(required("RUNNER_TEMP")) / "project-ci-package", Path(required("GITHUB_WORKSPACE")) / "private-source"):
                 if root.exists():
                     remove_staging(root)
