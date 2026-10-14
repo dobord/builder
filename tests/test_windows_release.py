@@ -82,6 +82,14 @@ class WindowsReleaseTests(unittest.TestCase):
                          "60a369f6b051ba651cb301af299e7dadcc99608d0db6894bccab87b953817602")
         proof = windows_sdk.binding(cfg)
         windows_sdk.validate_binding(proof, cfg)
+        from secure_release import cef_cache
+        for record in (cef_cache.WINDOWS_RELEASE_BINARY_CACHE, cef_cache.JOINT_COMPLETED_BINARY_CACHES['windows']):
+            cached = copy.deepcopy(cfg)
+            cached['platforms']['windows']['binary_cache'] = {name: record[name] for name in ('run', 'attempt', 'artifact_id', 'artifact_sha256')}
+            windows_sdk.validate_binding(windows_sdk.binding(cached), cached)
+            cached['platforms']['windows']['binary_cache']['artifact_sha256'] = '0'*64
+            with self.assertRaises(ValueError):
+                windows_sdk.binding(cached)
         for field in ("run", "artifact_id", "artifact_sha256"):
             altered = copy.deepcopy(cfg)
             altered["platforms"]["windows"]["checkpoint"][field] = 1 if field != "artifact_sha256" else "a" * 64

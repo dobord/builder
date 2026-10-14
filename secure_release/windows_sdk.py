@@ -92,8 +92,10 @@ def binding(cfg: dict) -> dict:
     cache = cfg["platforms"]["windows"]["binary_cache"]
     if cache is not None:
         from . import cef_cache
-        if cache != {name: cef_cache.WINDOWS_RELEASE_BINARY_CACHE[name]
-                     for name in ("run", "attempt", "artifact_id", "artifact_sha256")}:
+        reviewed = (cef_cache.WINDOWS_RELEASE_BINARY_CACHE,
+                    cef_cache.JOINT_COMPLETED_BINARY_CACHES["windows"])
+        if cache not in [{name: record[name] for name in ("run", "attempt", "artifact_id", "artifact_sha256")}
+                         for record in reviewed]:
             raise ValueError("Windows release binary cache is not the exact reviewed producer")
         cef_cache.selected_revision(cache, "windows", "vcpkg-binaries", "0" * 40)
     if (cfg["profile"] != "static-third-party"
