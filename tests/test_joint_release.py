@@ -77,6 +77,10 @@ class JointReleaseTests(unittest.TestCase):
             alternate = copy.deepcopy(common)
             alternate['plan']['platforms']['windows']['packages'] = ['different']
             self.assertNotEqual(joint_release.identity(common),joint_release.identity(alternate))
+            candidate = dict(common, version=4, platforms=['linux'], source_tag='v0.3.0-rc.1', release_tag='v0.3.0')
+            protocol.verified(crypto.sign(candidate, signing), verify)
+            with self.assertRaises(ValueError):
+                protocol.verified(crypto.sign(dict(candidate, release_tag='v0.4.0'), signing), verify)
 
     def test_reviewed_binary_cache_cannot_cross_platform_or_digest(self):
         record = cef_cache.WINDOWS_RELEASE_BINARY_CACHE

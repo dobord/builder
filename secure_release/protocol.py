@@ -14,7 +14,7 @@ BIN = "dobord/vcpkg-bin"
 IDS = {SOURCE: 1347237568, BUILDER: 1372874997, BIN: 1372873784}
 OWNER = 5323024
 SHA = re.compile(r"[0-9a-f]{40}")
-TAG = re.compile(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-windows)?")
+TAG = re.compile(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-windows|-rc\.[1-9][0-9]*)?")
 NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 PACKAGE = re.compile(r"[a-z0-9-]+(?:\[[a-z0-9,-]+\])?")
 BUILD_WORKFLOWS = {
@@ -30,9 +30,9 @@ def release_platforms(payload: dict) -> tuple[str, ...]:
         raise ValueError("invalid request version")
     if payload["version"] == 1 and "platforms" not in payload:
         return BUILD_WORKFLOWS["build-release.yml"]
-    if payload["version"] == 2 and payload.get("platforms") == ["linux"]:
+    if payload["version"] in (2, 4) and payload.get("platforms") == ["linux"]:
         return BUILD_WORKFLOWS["build-linux-release.yml"]
-    if payload["version"] in (2, 3) and payload.get("platforms") == ["windows"]:
+    if payload["version"] in (2, 3, 4) and payload.get("platforms") == ["windows"]:
         return BUILD_WORKFLOWS["build-windows-release.yml"]
     raise ValueError("invalid signed platform selection")
 
@@ -142,8 +142,14 @@ def verified(document: dict, public: str, *, allow_expired: bool = False) -> dic
     payload = crypto.verify(document, public)
     required = {"version", "release_id", "salt", "source_sha", "source_tag", "request_run", "request_attempt",
                  "builder_sha", "output_key", "input_key", "created", "expires", "source_id", "builder_id", "bin_id", "plan"}
-    if payload.get("version") in (2, 3):
+    if payload.get("version") in (2, 3, 4):
         required.add("platforms")
+    if payload.get("version") == 4:
+        required.add("release_tag")
+        if (not isinstance(payload.get("source_tag"), str) or "-rc." not in payload["source_tag"]
+                or payload.get("release_tag") != payload["source_tag"].split("-rc.", 1)[0]
+                or not TAG.fullmatch(payload["release_tag"])):
+            raise ValueError("Candidate source tag does not bind the exact final release version")
     if payload.get("version") == 3:
         required.add("requester_sha")
         sha(payload.get("requester_sha"))

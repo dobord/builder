@@ -18,6 +18,7 @@ def identity(payload: dict) -> bytes:
     keys = ('release_id', 'salt', 'source_sha', 'source_tag', 'request_run', 'request_attempt',
             'builder_sha', 'input_key', 'output_key', 'created', 'expires', 'source_id', 'builder_id', 'bin_id')
     value = {k: payload[k] for k in keys}
+    value['release_tag'] = payload.get('release_tag', payload['source_tag'])
     value['graph'] = {k: payload['plan'][k] for k in ('version', 'upstream_sha', 'ports', 'platforms', 'smoke_path')}
     return crypto.canonical(value)
 
@@ -54,6 +55,9 @@ def request():
                    'output_key': crypto.fingerprint(env('ARTIFACT_ENCRYPTION_PUBLIC_KEY')), 'created': created,
                    'expires': created + 172800, 'source_id': IDS[SOURCE], 'builder_id': IDS[BUILDER], 'bin_id': IDS[BIN], 'plan': plan}
         current = identity(payload)
+        if '-rc.' in payload['source_tag']:
+            payload.update(version=4, release_tag=payload['source_tag'].split('-rc.', 1)[0])
+            current = identity(payload)
         if common is not None and current != common:
             raise ValueError('Joint platform plans select different source/package graphs')
         common = current

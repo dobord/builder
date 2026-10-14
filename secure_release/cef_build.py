@@ -168,6 +168,12 @@ def run_engine(root: Path, cfg: dict, platform: str, execute, environment: dict,
         if platform_probe is not None:
             shutil.rmtree(Path(platform_probe["prefix"]))
             Path(platform_probe["manifest"]).unlink()
+        if linux_sdk_profile:
+            execute([sys.executable, str(driver), "identity", "--work", str(work), "--logs", str(logs),
+                     "--contract", key, "--state", str(logs / "expected-checkpoint-identity.json"), *platform_args],
+                    stage="preflight", timeout=180, cwd=recipe)
+            original = crypto.parse((restored / "checkpoint.json").read_bytes())
+            (logs / "original-checkpoint-identity.json").write_bytes(crypto.canonical({"identity": original["identity"]}))
         execute([sys.executable, str(driver), "restore", "--work", str(work), "--logs", str(logs),
                  "--contract", key, "--state", str(logs / "restored.json"), "--checkpoint", str(restored),
                  *platform_args],

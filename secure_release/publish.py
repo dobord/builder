@@ -169,7 +169,7 @@ def verify_result():
                     windows_sdk.validate_binding(crypto.parse(archive.read(repair_path)), cfg)
         elif "cef" in manifest or any(n.startswith(f"installed/{triplet}/share/cef-static/") for n in names):
             raise ValueError("Unrequested CEF package or evidence")
-        filename = sdk_filename(payload['source_tag'], platform)
+        filename = sdk_filename(payload.get('release_tag', payload['source_tag']), platform)
         shutil.copyfile(sdk, staging / filename)
         files[filename] = manifest["sdk_sha256"]
         manifests[platform] = manifest
@@ -184,6 +184,7 @@ def verify_result():
                 "release_platforms": list(platforms), "build_workflow": workflow_name}
     if joint_requests:
         release["platform_requests"] = joint_requests
+        release["release_tag"] = payload.get("release_tag", payload["source_tag"])
     (staging / "release-manifest.json").write_bytes(crypto.canonical(release))
     files["release-manifest.json"] = crypto.digest(staging / "release-manifest.json")
     (staging / "SHA256SUMS").write_text("".join(f"{h}  {n}\n" for n, h in sorted(files.items())), encoding="ascii")
@@ -207,7 +208,7 @@ def publish_release():
         files[name] = h
     files["SHA256SUMS"] = crypto.digest(sums)
     manifest = crypto.parse((root / "release-manifest.json").read_bytes())
-    tag = manifest["source_tag"]
+    tag = manifest.get("release_tag", manifest["source_tag"])
     if (not TAG.fullmatch(tag)
             or set(manifest["platforms"]) != set(platforms)
             or manifest.get("release_platforms", ["linux", "windows"]) != list(platforms)
