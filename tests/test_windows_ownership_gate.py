@@ -1,5 +1,6 @@
 """No native success is inferred from these mocked gate-policy tests."""
 import contextlib
+from collections import UserDict
 import io
 import json
 import os
@@ -32,6 +33,29 @@ def suite(gate, statuses=("success", "success")):
 
 
 class WindowsOwnershipGateTests(unittest.TestCase):
+    def test_environment_restoration_handles_windows_key_canonicalization(self):
+        class WindowsEnvironment(UserDict):
+            def __getitem__(self, key):
+                return super().__getitem__(key.upper())
+
+            def __setitem__(self, key, value):
+                super().__setitem__(key.upper(), value)
+
+            def __delitem__(self, key):
+                super().__delitem__(key.upper())
+
+        # Reproduce Windows os.environ semantics without altering platform
+        # identity or substituting mocked native process-ownership results.
+        with patch.object(os, "environ", WindowsEnvironment(os.environ)):
+            self.test_tests_receive_filtered_environment_and_caller_is_restored()
+
+    def test_workflow_read_is_independent_of_windows_default_encoding(self):
+        read_text = Path.read_text
+        def windows_read_text(path, encoding=None, errors=None):
+            return read_text(path, encoding=encoding or "cp1252", errors=errors)
+        with patch.object(Path, "read_text", windows_read_text):
+            self.test_workflow_gates_windows_before_download_and_materialization()
+
     def test_non_native_context_fails_before_loading_tests(self):
         from secure_release import windows_ownership_gate as gate
         with tempfile.TemporaryDirectory() as tmp, patch.object(gate, "native_supported", return_value=False), patch.object(gate, "native_suite") as load:
@@ -66,13 +90,16 @@ class WindowsOwnershipGateTests(unittest.TestCase):
         from secure_release import windows_ownership_gate as gate
         original = {"PATH": "PUBLIC_TOOLS", "SystemRoot": "PUBLIC_WINDOWS", "GH_TOKEN": "SYNTHETIC_SECRET", "CI_INPUT_PRIVATE_KEY_B64": "SYNTHETIC_SECRET"}
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, original, clear=True), patch.object(gate, "native_supported", return_value=True), patch.object(gate, "native_suite", side_effect=lambda: suite(gate, ("environment", "environment"))):
+            # Windows canonicalizes keys when they enter os.environ. Compare
+            # against the caller's actual mapping, preserving every value.
+            expected = dict(os.environ)
             gate.run_contract(Path(tmp) / "contract")
-            self.assertEqual(dict(os.environ), original)
+            self.assertEqual(dict(os.environ), expected)
 
     def test_workflow_gates_windows_before_download_and_materialization(self):
         import yaml
         root = Path(__file__).resolve().parents[1]
-        workflow = yaml.safe_load((root / ".github/workflows/encrypted-project-ci.yml").read_text())
+        workflow = yaml.safe_load((root / ".github/workflows/encrypted-project-ci.yml").read_text(encoding="utf-8"))
         self.assertEqual(set(workflow["jobs"]), {"prepare", "qualify", "required"})
         qualify = workflow["jobs"]["qualify"]
         self.assertEqual(qualify["name"], "Encrypted lane ${{ matrix.lane }}")
