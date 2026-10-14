@@ -17,6 +17,9 @@ OS_MODULES = {"libc.so.6", "libm.so.6", "ld-linux-x86-64.so.2"}
 # Reviewed canonical entry point with NO_STACK_PROTECTOR (lfc-ui issue #314).
 PROXY_BLOB = "521631bed802d47bc2daa1967a861ca8987aaf38"
 PORT_BLOB = "f09bda1237f32164dd37fd255e7b6f06ab876c6a"
+LFC_UI_050 = "9ac3eaf69ecdb22651dc3e57b928f54d751edaa1"
+PROXY_050_BLOB = "20ccbf6778308a844fc39b01a780b15815077399"
+PORT_050_BLOB = "fa1905a7c256b1bb3ad6aed9e0a4ca2e9af425f8"
 
 
 def validate_cpp_proof(proof: dict) -> None:
@@ -52,8 +55,9 @@ def capture_sources(root: Path, plan: dict) -> dict:
         raise ValueError("Pinned lfc-ui lacks its real CEF proxy runtime regression")
     cef_sdk_objects.validate_sources(root / "workspace")
     return {"lfc_ui": source,
-            "examples": cef_sdk_example.capture(source, root / "workspace",
-                                                 proxy_blob=PROXY_BLOB, port_blob=PORT_BLOB)}
+             "examples": cef_sdk_example.capture(source, root / "workspace",
+                                                  proxy_blob=PROXY_050_BLOB if lfc["sha"] == LFC_UI_050 else PROXY_BLOB,
+                                                  port_blob=PORT_050_BLOB if lfc["sha"] == LFC_UI_050 else PORT_BLOB)}
 
 
 def prepare_engine(root: Path, cfg: dict, environment: dict) -> None:

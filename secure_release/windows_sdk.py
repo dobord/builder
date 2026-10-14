@@ -89,10 +89,17 @@ def binding(cfg: dict) -> dict:
     cef_contract.validate(cfg)
     selected = selected_checkpoint()
     expected = {name: selected[name] for name in ("run", "attempt", "artifact_id", "artifact_sha256")}
+    cache = cfg["platforms"]["windows"]["binary_cache"]
+    if cache is not None:
+        from . import cef_cache
+        if cache != {name: cef_cache.WINDOWS_RELEASE_BINARY_CACHE[name]
+                     for name in ("run", "attempt", "artifact_id", "artifact_sha256")}:
+            raise ValueError("Windows release binary cache is not the exact reviewed producer")
+        cef_cache.selected_revision(cache, "windows", "vcpkg-binaries", "0" * 40)
     if (cfg["profile"] != "static-third-party"
             or cfg["recipe_commit"] != cef_windows_iteration.CEF
             or cfg["platforms"]["windows"] != {
-                "mode": "source-resume", "checkpoint": expected, "binary_cache": None}
+                "mode": "source-resume", "checkpoint": expected, "binary_cache": cache}
             or source_repair.build_key(cef_contract.build_key(cfg, "windows")) != selected["build_key"]):
         raise ValueError("Windows release must select the exact qualified repaired engine")
     return {"schema": 1, "kind": "windows-qualified-source-engine",

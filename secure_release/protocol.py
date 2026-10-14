@@ -21,6 +21,7 @@ BUILD_WORKFLOWS = {
     "build-release.yml": ("linux", "windows"),
     "build-linux-release.yml": ("linux",),
     "build-windows-release.yml": ("windows",),
+    "build-combined-release.yml": ("linux", "windows"),
 }
 
 

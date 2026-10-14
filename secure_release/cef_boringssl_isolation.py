@@ -29,6 +29,8 @@ from . import cef_crel, cef_objcopy_groups, safeio
 TRIPLET = "x64-linux-static-release"
 OPENSSL_VERSION = "3.6.3"
 OPENSSL_PORT_BLOB = "82e2a0232b25f0e52397e80ff2ab93040055b11d"
+OPENSSL_OVERLAY_403_BLOB = "cefad8e6db91983c5276e6bef85576a980a98503"
+OPENSSL_VERSIONS = {"3.6.3", "4.0.3"}
 CEF_VERSION = "152.0.6"
 CEF_PORT_VERSION = 15
 NAMESPACE = "CEF_CHROMIUM_BSSL_"
@@ -127,11 +129,11 @@ def regular(root: Path, relative: str) -> Path:
 def validate_sources(upstream: Path) -> None:
     path = regular(upstream, "ports/openssl/vcpkg.json")
     raw = path.read_bytes()
-    require(git_blob(raw) == OPENSSL_PORT_BLOB,
+    require(git_blob(raw) in {OPENSSL_PORT_BLOB, OPENSSL_OVERLAY_403_BLOB},
             "Pinned OpenSSL port manifest changed")
     value = json.loads(raw)
     require(value.get("name") == "openssl"
-            and value.get("version") == OPENSSL_VERSION,
+            and value.get("version") in OPENSSL_VERSIONS,
             "Pinned OpenSSL version changed")
 
 
@@ -686,6 +688,15 @@ def _ownership(
             and set(expected) == {"cef-static", "openssl"},
             "Invalid BoringSSL ownership receipt",
         )
+    if expected is not None:
+        openssl_version = expected["openssl"]["version"]
+    else:
+        candidates = [r.get("Version", "").split("#", 1)[0] for r in _status_records(installed)
+                      if r.get("Package") == "openssl" and r.get("Architecture") == TRIPLET
+                      and r.get("Feature") in (None, "core") and r.get("Status") == "install ok installed"]
+        require(len(candidates) == 1, "Missing installed OpenSSL identity")
+        openssl_version = candidates[0]
+    require(openssl_version in OPENSSL_VERSIONS, "Unreviewed OpenSSL provider version")
     result = {
         "cef-static": _owner(
             installed, "cef-static", CEF_VERSION, CEF_PORT_VERSION,
@@ -694,7 +705,7 @@ def _ownership(
             require_status=require_status,
         ),
         "openssl": _owner(
-            installed, "openssl", OPENSSL_VERSION, 0,
+            installed, "openssl", openssl_version, 0,
             {TRIPLET + "/" + name for name in OPENSSL_ARCHIVES},
             expected=None if expected is None else expected["openssl"],
             require_status=require_status,
@@ -1042,7 +1053,7 @@ def install(installed: Path, source: Path, diagnostics: Path) -> dict:
         "atomic_collision_count": len(atomic_ordered),
         "atomic_symbols": atomic_ordered,
         "openssl": {
-            "version": OPENSSL_VERSION,
+            "version": ownership_receipt["openssl"]["version"],
             "archives": provider_hashes,
         },
         "gcc_runtime": gcc_runtime,
@@ -1078,7 +1089,7 @@ def verify(installed: Path, source: Path, receipt: dict) -> dict:
             and receipt.get("cxx_namespace") == CXX_NAMESPACE
             and receipt.get("ffmpeg_namespace") == FFMPEG_NAMESPACE
             and receipt.get("atomic_namespace") == ATOMIC_NAMESPACE
-            and receipt.get("openssl", {}).get("version") == OPENSSL_VERSION,
+            and receipt.get("openssl", {}).get("version") in OPENSSL_VERSIONS,
             "Missing CEF runtime isolation receipt")
     symbols = receipt.get("symbols")
     cxx_symbols = receipt.get("cxx_symbols")

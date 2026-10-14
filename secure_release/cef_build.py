@@ -87,10 +87,10 @@ def capture_platform_dependencies(root: Path, cfg: dict, platform: str, execute,
             "qualification": receipt, "qualification_sha256": crypto.digest(receipt)}
 
 
-def binary_key(upstream_sha: str, platform: str, revision: str, triplet: Path) -> str:
+def binary_key(upstream_sha: str, platform: str, revision: str, triplet: Path, *, image: str | None = None) -> str:
     return hashlib.sha256(crypto.canonical({"schema": 1, "upstream": upstream_sha,
         "platform": platform, "builder": revision, "triplet_sha256": crypto.digest(triplet),
-        "image": os.environ.get("ImageVersion", "")})).hexdigest()
+        "image": os.environ.get("ImageVersion", "") if image is None else image})).hexdigest()
 
 
 def worker_environment(environment: dict, recipe_sha: str) -> dict:

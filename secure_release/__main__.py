@@ -3,9 +3,9 @@ import sys
 import os
 from pathlib import Path
 import traceback
-from . import tasks, publish, process
+from . import tasks, publish, process, joint_release
 
-COMMANDS = {"request": tasks.request, "prepare": tasks.prepare, "build": tasks.build,
+COMMANDS = {"request": tasks.request, "request-joint": joint_release.request, "prepare": tasks.prepare, "build": tasks.build,
             "diagnostics": tasks.diagnostics, "cleanup": tasks.cleanup,
             "verify": publish.verify_result, "publish": publish.publish_release}
 

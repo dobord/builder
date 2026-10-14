@@ -93,13 +93,29 @@ LINUX_HOST_TOOL_CONTINUATION = {
         "vcpkg-binaries": (11316821295, "d3764aaa5a1454f08a36c3b5604bc6afa88dcbeb7d1aaff6a8db7310b9bf644e"),
     },
 }
+LINUX_RELEASE_CONTINUATION = {
+    "run": 37241409118, "attempt": 1,
+    "revision": "2053156709342b6c0ffde98c84ef334b63d3dcb2",
+    "source_sha": "40ec6aa95709336f5454921d90988f8da248a4d7",
+    "recipe_commit": "5d427cb2d29cd14fbdb3d7fbccbf3822e3b03896",
+    "artifacts": {
+        "cef-checkpoint": (11319636912, "551ce49eee4093074e9157d0e1faba7c46f7a8d993ccaa91bf4caf3178b530e1"),
+        "vcpkg-binaries": (11318479858, "63c7fa557a3c48a93568551e4018b888cfef8464682fc4c5999fb19fbfd505a4"),
+    },
+}
+WINDOWS_RELEASE_BINARY_CACHE = {
+    "run": 38523034273, "attempt": 1,
+    "revision": "47fe37684a17e4b64182868b485dfff2e04bb39f",
+    "artifact_id": 11878152631,
+    "artifact_sha256": "3e27b98fdd2428867ed3ee1016d4c5033e290e6b252b64c86a9a8dadf1928a4d",
+}
 
 
 def continuation_record(run: int) -> dict | None:
     return next((record for record in (LINUX_CONTINUATION, LINUX_RUNTIME_CONTINUATION,
                                       LINUX_INSTALL_CONTINUATION, LINUX_INVENTORY_CONTINUATION,
                                       LINUX_SMOKE_CONTINUATION, LINUX_AUDIT_CONTINUATION,
-                                      LINUX_HOST_TOOL_CONTINUATION)
+                                      LINUX_HOST_TOOL_CONTINUATION, LINUX_RELEASE_CONTINUATION)
                  if record["run"] == run), None)
 
 
@@ -115,6 +131,12 @@ def producer_revision(platform: str, kind: str, run: int, attempt: int, revision
 def selected_revision(selected: dict | None, platform: str, kind: str, revision: str) -> str:
     if selected is None:
         return revision
+    if selected["run"] == WINDOWS_RELEASE_BINARY_CACHE["run"]:
+        record = WINDOWS_RELEASE_BINARY_CACHE
+        require(platform == "windows" and kind == "vcpkg-binaries"
+                and all(selected[name] == record[name] for name in ("run", "attempt", "artifact_id", "artifact_sha256")),
+                "Reviewed Windows binary-cache selector changed")
+        return record["revision"]
     selected_sha = producer_revision(platform, kind, selected["run"], selected["attempt"], revision)
     record = continuation_record(selected["run"])
     if record is not None:
@@ -122,6 +144,15 @@ def selected_revision(selected: dict | None, platform: str, kind: str, revision:
         require(selected["artifact_id"] == artifact_id and selected["artifact_sha256"] == expected,
                 "Reviewed Linux continuation artifact changed")
     return selected_sha
+
+
+def binary_cache_image(selected: dict, platform: str, revision: str) -> str | None:
+    selected_revision(selected, platform, "vcpkg-binaries", revision)
+    if selected["run"] == LINUX_RELEASE_CONTINUATION["run"]:
+        return "20260927.320.1"
+    if selected["run"] == WINDOWS_RELEASE_BINARY_CACHE["run"]:
+        return "20261004.326.1"
+    return None
 
 
 def context(kind: str, platform: str, key: str, run: int, attempt: int, revision: str, member: str) -> dict:
@@ -255,6 +286,9 @@ def fetch(api, selected: dict, directory: Path, *, platform: str, kind: str, key
     require(producer["status"] == "completed", "Cache producer is still running")
     current = api.get(f"/repos/{BUILDER}/actions/runs/{run}")
     require(current["run_attempt"] == attempt and current["status"] == "completed", "Cache producer was rerun")
+    if run in {LINUX_RELEASE_CONTINUATION["run"], WINDOWS_RELEASE_BINARY_CACHE["run"]}:
+        require(producer.get("conclusion") == "success" and current.get("conclusion") == "success"
+                and current.get("head_sha") == revision, "Qualified release cache producer changed or failed")
     name = f"{kind}-{platform}-{run}-{attempt}"
     matches = [a for a in api.artifacts(BUILDER, run) if a["id"] == selected["artifact_id"]]
     require(len(matches) == 1, "Selected cache artifact is missing")

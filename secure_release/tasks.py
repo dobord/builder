@@ -22,7 +22,15 @@ def work() -> Path:
 
 
 def event() -> dict:
-    return crypto.parse(Path(env("GITHUB_EVENT_PATH")).read_bytes())
+    value = crypto.parse(Path(env("GITHUB_EVENT_PATH")).read_bytes())
+    if os.environ.get("SDK_JOINT_RELEASE") == "true" and env("GITHUB_EVENT_NAME") == "workflow_dispatch":
+        platform = env("TARGET_PLATFORM")
+        if platform not in {"linux", "windows"}:
+            raise ValueError("Invalid joint SDK platform")
+        original = value["inputs"]
+        value["inputs"] = {"release_id": original["release_id"], "salt": original["salt"],
+                           "request": original[platform + "_request"]}
+    return value
 
 
 def clean_env() -> dict:
@@ -249,6 +257,8 @@ def prepare():
     if requester_event not in {"push", "workflow_dispatch"}:
         raise ValueError("unsupported requester event")
     request_workflow = "release-windows-request.yml" if release_platforms(payload) == ("windows",) else "release-request.yml"
+    if os.environ.get("SDK_JOINT_RELEASE") == "true":
+        request_workflow = "release-combined-request.yml"
     requester_sha = payload.get("requester_sha", payload["source_sha"])
     if payload["version"] == 3:
         if requester_event != "workflow_dispatch" or requester.get("head_branch") != "main":
@@ -398,7 +408,8 @@ def build():
                                          triplets / (triplet + ".cmake"))
         if selected is not None:
             restore_cache_key = cef_build.binary_key(payload["plan"]["upstream_sha"], platform, cache_revision,
-                                                     triplets / (triplet + ".cmake"))
+                                                     triplets / (triplet + ".cmake"),
+                                                     image=cef_cache.binary_cache_image(selected, platform, env("GITHUB_SHA")))
             cef_cache.fetch(Client(env("BUILD_CACHE_READ_TOKEN")), selected, binary_cache,
                             platform=platform, kind="vcpkg-binaries", key=restore_cache_key,
                             revision=env("GITHUB_SHA"), private=input_private)

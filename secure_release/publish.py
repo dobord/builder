@@ -53,6 +53,7 @@ def verify_result():
     staging = Path(env("STAGING_DIR"))
     staging.mkdir(parents=True, exist_ok=False)
     common_request = None
+    joint_identity, joint_requests = None, {}
     files, manifests, provenance = {}, {}, {}
     unexpected = {f"sdk-{p}-{run_id}-{attempt}" for p in ("linux", "windows") if p not in platforms}
     if any(a["name"] in unexpected for a in artifacts):
@@ -88,10 +89,18 @@ def verify_result():
             raise ValueError("unexpected decrypted bundle members")
         signed = crypto.parse((bundle / "request.json").read_bytes())
         payload = verified(signed, env("REQUEST_VERIFY_PUBLIC_KEY"))
-        if release_platforms(payload) != platforms:
+        joint = workflow_name == "build-combined-release.yml"
+        if release_platforms(payload) != ((platform,) if joint else platforms):
             raise ValueError("signed platforms differ from the successful builder workflow")
         signed_bytes = crypto.canonical(signed)
-        if common_request is not None and signed_bytes != common_request:
+        if joint:
+            from . import joint_release
+            current = joint_release.identity(payload)
+            if joint_identity is not None and current != joint_identity:
+                raise ValueError("Joint platform requests select different sources, graphs or authorization")
+            joint_identity = current
+            joint_requests[platform] = hashlib.sha256(signed_bytes).hexdigest()
+        elif common_request is not None and signed_bytes != common_request:
             raise ValueError("platforms use different requests")
         common_request = signed_bytes
         if (payload["release_id"] != supplied["release_id"] or payload["salt"] != supplied["salt"]
@@ -113,7 +122,7 @@ def verify_result():
         if "scripts/buildsystems/vcpkg.cmake" not in names or not any(n.startswith(f"installed/{triplet}/lib/") and n.endswith((".a", ".lib")) for n in names):
             raise ValueError("SDK layout invalid")
         reviewed_sources = set()
-        if workflow_name == "build-linux-release.yml" and payload["plan"].get("cef") is not None:
+        if (workflow_name == "build-linux-release.yml" or joint and platform == "linux") and payload["plan"].get("cef") is not None:
             from . import linux_sdk
             reviewed_sources = linux_sdk.validate_archive_sources(sdk, manifest.get("cef", {}).get("sdk_sources"))
         for n in names:
@@ -124,7 +133,7 @@ def verify_result():
         cfg = payload["plan"].get("cef")
         if cfg is not None:
             evidence = manifest.get("cef", {})
-            if workflow_name == "build-windows-release.yml":
+            if workflow_name == "build-windows-release.yml" or joint and platform == "windows":
                 from . import windows_sdk
                 windows_sdk.validate_binding(evidence.get("windows_engine"), cfg)
                 linker = evidence.get("windows_consumer_linker", {})
@@ -133,7 +142,7 @@ def verify_result():
                 cef_contract.digest(linker.get("sha256"))
                 from . import windows_runtime_isolation
                 windows_runtime_isolation.validate_archive(sdk, evidence.get("windows_runtime_isolation"))
-            if workflow_name == "build-linux-release.yml":
+            if workflow_name == "build-linux-release.yml" or joint and platform == "linux":
                 from . import linux_sdk
                 if cfg.get("profile") != "static-third-party":
                     raise ValueError("Linux CEF publication requires the strict profile")
@@ -153,7 +162,7 @@ def verify_result():
                     raise ValueError("CEF package lacks its ABI-tracked build contract")
                 if crypto.parse(archive.read(path)) != expected_contract:
                     raise ValueError("Installed CEF package differs from the signed build plan")
-                if workflow_name == "build-windows-release.yml":
+                if workflow_name == "build-windows-release.yml" or joint and platform == "windows":
                     repair_path = f"installed/{triplet}/share/cef-static/windows-qualified-engine.json"
                     if repair_path not in names or archive.getinfo(repair_path).file_size > 65536:
                         raise ValueError("Installed Windows SDK lacks its source repair binding")
@@ -165,10 +174,16 @@ def verify_result():
         files[filename] = manifest["sdk_sha256"]
         manifests[platform] = manifest
         provenance[platform] = {"artifact_id": artifact["id"], "artifact_digest": artifact["digest"]}
+    if joint_requests:
+        if set(joint_requests) != {"linux", "windows"}:
+            raise ValueError("Joint release lacks one independently signed platform result")
+        common_request = crypto.canonical(joint_requests)
     release = {"version": 1, "release_id": payload["release_id"], "source_tag": payload["source_tag"], "source_sha": payload["source_sha"],
                "builder_sha": approved, "build_run": run_id, "build_attempt": attempt,
                "request_sha256": hashlib.sha256(common_request).hexdigest(), "platforms": manifests, "artifacts": provenance, "files": files,
-               "release_platforms": list(platforms), "build_workflow": workflow_name}
+                "release_platforms": list(platforms), "build_workflow": workflow_name}
+    if joint_requests:
+        release["platform_requests"] = joint_requests
     (staging / "release-manifest.json").write_bytes(crypto.canonical(release))
     files["release-manifest.json"] = crypto.digest(staging / "release-manifest.json")
     (staging / "SHA256SUMS").write_text("".join(f"{h}  {n}\n" for n, h in sorted(files.items())), encoding="ascii")
