@@ -174,6 +174,11 @@ def run_engine(root: Path, cfg: dict, platform: str, execute, environment: dict,
                     stage="preflight", timeout=180, cwd=recipe)
             original = crypto.parse((restored / "checkpoint.json").read_bytes())
             (logs / "original-checkpoint-identity.json").write_bytes(crypto.canonical({"identity": original["identity"]}))
+            from . import linux_checkpoint_host
+            host = linux_checkpoint_host.prepare(
+                selected["checkpoint"], crypto.parse((logs / "expected-checkpoint-identity.json").read_bytes()),
+                original["identity"], environment)
+            (logs / "checkpoint-host.json").write_bytes(crypto.canonical(host))
         execute([sys.executable, str(driver), "restore", "--work", str(work), "--logs", str(logs),
                  "--contract", key, "--state", str(logs / "restored.json"), "--checkpoint", str(restored),
                  *platform_args],
