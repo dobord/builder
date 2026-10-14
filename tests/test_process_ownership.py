@@ -214,6 +214,9 @@ class NativeWindowsOwnershipTests(unittest.TestCase):
                     process.terminate_tree(owned)
                 self.assertIsNotNone(owned.returncode)
                 self.assertIsNone(owned._builder_job.handle)
+            # Kernel file teardown can lag job completion briefly. Reuse the
+            # bounded sharing-violation cleanup, after all ownership assertions.
+            process.remove_tree(root)
 
     def test_job_retires_grandchild_after_guardian_and_source_parent_exit(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -243,3 +246,4 @@ class NativeWindowsOwnershipTests(unittest.TestCase):
                 release.write_text("release")
                 self.assertFalse(escaped.exists())
                 self.assertIsNone(owned._builder_job.handle)
+            process.remove_tree(root)

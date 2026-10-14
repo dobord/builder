@@ -26,6 +26,16 @@ def payload():
 
 
 class ProjectCiTests(unittest.TestCase):
+    def test_windows_system_directory_survives_credential_filtering(self):
+        host = {"PATH": "PUBLIC_TOOLS", "SYSTEMROOT": "PUBLIC_WINDOWS",
+                "WINDIR": "PUBLIC_WINDOWS", "GH_TOKEN": "SYNTHETIC_SECRET",
+                "PROJECT_CI_INPUT_PRIVATE_KEY_B64": "SYNTHETIC_SECRET"}
+        child = ci.build_environment(host)
+        self.assertEqual(child["WINDIR"], host["WINDIR"])
+        self.assertEqual(child["SYSTEMROOT"], host["SYSTEMROOT"])
+        self.assertNotIn("GH_TOKEN", child)
+        self.assertNotIn("PROJECT_CI_INPUT_PRIVATE_KEY_B64", child)
+
     def test_wait_interruption_retires_child_and_preserves_original_exception(self):
         for error in (KeyboardInterrupt(), RuntimeError("SYNTHETIC_WAIT_FAILURE")):
             child = unittest.mock.Mock()

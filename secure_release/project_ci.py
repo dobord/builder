@@ -176,7 +176,7 @@ def checked(command, cwd, env, log):
 
 def build_environment(environ):
     names = {"PATH", "HOME", "USER", "LANG", "LC_ALL", "TMPDIR", "TEMP", "TMP",
-             "SystemRoot", "SYSTEMROOT", "COMSPEC", "PATHEXT", "USERPROFILE",
+             "SystemRoot", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "USERPROFILE",
              "ProgramFiles", "ProgramFiles(x86)", "NUMBER_OF_PROCESSORS",
              "VCPKG_INSTALLATION_ROOT", "RUNNER_OS", "RUNNER_ARCH", "SystemDrive", "SYSTEMDRIVE",
              "ProgramData", "ALLUSERSPROFILE", "APPDATA", "LOCALAPPDATA", "HOMEDRIVE", "HOMEPATH",
