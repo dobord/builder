@@ -1,4 +1,4 @@
-name: Encrypted RDPDR internal foundation checks
+name: Encrypted scoped drive checks
 on:
   push:
     branches: [ci/encrypted-drive-foundation]
@@ -12,7 +12,7 @@ jobs:
       github.repository_id == '1372874997' &&
       github.sha == vars.DRIVE_FOUNDATION_CI_RUN_SHA
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 90
     permissions:
       contents: read
     steps:

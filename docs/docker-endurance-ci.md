@@ -1,5 +1,24 @@
 # Encrypted Docker endurance qualification
 
+## Separate bounded-drive integration pilot
+
+The isolated `ci/encrypted-drive-foundation` branch may also execute a signed
+`mode=pilot` request for the reviewed Docker drive-integration recipe. Its job has
+a 90-minute build/test budget; this is **not** a change to the five-hour file
+qualification contract or the accepted duration/cycle values. The existing
+foundation mode still has `qualification=false`, the exact foundation recipe and
+`drive_interoperability=NOT RUN` guards. Its historical runs remain foundation-only.
+
+An integration pilot must retain its own source inventory, image and live-client
+library hashes, actual FUSE/native-client and GUI/video effects, read-only negative
+matrix, active-consumer interval and final resource cleanup. It must continue to
+report `qualification=false`; no Windows, installed-MAC or endurance qualification
+is inferred. Input/evidence purposes, recipient/signature checks, data-only input
+commit boundary and repository/ref/attempt/SHA guards are unchanged. Do not put
+private recipes, revisions, stand credentials or plaintext results into this public
+workflow or its inputs. The separate `DRIVE_FOUNDATION_CI_RUN_SHA` variable remains
+the exact isolated-branch admission guard; other workflows/variables are untouched.
+
 This opt-in branch workflow runs an operator-approved private source snapshot on
 an ordinary `ubuntu-24.04` Actions runner. The qualification timer is **18000
 seconds / 100 cycles**. The 360-minute job budget leaves up to one hour for
