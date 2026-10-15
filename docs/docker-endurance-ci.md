@@ -26,11 +26,13 @@ and record it separately from the authenticated product source revision/inventor
 An unauthenticated private Git fetch failure is not an integration result and must
 remain a retained failed request, followed by fresh operator authorization/input.
 
-This opt-in branch workflow runs an operator-approved private source snapshot on
-an ordinary `ubuntu-24.04` Actions runner. The qualification timer is **18000
-seconds / 100 cycles**. The 360-minute job budget leaves up to one hour for
-preparation, teardown, encryption and upload. A timed-out or partially completed
-job is FAIL; a short pilot is never a five-hour qualification.
+The retained qualification protocol requires **18000 seconds / 100 cycles**.
+It needs a separately reviewed 360-minute workflow budget to leave up to one hour
+for preparation, teardown, encryption and upload. The current isolated pilot
+workflow has only 90 minutes and **cannot execute or qualify that full profile**;
+the generic CLI's ability to package it is not runtime evidence or a budget gate.
+A timed-out or partially completed job is FAIL; a short pilot is never a five-hour
+qualification.
 
 ## Approval and transport
 
