@@ -826,6 +826,115 @@ def validate_action(action):
         raise ValueError("unsupported recipe action")
 
 
+PREPARE_DIAGNOSTIC_MAX_BYTES = 16384
+PREPARE_DIAGNOSTIC_REASONS = frozenset({
+    "missing configuration", "unapproved builder execution", "request hash mismatch",
+    "invalid explicit transport schema", "request schema denied by source policy",
+    "CI request replay or ambiguous execution", "expired CI request", "request identity mismatch",
+    "builder operator identity mismatch", "untrusted builder execution", "source not authorized",
+    "unauthorized operator", "source identity mismatch", "baseline is not a published stable release",
+    "released baseline identity mismatch", "stale or foreign PR", "moved operator input ref",
+    "invalid isolated input commit", "invalid input tree", "invalid input blob entry",
+    "invalid Git blob identity or encoding", "input ciphertext digest mismatch",
+    "signed ciphertext digest mismatch", "release recipe differs from reviewed builder contract",
+    "dependency-review gate failed", "dependency data unavailable", "unsupported dependency manifest",
+    "unresolved OpenSSL dependency", "unsupported external dependency", "empty dependency inventory",
+    "private subprocess failed", "private subprocess timed out",
+})
+
+
+def _diagnostic_identifier(value, *, module=False):
+    # Never truncate untrusted text into something that looks like a valid symbol.
+    # These are bounded code identifiers, not exception messages or local values.
+    if type(value) is not str or len(value) > 4096 or any(part in value for part in ("://", "\x00", "\r", "\n", "?", "#")):
+        return "<invalid>"
+    if module:
+        value = Path(value).name
+        return value if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,95}\.py", value) else "<invalid>"
+    if value in {"<module>", "<lambda>", "<listcomp>", "<dictcomp>", "<setcomp>", "<genexpr>"}:
+        return value
+    return value if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,95}", value) else "<invalid>"
+
+
+def prepare_failure_record(error):
+    """Return bounded failure identity without stringifying errors or inspecting locals."""
+    argument = error.args[0] if error.args else None
+    reason = argument if type(argument) is str and argument in PREPARE_DIAGNOSTIC_REASONS else "unclassified prepare failure"
+    report = {"schema": 1, "stage": "prepare", "exception": _diagnostic_identifier(type(error).__name__),
+              "code": reason, "frames": []}
+    current = error.__traceback__
+    for _ in range(64):
+        if current is None:
+            break
+        code = current.tb_frame.f_code
+        line = current.tb_lineno
+        report["frames"].append({"module": _diagnostic_identifier(code.co_filename, module=True),
+            "function": _diagnostic_identifier(code.co_name), "line": line if type(line) is int and 0 < line <= 10000000 else 0})
+        report["frames"] = report["frames"][-16:]
+        current = current.tb_next
+    report["frames_truncated"] = current is not None
+    if isinstance(error, urllib.error.HTTPError):
+        status = error.code
+        if type(status) is int and 400 <= status <= 599:
+            report["http_status"] = status  # Never URL, headers, body or reason.
+    return report
+
+
+def _prepare_diagnostic_directory(*, fresh):
+    parent = Path(required("RUNNER_TEMP"))
+    if not parent.is_absolute() or not parent.is_dir():
+        raise ValueError("unsafe prepare diagnostic parent")
+    directory = parent / "project-ci-prepare-diagnostics"
+    if fresh or not (directory.exists() or directory.is_symlink()):
+        directory.mkdir(mode=0o700)
+    if directory.is_symlink() or directory.is_junction() or not directory.is_dir():
+        raise ValueError("unsafe prepare diagnostic directory")
+    info = directory.stat(follow_symlinks=False)
+    if os.name == "posix" and (info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) != 0o700):
+        raise ValueError("unsafe prepare diagnostic ownership")
+    return directory
+
+
+def _write_prepare_diagnostic(directory, name, report):
+    data = crypto.canonical(report)
+    if len(data) > PREPARE_DIAGNOSTIC_MAX_BYTES:
+        raise ValueError("prepare diagnostic exceeds bound")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(directory / name, flags, 0o600)
+    with os.fdopen(fd, "wb") as stream:
+        if os.name == "posix":
+            os.fchmod(stream.fileno(), 0o600)
+        stream.write(data)
+
+
+def record_prepare_failure(error):
+    """A fresh private record cannot replace old evidence or follow a linked root."""
+    report = prepare_failure_record(error)
+    directory = _prepare_diagnostic_directory(fresh=True)
+    _write_prepare_diagnostic(directory, "prepare-error.json", report)
+
+
+def ensure_prepare_diagnostics():
+    """Missing records (e.g. installer failure) are not a successful admission receipt."""
+    directory = _prepare_diagnostic_directory(fresh=False)
+    found = False
+    for name in ("prepare-error.json", "prepare-status.json"):
+        path = directory / name
+        try:
+            info = path.lstat()
+        except FileNotFoundError:
+            continue
+        if (path.is_symlink() or not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+                or info.st_size > PREPARE_DIAGNOSTIC_MAX_BYTES):
+            raise ValueError("unsafe prepare diagnostic record")
+        if os.name == "posix" and (info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) != 0o600):
+            raise ValueError("unsafe prepare diagnostic record ownership")
+        found = True
+    if not found:
+        _write_prepare_diagnostic(directory, "prepare-status.json",
+            {"schema": 1, "stage": "prepare", "state": "no-prepare-error-record"})
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("stage", choices=("package", "dispatch", "prepare", "materialize", "run", "reports", "diagnostics", "cleanup"))
@@ -838,7 +947,11 @@ def main():
             from . import project_ci_runner
             project_ci_runner.collect_reports()
         elif args.stage == "diagnostics":
+            if os.environ.get("GITHUB_JOB") == "prepare":
+                ensure_prepare_diagnostics()
             roots = [Path(required("RUNNER_TEMP")) / "project-ci", Path(required("GITHUB_WORKSPACE")) / "private-source",
+                     Path(required("RUNNER_TEMP")) / "project-ci-prepare-diagnostics",
+                     Path(required("RUNNER_TEMP")) / "project-ci-prepare",
                      Path(required("RUNNER_TEMP")) / "project-ci-native-contract"]
             roots = [root for root in roots if root.exists()]
             target = Path(required("RUNNER_TEMP")) / "cipher-logs/diagnostics.enc"
@@ -847,12 +960,18 @@ def main():
         elif args.stage == "cleanup":
             for root in (Path(required("RUNNER_TEMP")) / "project-ci", Path(required("RUNNER_TEMP")) / "project-ci-native-contract",
                          Path(required("RUNNER_TEMP")) / "project-ci-prepare",
+                         Path(required("RUNNER_TEMP")) / "project-ci-prepare-diagnostics",
                          Path(required("RUNNER_TEMP")) / "project-ci-package", Path(required("GITHUB_WORKSPACE")) / "private-source"):
                 if root.exists():
                     remove_staging(root)
         else:
             globals()[args.stage]()
-    except Exception:
+    except Exception as error:
+        if args.stage == "prepare":
+            try:
+                record_prepare_failure(error)
+            except BaseException:
+                pass  # Diagnostic failure must not replace admission failure.
         print("::error::PROJECT_CI_STAGE_FAILED stage=" + args.stage + "; diagnostics remain private", file=sys.stderr)
         raise SystemExit(1) from None
 
