@@ -34,6 +34,12 @@ the generic CLI's ability to package it is not runtime evidence or a budget gate
 A timed-out or partially completed job is FAIL; a short pilot is never a five-hour
 qualification.
 
+An approved private integration recipe may add a bounded actual full-native-volume
+fault beside its read-write/read-only consumer profiles. Require independent
+before/recovery bytes, exact failure status and scoped mount/session cleanup;
+fault setup/teardown time is not active-consumer duration, and provider injection
+is not real quota or Windows full-volume evidence.
+
 ## Approval and transport
 
 1. Review/commit the public workflow/module changes as code commit **B**.
