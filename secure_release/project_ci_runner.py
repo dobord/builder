@@ -7,10 +7,11 @@ Only reviewed public tool actions are interpreted; private caches are disabled.
 """
 from __future__ import annotations
 import ast
+import hashlib
 import io
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import shutil
 import tarfile
@@ -87,6 +88,59 @@ def windows_preflight(root, work, env, body, host, runner_os, shell, deadline, i
         done.add(identity)  # Failed primary probes never become cached success.
 
 
+GCOVR_METADATA_LIMIT = 64 * 1024**2
+GCOVR_SOURCE_LIMIT = 20000
+
+
+def generated_coverage_html_names(source_root, report_root):
+    """Classify source-backed gcovr detail-page names, not their HTML contents.
+
+    Approved recipe output and the materialized source tree are trusted inputs;
+    this is narrow filename classification, not DLP/body inspection. Only gcovr
+    0.6-format metadata with existing in-root C/C++ sources can grant an exception.
+    MD5 is gcovr's non-security filename ID only. Transport and archive integrity
+    remain the existing authenticated envelope and SHA-256 manifest.
+    """
+    if not report_root.is_dir():
+        return frozenset()
+    summary, index = report_root / "coverage.json", report_root / "coverage.html"
+    try:
+        if (summary.is_symlink() or index.is_symlink() or not summary.is_file()
+                or not index.is_file() or not 0 < summary.stat().st_size <= GCOVR_METADATA_LIMIT):
+            return frozenset()
+        with summary.open("rb") as incoming:
+            raw = incoming.read(GCOVR_METADATA_LIMIT + 1)
+        if len(raw) > GCOVR_METADATA_LIMIT:
+            return frozenset()
+        value = crypto.parse(raw)
+        if (not isinstance(value, dict) or value.get("gcovr/format_version") != "0.6"
+                or not isinstance(value.get("files"), list) or len(value["files"]) > GCOVR_SOURCE_LIMIT):
+            return frozenset()
+        names = set()
+        for record in value["files"]:
+            if not isinstance(record, dict) or not isinstance(record.get("file"), str):
+                return frozenset()
+            text = record["file"]
+            relative = PurePosixPath(text)
+            if (relative.is_absolute() or not relative.parts or ".." in relative.parts
+                    or "\\" in text or ":" in text or "\x00" in text):
+                return frozenset()
+            if relative.suffix.lower() not in {".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".hxx"}:
+                continue
+            fingerprint = hashlib.md5(text.encode("utf-8"), usedforsecurity=False).hexdigest()
+            name = f"coverage.{relative.name}.{fingerprint}.html"
+            if not encrypted_logs_name_forbidden(name):
+                continue
+            source = source_root / text
+            if (source.is_symlink() or not source.is_file()
+                    or not source.resolve().is_relative_to(source_root.resolve())):
+                return frozenset()
+            names.add(name)
+        return frozenset(names)
+    except (OSError, ValueError, UnicodeError):
+        return frozenset()
+
+
 def artifact_archive(root, paths, target, payload, lane):
     """Preserve reports/corpora as ciphertext; reject links, escape, and overflow."""
     work = Path(ci.required("RUNNER_TEMP")) / "project-ci"
@@ -99,13 +153,15 @@ def artifact_archive(root, paths, target, payload, lane):
                 continue
             if path.is_symlink() or not path.resolve().is_relative_to(root.resolve()):
                 raise ValueError("unsafe report root")
+            coverage_names = generated_coverage_html_names(root, path)
             members = [path] if path.is_file() else sorted(path.rglob("*"))
             for member in members:
                 if member.is_symlink():
                     raise ValueError("linked report member")
                 if not member.is_file():
                     continue
-                if encrypted_logs_name_forbidden(member.name):
+                if (encrypted_logs_name_forbidden(member.name)
+                        and not (member.parent == path and member.name in coverage_names)):
                     raise ValueError("credential-like report member")
                 count += 1
                 total += member.stat().st_size
