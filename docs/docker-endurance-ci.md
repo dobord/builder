@@ -19,6 +19,13 @@ private recipes, revisions, stand credentials or plaintext results into this pub
 workflow or its inputs. The separate `DRIVE_FOUNDATION_CI_RUN_SHA` variable remains
 the exact isolated-branch admission guard; other workflows/variables are untouched.
 
+The private source envelope must contain all product files needed by its recipe.
+No product repository token is passed to the recipe. Fetch only public pinned
+upstreams; if build tooling needs Git metadata, create disposable staging metadata
+and record it separately from the authenticated product source revision/inventory.
+An unauthenticated private Git fetch failure is not an integration result and must
+remain a retained failed request, followed by fresh operator authorization/input.
+
 This opt-in branch workflow runs an operator-approved private source snapshot on
 an ordinary `ubuntu-24.04` Actions runner. The qualification timer is **18000
 seconds / 100 cycles**. The 360-minute job budget leaves up to one hour for
