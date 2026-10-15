@@ -117,8 +117,32 @@ collection carries these files; no plaintext artifact or public report is added.
 This is diagnostic hardening, not proof that a historical Windows hang is fixed.
 Native exact-SHA qualification and all 39 release lanes remain mandatory.
 
-## Source-backed coverage report names
+## Private prepare-failure diagnostics
 
+Prepare failures retain a bounded owner-private record before the fixed public
+stage-failure marker. It contains exception type, an exact allowlisted reason,
+and at most 16 sanitized module/function/line entries from a bounded stack walk.
+An HTTP error may add only an integer status from 400 through 599. No arbitrary
+exception string, chained exception, local, source line, path, URL, header, body,
+request, environment or key bytes are recorded. Unknown/invalid strings use fixed
+placeholders. These code identifiers are metadata, not DLP/content inspection.
+
+Fresh exclusive staging uses POSIX directory/file modes `0700`/`0600`; Windows
+inherits the trusted runner temporary directory's ACLs. Links, overwrites,
+hardlinked records and broadened POSIX permissions are rejected. Recording errors
+cannot replace admission failure or expose diagnostic exceptions publicly.
+
+The same reviewed Tink encrypted-log context and public log recipient encrypt
+prepare diagnostics in always-run steps; only `.enc` is uploaded before always-run
+plaintext cleanup. A fixed `no-prepare-error-record` header covers absent records
+(including pre-prepare installer failure) without asserting successful admission.
+If the reviewed crypto runtime itself is unavailable, encryption/upload fail
+closed: no plaintext or alternate cipher is published. Failure still blocks all
+qualification lanes; source/input uploads retain their implicit success guard.
+Diagnostics do not authorize replay: retry needs a fresh signed request/nonce and
+any implementation change needs a newly reviewed immutable builder revision.
+
+## Source-backed coverage report names
 Report collection keeps the credential-like filename guard. A narrow exception
 admits direct-child `coverage.<C/C++ basename>.<gcovr MD5>.html` pages only when
 bounded gcovr format `0.6` metadata maps the exact name to an existing, nonlinked
