@@ -1,18 +1,18 @@
-name: Encrypted Docker endurance qualification
+name: Encrypted RDPDR internal foundation checks
 on:
   push:
-    branches: [ci/encrypted-docker-endurance]
+    branches: [ci/encrypted-drive-foundation]
 permissions: {}
 concurrency:
-  group: encrypted-docker-endurance
+  group: encrypted-drive-foundation
   cancel-in-progress: false
 jobs:
   endurance:
     if: >-
       github.repository_id == '1372874997' &&
-      github.sha == vars.ENDURANCE_CI_RUN_SHA
+      github.sha == vars.DRIVE_FOUNDATION_CI_RUN_SHA
     runs-on: ubuntu-24.04
-    timeout-minutes: 360
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:

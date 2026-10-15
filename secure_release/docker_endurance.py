@@ -50,7 +50,10 @@ def validate(payload, revision, *, now=None):
         raise ValueError("invalid numeric profile")
     full = payload["mode"] == "qualification" and payload["duration_seconds"] == 18000 and payload["cycles"] == 100
     pilot = payload["mode"] == "pilot" and 30 <= payload["duration_seconds"] <= 600 and 1 <= payload["cycles"] <= 20
-    if not (full or pilot):
+    foundation = payload["mode"] == "rdpdr-foundation" and payload["duration_seconds"] == 0 and payload["cycles"] == 1
+    if foundation and payload["recipe"] != "server/frdp/test/e2e/run-rdpdr-irp-ci.py":
+        raise ValueError("wrong foundation recipe")
+    if not (full or pilot or foundation):
         raise ValueError("unsupported duration/cycle profile")
     if not (payload["created"] <= now + 300 and now <= payload["expires"] and
             0 < payload["expires"] - payload["created"] <= 21600):
@@ -140,7 +143,7 @@ def run():
         PHASE = "admission"
         if (int(project_ci.required("GITHUB_REPOSITORY_ID")) != project_ci.BUILDER_ID or
                 run_context["attempt"] != "1" or project_ci.required("GITHUB_EVENT_NAME") != "push" or
-                project_ci.required("GITHUB_REF") != "refs/heads/ci/encrypted-docker-endurance" or
+                project_ci.required("GITHUB_REF") != "refs/heads/ci/encrypted-drive-foundation" or
                 project_ci.required("RUNNER_OS") != "Linux"):
             raise ValueError("wrong repository or replayed run")
         code_boundary(root, revision)
@@ -170,11 +173,16 @@ def run():
                    "--duration-seconds", str(payload["duration_seconds"]), "--cycles", str(payload["cycles"])]
         if payload["mode"] == "pilot":
             command.append("--pilot")
+        if payload["mode"] == "rdpdr-foundation":
+            command.append("--foundation")
         env = project_ci.build_environment(os.environ)
         code = project_ci.quiet(command, work / "source", env, work / "evidence/diagnostics.log", timeout=21000)
         if code:
             raise ValueError("private Docker recipe failed")
         result = crypto.parse((work / "reports/endurance-result.json").read_bytes())
+        if payload["mode"] == "rdpdr-foundation" and (result.get("scope") != "rdpdr-irp-foundation" or
+                result.get("drive_interoperability") != "NOT RUN"):
+            raise ValueError("wrong foundation evidence scope")
         if (any(type(result[name]) is not int for name in ("duration_seconds", "cycles", "elapsed_seconds")) or
                 type(result["qualification"]) is not bool or result["result"] != "pass" or result["duration_seconds"] != payload["duration_seconds"] or
                 result["cycles"] != payload["cycles"] or result["elapsed_seconds"] < payload["duration_seconds"] or
@@ -219,7 +227,7 @@ def main():
     pack.add_argument("--builder-code-sha", required=True)
     pack.add_argument("--recipe", required=True)
     pack.add_argument("--output", type=Path, required=True)
-    pack.add_argument("--mode", choices=("pilot", "qualification"), required=True)
+    pack.add_argument("--mode", choices=("pilot", "qualification", "rdpdr-foundation"), required=True)
     pack.add_argument("--duration-seconds", type=int, required=True)
     pack.add_argument("--cycles", type=int, required=True)
     commands.add_parser("run")
