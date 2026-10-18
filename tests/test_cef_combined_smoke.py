@@ -98,8 +98,8 @@ class CompositionTests(unittest.TestCase):
             root = Path(folder)
             source = root / 'consumer'
             source.mkdir()
-            (source / 'CMakeLists.txt').write_text(subject.LEGACY)
-            (source / 'main.cpp').write_text('synthetic consumer')
+            (source / 'CMakeLists.txt').write_bytes(subject.LEGACY.encode())
+            (source / 'main.cpp').write_bytes(b'synthetic consumer')
             smoke = root / 'smoke.c'
             smoke.write_bytes(subject.MARKER)
             for pair in (legacy, release):

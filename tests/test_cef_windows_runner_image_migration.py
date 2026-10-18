@@ -15,6 +15,7 @@ from secure_release import cef_windows_iteration as worker
 
 OLD = "20260927.320.1"
 NEW = "20261004.326.1"
+CURRENT = "20261012.333.1"
 HOST = {
     "schema": 1,
     "os_build": "20348",
@@ -66,6 +67,14 @@ class ImagePolicyTests(unittest.TestCase):
         self.assertFalse(report["runner_image_migrated"])
         self.assertTrue(report["checkpoint_host_verified"])
 
+    def test_current_image_preserves_exact_legacy_checkpoint_and_fingerprint(self):
+        logical, report = self.review(CURRENT)
+        self.assertEqual(logical, OLD)
+        self.assertEqual(report["runner_image_actual"], CURRENT)
+        self.assertEqual(report["critical_host_fingerprint"], HOST)
+        self.assertTrue(report["runner_image_migrated"])
+        self.assertTrue(report["checkpoint_host_verified"])
+
     def test_every_critical_host_field_fails_closed(self):
         for field in HOST:
             if field == "schema":
@@ -77,8 +86,9 @@ class ImagePolicyTests(unittest.TestCase):
                 changed[field] = "999" if field == "os_build" else "99.99.99"
                 if field == "machine":
                     changed[field] = "arm64"
-            with self.subTest(field=field), self.assertRaises(ValueError):
-                self.review(NEW, changed)
+            for image in (NEW, CURRENT):
+                with self.subTest(field=field, image=image), self.assertRaises(ValueError):
+                    self.review(image, changed)
 
     def test_unreviewed_image_and_missing_image_fail(self):
         with self.assertRaises(ValueError):
@@ -179,7 +189,7 @@ class NativeWindowsFingerprintTests(unittest.TestCase):
         value = worker.critical_windows_host_fingerprint()
         self.assertEqual(value, HOST)
         actual = os.environ.get("ImageVersion")
-        self.assertIn(actual, {OLD, NEW})
+        self.assertIn(actual, {OLD, NEW, CURRENT})
         print(
             "CEF_WINDOWS_IMAGE_MIGRATION_NATIVE "
             f"actual_image={actual} fingerprint_verified=true "
