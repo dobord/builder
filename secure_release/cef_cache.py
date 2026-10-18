@@ -121,16 +121,15 @@ JOINT_COMPLETED_BINARY_CACHES = {
                 "artifact_sha256": "cb1ce3974f74a849166e835b67cffdf470b0b14196cbbf7358b5e0d680f3d7a1",
                 "image": "20261004.326.1"},
 }
-# Exact producer finished and persisted completed vcpkg packages before its CEF
-# runtime gate failed. This is compile-cache provenance, never SDK/runtime
-# approval. Keep the older qualified engine checkpoint; do not select this
-# failed run's engine state or allow it to publish a release.
-LINUX_050_COMPLETED_PACKAGES = {
-    "run": 39095967761, "attempt": 1,
+# The operator selected Linux packages from the previous successful combined
+# release, not from an incomplete or runtime-failed build. Bind the exact
+# original producer, artifact and hosted image; SDK gates still run afresh.
+LINUX_SUCCESSFUL_RELEASE_PACKAGES = {
+    "run": 38608203966, "attempt": 1,
     "revision": "4ce8f380b24fb16dd80018cc12cd42d2e2bb2348",
-    "artifact_id": 12126109721,
-    "artifact_sha256": "b280a10c37d8d85e215ca1201b594d4c72621add9e874fff6a138d3b4c3bab61",
-    "image": "20261012.334.1",
+    "artifact_id": 11927207987,
+    "artifact_sha256": "839a22eeecbb6644f69723df9dd69b95f3a83ad6927b756154229be18622ed3e",
+    "image": "20261004.327.1",
 }
 
 
@@ -154,11 +153,11 @@ def producer_revision(platform: str, kind: str, run: int, attempt: int, revision
 def selected_revision(selected: dict | None, platform: str, kind: str, revision: str) -> str:
     if selected is None:
         return revision
-    if selected["run"] == LINUX_050_COMPLETED_PACKAGES["run"]:
-        record = LINUX_050_COMPLETED_PACKAGES
+    if selected["run"] == LINUX_SUCCESSFUL_RELEASE_PACKAGES["run"]:
+        record = LINUX_SUCCESSFUL_RELEASE_PACKAGES
         require(platform == "linux" and kind == "vcpkg-binaries"
                 and all(selected[name] == record[name] for name in ("run", "attempt", "artifact_id", "artifact_sha256")),
-                "Reviewed Linux 0.5.0 completed-package cache selector changed")
+                "Reviewed successful Linux release cache selector changed")
         return record["revision"]
     if selected["run"] == 38583556953:
         record = JOINT_COMPLETED_BINARY_CACHES.get(platform)
@@ -183,8 +182,8 @@ def selected_revision(selected: dict | None, platform: str, kind: str, revision:
 
 def binary_cache_image(selected: dict, platform: str, revision: str) -> str | None:
     selected_revision(selected, platform, "vcpkg-binaries", revision)
-    if selected["run"] == LINUX_050_COMPLETED_PACKAGES["run"]:
-        return LINUX_050_COMPLETED_PACKAGES["image"]
+    if selected["run"] == LINUX_SUCCESSFUL_RELEASE_PACKAGES["run"]:
+        return LINUX_SUCCESSFUL_RELEASE_PACKAGES["image"]
     if selected["run"] == 38583556953:
         return JOINT_COMPLETED_BINARY_CACHES[platform]["image"]
     if selected["run"] == LINUX_RELEASE_CONTINUATION["run"]:
@@ -319,7 +318,7 @@ def fetch(api, selected: dict, directory: Path, *, platform: str, kind: str, key
     producer = api.get(f"/repos/{BUILDER}/actions/runs/{run}/attempts/{attempt}")
     workflow = build_workflow(producer.get("path", ""))
     require(platform in BUILD_WORKFLOWS[workflow], "Cache platform differs from producer workflow")
-    if run in {38583556953, LINUX_050_COMPLETED_PACKAGES["run"]}:
+    if run in {38583556953, LINUX_SUCCESSFUL_RELEASE_PACKAGES["run"]}:
         require(workflow == "build-combined-release.yml", "Reviewed completed-package cache workflow changed")
     if continuation_record(run) is not None:
         require(workflow == "build-linux-release.yml", "Reviewed Linux continuation workflow changed")
@@ -327,7 +326,8 @@ def fetch(api, selected: dict, directory: Path, *, platform: str, kind: str, key
     require(producer["status"] == "completed", "Cache producer is still running")
     current = api.get(f"/repos/{BUILDER}/actions/runs/{run}")
     require(current["run_attempt"] == attempt and current["status"] == "completed", "Cache producer was rerun")
-    if run in {LINUX_RELEASE_CONTINUATION["run"], WINDOWS_RELEASE_BINARY_CACHE["run"]}:
+    if run in {LINUX_RELEASE_CONTINUATION["run"], WINDOWS_RELEASE_BINARY_CACHE["run"],
+               LINUX_SUCCESSFUL_RELEASE_PACKAGES["run"]}:
         require(producer.get("conclusion") == "success" and current.get("conclusion") == "success"
                 and current.get("head_sha") == revision, "Qualified release cache producer changed or failed")
     name = f"{kind}-{platform}-{run}-{attempt}"

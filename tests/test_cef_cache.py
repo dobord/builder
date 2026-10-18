@@ -13,19 +13,6 @@ if os.environ.get("REQUIRE_TINK_TESTS") == "1" and not HAS_TINK:
 
 
 class PathTests(unittest.TestCase):
-    def test_exact_failed_joint_run_reuses_only_completed_linux_packages(self):
-        selected = {'run': 39095967761, 'attempt': 1, 'artifact_id': 12126109721,
-                    'artifact_sha256': 'b280a10c37d8d85e215ca1201b594d4c72621add9e874fff6a138d3b4c3bab61'}
-        original = '4ce8f380b24fb16dd80018cc12cd42d2e2bb2348'
-        self.assertEqual(cache.selected_revision(selected, 'linux', 'vcpkg-binaries', 'a' * 40), original)
-        self.assertEqual(cache.binary_cache_image(selected, 'linux', 'a' * 40), '20261012.334.1')
-        for platform, kind in [('windows', 'vcpkg-binaries'), ('linux', 'cef-checkpoint')]:
-            with self.subTest(platform=platform, kind=kind), self.assertRaises(ValueError):
-                cache.selected_revision(selected, platform, kind, 'a' * 40)
-        for field, value in [('attempt', 2), ('artifact_id', 1), ('artifact_sha256', '0' * 64)]:
-            with self.subTest(field=field), self.assertRaises(ValueError):
-                cache.selected_revision(dict(selected, **{field: value}), 'linux', 'vcpkg-binaries', 'a' * 40)
-
     def test_cache_names(self):
         cache.allowed_path("checkpoint.json", "cef-checkpoint")
         cache.allowed_path("workspace.tar.gz.part0000", "cef-checkpoint")
