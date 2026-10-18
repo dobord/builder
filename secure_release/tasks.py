@@ -597,7 +597,9 @@ def diagnostics():
                 candidates.extend(sorted((root / "cef-consumer-evidence").rglob(pattern)))
         runtime_logs = root / "upstream/buildtrees/cef-static/diagnostics"
         if runtime_logs.is_dir() and not runtime_logs.is_symlink():
-            for pattern in ("smoke-progress-*.json", "stdout.txt", "stderr.txt", "cef-static.log"):
+            for pattern in ("smoke-progress-*.json", "smoke-modules-*.txt",
+                            "static-smoke.log", "static-smoke-status.json", "smoke-runs.json",
+                            "stdout.txt", "stderr.txt", "cef-static.log"):
                 candidates.extend(sorted(runtime_logs.rglob(pattern)))
         for folder in sorted((root / "upstream/buildtrees").glob("*")):
             if folder.is_dir() and not folder.is_symlink():
