@@ -90,6 +90,29 @@ class LiteralTests(unittest.TestCase):
 
 
 class CompositionTests(unittest.TestCase):
+    def test_reviewed_release_consumer_pairs_accept_without_mixing_versions(self):
+        legacy = (subject.PROJECT_BLOB, subject.MAIN_BLOB)
+        release = ('fba548add26ad29463c01309b98312013c58b3b9',
+                   'cb380928ef3ad9029fd382f362ec09ab9fbba63c')
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / 'consumer'
+            source.mkdir()
+            (source / 'CMakeLists.txt').write_bytes(subject.LEGACY.encode())
+            (source / 'main.cpp').write_bytes(b'synthetic consumer')
+            smoke = root / 'smoke.c'
+            smoke.write_bytes(subject.MARKER)
+            for pair in (legacy, release):
+                with self.subTest(pair=pair), mock.patch.object(
+                        subject.checked, 'blob', side_effect=[*pair, subject.SMOKE_BLOB]):
+                    self.assertEqual(set(subject.validate(source, smoke)),
+                                     {'CMakeLists.txt', 'main.cpp', 'smoke.c'})
+            for pair in ((legacy[0], release[1]), (release[0], legacy[1]),
+                         (release[0], '0' * 40), ('0' * 40, release[1])):
+                with self.subTest(pair=pair), mock.patch.object(
+                        subject.checked, 'blob', side_effect=pair), self.assertRaises(ValueError):
+                    subject.validate(source, smoke)
+
     def test_production_preflight_and_copy_are_before_configure_without_pin_changes(self):
         from secure_release import cef_strict_combined as combined
         import inspect
@@ -229,7 +252,9 @@ class PinnedTests(unittest.TestCase):
     def packages(self, parent):
         prefix = parent / 'sdk'
         for package, version, code in (
-            ('lockfreecoro', '0.3.1', 'add_library(lockfreecoro::all INTERFACE IMPORTED)\n'),
+            ('lockfreecoro', ('0.3.1' if subject.checked.blob(
+                (self.source / 'CMakeLists.txt').read_bytes()) == subject.PROJECT_BLOB else '0.5.0'),
+             'add_library(lockfreecoro::all INTERFACE IMPORTED)\n'),
             ('lfc-ui', None, 'add_library(lfc::ui INTERFACE IMPORTED)\n'),
             ('cef-static', '152.0.6', 'add_library(CEF::static INTERFACE IMPORTED)\n'
              'set(CEF_STATIC_CAPI_ONLY ON)\nset(CEF_STATIC_ENGINE_CONFIGURATION Release)\n'
