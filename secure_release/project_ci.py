@@ -46,7 +46,7 @@ RELEASE_RECIPE_DIGESTS = {
     "wasm-async": "d3f5f2bb2641333c4b68337ec723379746fe701ae06307b1099946d64080082c",
     "nightly-stress": "6399682b004cde5f7b724d46594644edf6b7130e42440fa6f022d97303c79160",
     "performance": "f34215c2364d7f705c162f3f66378b4ca49c1116d1317cc552a26c298e96e93a",
-    "vcpkg-port": "0559a53ce1d5377304e54c2f61cbf4c5a22f2f4fa8318a22a629590a0cbed500",
+    "vcpkg-port": "263a8c59ac57ff06993b408aa24ce4bf0caa43965f88bd647056c9377f7513f6",
 }
 SUITES = {"ci": ("ci", "wasm-async"), "async": ("wasm-async",),
           "nightly": ("nightly-stress",), "performance": ("performance",),
