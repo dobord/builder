@@ -21,6 +21,9 @@ CONSUMER_BLOBS = frozenset({
     (PROJECT_BLOB, MAIN_BLOB),
     ("fba548add26ad29463c01309b98312013c58b3b9",
      "cb380928ef3ad9029fd382f362ec09ab9fbba63c"),
+    # Release 0.5.1 changes only the exact package/runtime version checks.
+    ("b6cac082dc833ea3fd721b245476d78929aac340",
+     "f5e6b29845cb2cb317f93b5a4e4a84953c17dc7a"),
 })
 SMOKE_BLOB = "2b152219424a2ca9f944bf231577a5ae1d7f8999"
 MARKER = b"  cef_run_message_loop();"

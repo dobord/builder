@@ -94,6 +94,8 @@ class CompositionTests(unittest.TestCase):
         legacy = (subject.PROJECT_BLOB, subject.MAIN_BLOB)
         release = ('fba548add26ad29463c01309b98312013c58b3b9',
                    'cb380928ef3ad9029fd382f362ec09ab9fbba63c')
+        patch_release = ('b6cac082dc833ea3fd721b245476d78929aac340',
+                         'f5e6b29845cb2cb317f93b5a4e4a84953c17dc7a')
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             source = root / 'consumer'
@@ -102,12 +104,13 @@ class CompositionTests(unittest.TestCase):
             (source / 'main.cpp').write_bytes(b'synthetic consumer')
             smoke = root / 'smoke.c'
             smoke.write_bytes(subject.MARKER)
-            for pair in (legacy, release):
+            for pair in (legacy, release, patch_release):
                 with self.subTest(pair=pair), mock.patch.object(
                         subject.checked, 'blob', side_effect=[*pair, subject.SMOKE_BLOB]):
                     self.assertEqual(set(subject.validate(source, smoke)),
                                      {'CMakeLists.txt', 'main.cpp', 'smoke.c'})
             for pair in ((legacy[0], release[1]), (release[0], legacy[1]),
+                         (patch_release[0], release[1]), (release[0], patch_release[1]),
                          (release[0], '0' * 40), ('0' * 40, release[1])):
                 with self.subTest(pair=pair), mock.patch.object(
                         subject.checked, 'blob', side_effect=pair), self.assertRaises(ValueError):
@@ -251,9 +254,13 @@ class PinnedTests(unittest.TestCase):
 
     def packages(self, parent):
         prefix = parent / 'sdk'
+        version = {
+            subject.PROJECT_BLOB: '0.3.1',
+            'fba548add26ad29463c01309b98312013c58b3b9': '0.5.0',
+            'b6cac082dc833ea3fd721b245476d78929aac340': '0.5.1',
+        }[subject.checked.blob((self.source / 'CMakeLists.txt').read_bytes())]
         for package, version, code in (
-            ('lockfreecoro', ('0.3.1' if subject.checked.blob(
-                (self.source / 'CMakeLists.txt').read_bytes()) == subject.PROJECT_BLOB else '0.5.0'),
+            ('lockfreecoro', version,
              'add_library(lockfreecoro::all INTERFACE IMPORTED)\n'),
             ('lfc-ui', None, 'add_library(lfc::ui INTERFACE IMPORTED)\n'),
             ('cef-static', '152.0.6', 'add_library(CEF::static INTERFACE IMPORTED)\n'
