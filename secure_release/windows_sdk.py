@@ -93,7 +93,8 @@ def binding(cfg: dict) -> dict:
     if cache is not None:
         from . import cef_cache
         reviewed = (cef_cache.WINDOWS_RELEASE_BINARY_CACHE,
-                    cef_cache.JOINT_COMPLETED_BINARY_CACHES["windows"])
+                    cef_cache.JOINT_COMPLETED_BINARY_CACHES["windows"],
+                    cef_cache.RELEASE_050_BINARY_CACHES["windows"])
         if cache not in [{name: record[name] for name in ("run", "attempt", "artifact_id", "artifact_sha256")}
                          for record in reviewed]:
             raise ValueError("Windows release binary cache is not the exact reviewed producer")
