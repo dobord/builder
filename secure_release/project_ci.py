@@ -626,10 +626,11 @@ def verify_source_policy(payload, token):
             (payload["schema"] == 2 and (pr["base"]["repo"]["id"] != payload["source_id"] or
              pr["base"]["ref"] != policy["authorizer_branch"]))):
         raise ValueError("stale or foreign PR")
-    # The release profile is authorized by the protected signer and complete
-    # exact-SHA CI qualification, without a separate manual approval gate.
-    # Ordinary CI retains its existing sensitive-boundary PR review policy.
-    if payload["suite"] != "release":
+    # The authenticated schema-2 operator signature authorizes qualification,
+    # including sensitive changes, without a manual PR-review gate. The caller
+    # still verifies the signature, actor, exact source identity and recipe.
+    # Legacy schema-1 ordinary CI retains its protected-authorizer review policy.
+    if payload["schema"] == 1 and payload["suite"] != "release":
         files = pages(f"repos/{payload['source']}/pulls/{payload['pr']}/files", token)
         paths = [item["filename"] for item in files]
         boundaries = sum(any(re.search(pattern, name) for name in paths) for pattern in policy["approval_boundaries"])

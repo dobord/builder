@@ -223,11 +223,14 @@ committed wheelhouse.
 
 The separately provisioned `.github/workflows/encrypted-project-ci.yml` accepts
 an opaque, signed HPKE request from a protected source-repository authorizer.
-It verifies repository IDs, current-head independent reviews, dependency review,
-immutable artifact hashes and the exact approved `PROJECT_CI_BUILDER_SHA` before
-executing any source. The signed `release` profile replaces the manual PR approval
-gate with successful complete exact-SHA qualification; ordinary sensitive-change
-CI review remains enforced, along with dependency review and all admission checks.
+It verifies repository IDs, operator identity, dependency review, immutable
+artifact hashes and the exact approved `PROJECT_CI_BUILDER_SHA` before executing
+any source. A signed schema-2 local operator request authorizes qualification
+without an independent PR approval, including sensitive changes. It does not
+authorize merging or publishing a release. Legacy schema-1 ordinary CI retains
+its sensitive-change PR review gate. The signed `release` profile requires
+successful complete exact-SHA qualification without a manual PR approval gate;
+dependency review and all cryptographic and source admission checks remain.
 Dependency review runs in the trusted prepare stage over authenticated Git
 objects using public OSV data, without GitHub Advanced Security. It checks
 introduced PR pins (the full inventory for non-PR requests), resolves action
@@ -272,8 +275,9 @@ without overwriting SDK secrets or backup files. Shared-key compromise/rotation
 then affects both contours; authenticated protocol contexts remain distinct.
 It does not alter the
 offline wheelhouse. `project-ci-requirements.lock` pins the official online
-CPython 3.12 Linux, Windows and macOS runtime. Source identity and approval
-patterns are private operator-provisioned policy, not discovered from source code.
+CPython 3.12 Linux, Windows and macOS runtime. Source identity and legacy schema-1
+approval patterns are private operator-provisioned policy, not discovered from
+source code.
 `project_ci_bootstrap.py` generates protected local backups and provisions keys
 through `gh` stdin, initially setting `PROJECT_CI_ENABLED=false`. An operator
 reviews the immutable builder SHA, protected source environment, narrow tokens

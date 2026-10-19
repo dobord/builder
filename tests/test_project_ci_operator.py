@@ -234,33 +234,68 @@ class OperatorTests(unittest.TestCase):
         self.assertNotIn(value["source"], json.dumps(context))
         self.assertNotIn(value["source_sha"], json.dumps(context))
 
-    def test_policy_never_queries_source_actions_and_checks_current_identity(self):
-        value = dict(operator_payload(), pr=151, suite="release")
+    def test_operator_signed_ci_does_not_require_manual_reviews(self):
+        value = dict(operator_payload(), pr=151)
         policy = {"repository": value["source"], "repository_id": value["source_id"],
-                  "authorizer_branch": "main", "approval_boundaries": ["^sensitive"],
-                  "operator_id": 5323024, "operator_origin": "local-operator"}
+                  "authorizer_branch": "main", "approval_boundaries": ["^sensitive", "^ci/"],
+                  "operator_id": 5323024, "operator_origin": "local-operator", "request_schemas": [2]}
+        repository = {"id": value["source_id"], "full_name": value["source"]}
+        release = {"draft": False, "prerelease": False, "tag_name": value["baseline_tag"], "published_at": "2026-01-01"}
+        baseline = {"object": {"type": "commit", "sha": value["baseline_sha"]}}
+        pr = {"head": {"sha": value["source_sha"], "repo": {"id": value["source_id"]}},
+              "base": {"sha": value["base_sha"], "repo": {"id": value["source_id"]}, "ref": "main"},
+              "state": "open", "user": {"login": "synthetic"}}
         def reply(path, token):
             self.assertNotIn("/actions/", path)
             if path.endswith(value["source"]):
-                return {"id": value["source_id"], "full_name": value["source"]}
+                return repository
             if "/releases/tags/" in path:
-                return {"draft": False, "prerelease": False, "tag_name": value["baseline_tag"], "published_at": "2026-01-01"}
+                return release
             if "/git/ref/tags/" in path:
-                return {"object": {"type": "commit", "sha": value["baseline_sha"]}}
+                return baseline
             if "/pulls/" in path:
-                return {"head": {"sha": value["source_sha"], "repo": {"id": value["source_id"]}},
-                        "base": {"sha": value["base_sha"], "repo": {"id": value["source_id"]}, "ref": "main"},
-                        "state": "open", "user": {"login": "synthetic"}}
+                return pr
             if "/git/ref/heads/main" in path:
                 return {"object": {"type": "commit", "sha": value["source_sha"]}}
             raise AssertionError(path)
-        with patch.dict(os.environ, {"CI_SOURCE_POLICY": json.dumps(policy), "GITHUB_ACTOR_ID": "5323024"}), patch.object(ci, "api_json", side_effect=reply), patch.object(ci, "pages", return_value=[]):
-            ci.verify_source_policy(value, "synthetic")
-            for change in ({"operator_id": 7}, {"source_id": 8}, {"source_sha": "0" * 40}, {"base_sha": "0" * 40}):
-                # Current source replies remain fixed to the admitted request.
+        def list_reply(path, token):
+            if path.endswith("/files"):
+                return [{"filename": "sensitive.cpp"}, {"filename": "ci/recipe.yml"}]
+            if path.endswith("/reviews"):
+                return []
+            raise AssertionError(path)
+        with patch.dict(os.environ, {"CI_SOURCE_POLICY": json.dumps(policy), "GITHUB_ACTOR_ID": "5323024"}), patch.object(ci, "api_json", side_effect=reply), patch.object(ci, "pages", side_effect=list_reply) as pages:
+            # An authenticated operator authorizes every profile, even across
+            # multiple sensitive boundaries. No review API may gate admission.
+            for suite in sorted(ci.SUITES):
+                with self.subTest(suite=suite):
+                    ci.verify_source_policy(dict(value, suite=suite), "synthetic")
+            pages.assert_not_called()
+            for change in ({"operator_id": 7}, {"source_id": 8}, {"source_sha": "0" * 40},
+                           {"base_sha": "0" * 40}, {"source": "dobord/foreign"}):
                 with self.subTest(change=change), self.assertRaises(ValueError):
                     ci.verify_source_policy(dict(value, **change), "synthetic")
-            with patch.dict(os.environ, {"GITHUB_ACTOR_ID": "7"}), self.assertRaises(ValueError):
+            with patch.dict(os.environ, {"GITHUB_ACTOR_ID": "7"}), self.assertRaisesRegex(ValueError, "unauthorized operator"):
+                ci.verify_source_policy(value, "synthetic")
+            # Same-repository current-head/base constraints and stable baseline
+            # qualification still fail closed without any review fallback.
+            invalid_prs = []
+            for side in ("head", "base"):
+                foreign = copy.deepcopy(pr)
+                foreign[side]["repo"]["id"] = 7
+                invalid_prs.append(foreign)
+                stale = copy.deepcopy(pr)
+                stale[side]["sha"] = "0" * 40
+                invalid_prs.append(stale)
+            invalid_prs.extend([dict(pr, state="closed"), dict(pr, base=dict(pr["base"], ref="foreign"))])
+            for invalid in invalid_prs:
+                with self.subTest(pr=invalid), patch.object(ci, "api_json", side_effect=lambda path, token: invalid if "/pulls/" in path else reply(path, token)), self.assertRaisesRegex(ValueError, "stale or foreign PR"):
+                    ci.verify_source_policy(value, "synthetic")
+            for change in ({"draft": True}, {"prerelease": True}, {"published_at": None}, {"tag_name": "v0.0.0"}):
+                invalid = dict(release, **change)
+                with self.subTest(release=change), patch.object(ci, "api_json", side_effect=lambda path, token: invalid if "/releases/tags/" in path else reply(path, token)), self.assertRaisesRegex(ValueError, "baseline is not a published stable release"):
+                    ci.verify_source_policy(value, "synthetic")
+            with patch.object(ci, "api_json", side_effect=lambda path, token: {"object": {"type": "commit", "sha": "0" * 40}} if "/git/ref/tags/" in path else reply(path, token)), self.assertRaisesRegex(ValueError, "released baseline identity mismatch"):
                 ci.verify_source_policy(value, "synthetic")
             ci.verify_source_policy(dict(value, pr=0, base_sha=value["source_sha"]), "synthetic")
 

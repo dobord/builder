@@ -19,8 +19,8 @@ decoded only inside trusted prepare. This prevents Actions' structured-secret ma
 classifying short schema values such as `2` as secrets in the public matrix.
 Masking remains enabled; no private policy data is exposed through job outputs.
 The policy must
-retain its repository, repository ID, authorizer branch and ordinary CI approval
-boundaries, and explicitly add:
+retain its repository, repository ID, authorizer branch and legacy schema-1 CI
+approval boundaries, and explicitly add:
 
 ```json
 {"operator_origin":"local-operator","operator_id":5323024,"request_schemas":[2]}
@@ -32,15 +32,20 @@ its own policy, the signed operator identity, workflow actor ID, run actor and
 triggering actor. A PR must be open, same-repository on both sides, and match the
 exact current head/base; its base branch must match the policy's authorizer
 branch. A non-PR must name exact current source main as both
-head/base. Schema 2 queries no source Actions API. Ordinary CI retains sensitive
-current-head independent review requirements; release adds no manual approval.
+head/base. Schema 2 queries no source Actions or PR review API. The authenticated
+local operator signature authorizes CI and all other qualification profiles,
+including sensitive changes, without external manual or independent PR approval.
+It does not authorize merging or publishing a release. Legacy schema-1 ordinary
+CI retains its existing current-head independent review gate. Cryptographic,
+source identity, dependency and complete exact-SHA qualification checks remain
+mandatory.
 The optional `request_schemas` field is a nonempty, unique list drawn from
 `[1, 2]`. Setting `[2]` denies legacy source Actions origins before any admission
 API call, both in prepare and local policy preflight. Policies omitting the field
 retain legacy admission behavior. Candidate requests cannot override this policy.
 
-The source-read token in builder reads only source identity, PR/review policy and
-published stable baseline metadata. The builder read token fetches the public
+The source-read token in builder reads only source identity, PR identity (and
+legacy schema-1 review policy) and published stable baseline metadata. The builder read token fetches the public
 input Git objects. Native build commands retain their credential-free contract.
 The local authenticated GitHub CLI account needs source metadata/content read,
 source commit-status write, and builder contents/actions read/write permission.
