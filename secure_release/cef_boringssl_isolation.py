@@ -69,6 +69,10 @@ FFMPEG_CODEC_PROVIDERS = (
 FFMPEG_CODEC_COMPANIONS = {
     "libwebp": ("lib/libwebpmux.a", "lib/libsharpyuv.a", "lib/libwebpdemux.a", "lib/libwebpdecoder.a"),
 }
+# C++ codec objects carry this weak exception-personality reference too.
+# It belongs to the independently pinned GCC runtime, not the media namespace.
+# Do not grant precedence to arbitrary duplicate provider definitions.
+MEDIA_CXX_SHARED_DEFINITIONS = frozenset({"DW.ref.__gxx_personality_v0"})
 GXX = Path("/usr/bin/g++-14")
 GCC_ROOT = Path("/usr/lib/gcc/x86_64-linux-gnu/14")
 GCC_RUNTIME_ARCHIVES = ("libstdc++.a", "libgcc.a", "libgcc_eh.a")
@@ -830,6 +834,7 @@ def install(installed: Path, source: Path, diagnostics: Path) -> dict:
         table = _symbols(nm, path)
         ffmpeg_defined.update(_defined(table))
         ffmpeg_names.update(name for name, _ in table)
+    ffmpeg_defined.difference_update(MEDIA_CXX_SHARED_DEFINITIONS & gcc_defined)
 
     collisions: set[str] = set()
     cxx_collisions: set[str] = set()
