@@ -661,7 +661,7 @@ class PolicyTests(unittest.TestCase):
         self.assertIn("GCC_RUNTIME_ARCHIVES", text)
         self.assertIn("GCC_ATOMIC_ARCHIVE", text)
         self.assertEqual(isolation.FFMPEG_VERSION, "9.0.2")
-        self.assertEqual(isolation.FFMPEG_PORT_VERSION, 0)
+        self.assertEqual(isolation.FFMPEG_PORT_VERSION, 1)
         self.assertNotIn("--allow-multiple-definition", text)
         self.assertNotIn("--unresolved-symbols", text)
         self.assertNotIn("--exclude-libs", text)

@@ -473,6 +473,10 @@ def build():
     if windows_isolation is not None:
         windows_runtime_isolation.validate_archive(package, windows_isolation)
     safeio.extract_zip(package, root / "consumer-sdk")
+    multimedia_tools_proof = None
+    if platform == "linux" and "ffmpeg[static-full-gpl]" in packages:
+        from . import multimedia_tools
+        multimedia_tools_proof = multimedia_tools.verify_linux(root / "consumer-sdk", root, execute)
     if windows_objects is not None:
         windows_multimedia.relocated(root / "consumer-sdk", windows_objects, source_review)
     source = root / "workspace" / payload["plan"]["smoke_path"]
@@ -536,6 +540,8 @@ def build():
     if cfg is not None:
         manifest["cef"] = {"build_contract_sha256": cef_contract.build_key(cfg, platform, platform_sha256),
                             "profile": cfg["profile"], "consumer": cef_proof}
+        if multimedia_tools_proof is not None:
+            manifest["cef"]["multimedia_tools"] = multimedia_tools_proof
         if workflow == "build-windows-release.yml":
             if windows_objects is not None:
                 manifest["cef"]["windows_multimedia_sources"] = source_review

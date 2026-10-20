@@ -122,6 +122,9 @@ def verify_result():
         if "scripts/buildsystems/vcpkg.cmake" not in names or not any(n.startswith(f"installed/{triplet}/lib/") and n.endswith((".a", ".lib")) for n in names):
             raise ValueError("SDK layout invalid")
         reviewed_sources = set()
+        if platform == "linux" and "ffmpeg[static-full-gpl]" in payload["plan"]["platforms"]["linux"]["packages"]:
+            from . import multimedia_tools
+            multimedia_tools.validate_archive(sdk, manifest.get("cef", {}).get("multimedia_tools"))
         if platform == "windows" and "freerdp[full]" in payload["plan"]["platforms"]["windows"]["packages"]:
             from . import windows_multimedia
             reviewed_sources = windows_multimedia.validate_archive_sources(
