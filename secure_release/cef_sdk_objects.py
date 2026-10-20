@@ -36,6 +36,10 @@ def validate_sources(registry: Path) -> None:
 
 def imported_objects(declarations: str, configuration: str, *, triplet: str = TRIPLET) -> dict[str, list[str]]:
     """Read the limited CMake-generated Release OBJECT export grammar only."""
+    # Parse either native line ending; snapshot() still hashes the original
+    # unmodified bytes, so this never canonicalizes an ownership/transport proof.
+    declarations = declarations.replace("\r\n", "\n")
+    configuration = configuration.replace("\r\n", "\n")
     declared = re.findall(r"^add_library\((" + TARGET + r") OBJECT IMPORTED\)$",
                           declarations, re.M)
     checked.require(len(declared) == len(set(declared)) and

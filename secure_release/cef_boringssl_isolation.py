@@ -49,6 +49,17 @@ FFMPEG_ARCHIVES = (
     "lib/libswresample.a",
     "lib/libswscale.a",
 )
+# The full software graph may overlap Chromium's own WebRTC/image codecs too.
+# Bind exact installed owners and derive collisions from their actual archives;
+# rewrite only CEF definitions/references, never these consumer providers.
+FFMPEG_CODEC_PROVIDERS = (
+    ("aom", "3.13.3", 0, "lib/libaom.a"),
+    ("dav1d", "1.5.3", 0, "lib/libdav1d.a"),
+    ("libvpx", "1.17.0", 0, "lib/libvpx.a"),
+    ("opus", "1.5.2", 1, "lib/libopus.a"),
+    ("libwebp", "1.6.0", 2, "lib/libwebp.a"),
+    ("openh264", "2.6.0", 4, "lib/libopenh264.a"),
+)
 GXX = Path("/usr/bin/g++-14")
 GCC_ROOT = Path("/usr/lib/gcc/x86_64-linux-gnu/14")
 GCC_RUNTIME_ARCHIVES = ("libstdc++.a", "libgcc.a", "libgcc_eh.a")
@@ -380,11 +391,20 @@ def _ffmpeg_runtime(
         require_status=require_status,
     )
     providers = [(name, regular(prefix, name)) for name in FFMPEG_ARCHIVES]
+    codec_ownership = {}
+    for package, version, port_version, name in FFMPEG_CODEC_PROVIDERS:
+        codec_ownership[package] = _owner(
+            installed, package, version, port_version, {TRIPLET + "/" + name},
+            expected=None if expected is None else expected.get("codec_ownership", {}).get(package),
+            require_status=require_status,
+        )
+        providers.append((name, regular(prefix, name)))
     archives = {name: digest(path) for name, path in providers}
     result = {
         "version": FFMPEG_VERSION,
         "port_version": FFMPEG_PORT_VERSION,
         "ownership": owner,
+        "codec_ownership": codec_ownership,
         "archives": archives,
     }
     if expected is not None:

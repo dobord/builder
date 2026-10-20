@@ -1,9 +1,11 @@
 """0.5.2 reuses only the exact successful 0.5.1 package-cache producers."""
 import copy
+from pathlib import Path
+import tempfile
 import unittest
 from unittest import mock
 
-from secure_release import cef_cache as cache
+from secure_release import cef_cache as cache, cef_boringssl_isolation as isolation
 
 
 class PreviousReleaseCacheTests(unittest.TestCase):
@@ -41,6 +43,42 @@ class PreviousReleaseCacheTests(unittest.TestCase):
                                 platform=platform, kind="vcpkg-binaries", key="a" * 64,
                                 revision="b" * 40, private="disposable")
                 api.download.assert_not_called()
+
+
+class FullCodecProviderTests(unittest.TestCase):
+    def test_complete_provider_ownership_and_bytes_survive_relocation(self):
+        with tempfile.TemporaryDirectory() as folder:
+            installed = Path(folder) / "installed"
+            prefix = installed / isolation.TRIPLET
+            info = installed / "vcpkg/info"
+            info.mkdir(parents=True)
+            specs = [("ffmpeg", isolation.FFMPEG_VERSION, isolation.FFMPEG_PORT_VERSION,
+                      isolation.FFMPEG_ARCHIVES)] + [(name, version, revision, (archive,))
+                      for name, version, revision, archive in isolation.FFMPEG_CODEC_PROVIDERS]
+            statuses = []
+            for name, version, revision, archives in specs:
+                statuses.append(f"Package: {name}\nVersion: {version}\nPort-Version: {revision}\n"
+                                f"Architecture: {isolation.TRIPLET}\nStatus: install ok installed\n")
+                listing = info / (name + "_" + version + "_" + isolation.TRIPLET + ".list")
+                listing.write_text("".join(isolation.TRIPLET + "/" + archive + "\n" for archive in archives))
+                for archive in archives:
+                    path = prefix / archive
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(b"!<arch>\n")
+            status = installed / "vcpkg/status"
+            status.write_text("\n".join(statuses))
+            receipt, providers = isolation._ffmpeg_runtime(installed, prefix)
+            self.assertEqual(len(providers), len(isolation.FFMPEG_ARCHIVES) + len(isolation.FFMPEG_CODEC_PROVIDERS))
+            self.assertEqual(set(receipt["codec_ownership"]), {spec[0] for spec in isolation.FFMPEG_CODEC_PROVIDERS})
+            status.unlink()
+            moved = Path(folder) / "relocated-installed"
+            installed.rename(moved)
+            installed, prefix = moved, moved / isolation.TRIPLET
+            self.assertEqual(isolation._ffmpeg_runtime(installed, prefix, expected=receipt, require_status=False)[0], receipt)
+            path = prefix / isolation.FFMPEG_CODEC_PROVIDERS[0][3]
+            path.write_bytes(b"!<arch>\nchanged")
+            with self.assertRaises(ValueError):
+                isolation._ffmpeg_runtime(installed, prefix, expected=receipt, require_status=False)
 
 
 if __name__ == "__main__":

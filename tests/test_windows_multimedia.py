@@ -75,6 +75,20 @@ class WindowsMultimediaTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             safeio._object_payload(coff(), platform="linux")
 
+    def test_crlf_exports_parse_without_rewriting_the_bound_bytes(self):
+        for relative in self.names:
+            if relative.endswith(".cmake"):
+                path = self.prefix / relative
+                path.write_bytes(path.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"))
+        receipt = objects.capture(self.sdk / "installed", triplet=T)
+        path = self.prefix / (objects.EXPORTS[0] + ".cmake")
+        before = path.read_bytes()
+        objects.verify(self.sdk / "installed", receipt, triplet=T)
+        self.assertEqual(path.read_bytes(), before)
+        path.write_bytes(before.replace(b"\r\n", b"\n"))
+        with self.assertRaises(ValueError):
+            objects.verify(self.sdk / "installed", receipt, triplet=T)
+
     @unittest.skipUnless(shutil.which("clang"), "A native COFF-producing Clang is required")
     def test_real_compiler_coff_survives_bound_transport(self):
         source = self.root / "native.c"
