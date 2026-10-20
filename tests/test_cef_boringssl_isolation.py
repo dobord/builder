@@ -401,6 +401,27 @@ class NativeTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 isolation.verify(self.installed, self.source, receipt)
 
+    def test_codec_weak_exception_personality_alias_stays_in_gcc_namespace(self):
+        symbol = "DW.ref.__gxx_personality_v0"
+        source = ('int shared_personality __asm__("' + symbol + '") __attribute__((weak))=7;\n')
+        archive(self.root, "personality_alias", source)
+        for path in (self.prefix / self.names[0], self.runtime_providers[0][1], self.ffmpeg_providers[0][1]):
+            run(["ar", "rcs", path, self.root / "personality_alias.o"], self.root)
+        receipt = isolation.install(self.installed, self.source, self.root / "personality-diagnostics")
+        self.assertIn(symbol, receipt["cxx_symbols"])
+        self.assertNotIn(symbol, receipt["ffmpeg_symbols"])
+        isolation.verify(self.installed, self.source, receipt)
+
+    def test_unknown_cross_domain_codec_symbol_still_fails_before_namespace_rewrite(self):
+        source = 'int unexpected_provider_overlap(void){return 7;}\n'
+        archive(self.root, "unknown_overlap", source)
+        for path in (self.prefix / self.names[0], self.runtime_providers[0][1], self.ffmpeg_providers[0][1]):
+            run(["ar", "rcs", path, self.root / "unknown_overlap.o"], self.root)
+        before = isolation.digest(self.prefix / self.names[0])
+        with self.assertRaisesRegex(ValueError, "multiple provider namespaces"):
+            isolation.install(self.installed, self.source, self.root / "overlap-diagnostics")
+        self.assertEqual(isolation.digest(self.prefix / self.names[0]), before)
+
     def test_duplicate_ssl_providers_fail_then_namespaced_cef_links_and_relocates(self):
         failed = consumer(
             self.root, self.prefix, self.names,
