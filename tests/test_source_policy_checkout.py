@@ -71,7 +71,7 @@ class SourcePolicyCheckoutTests(unittest.TestCase):
         policy = self.checkout(fixed=True)
         original = policy.read_bytes()
         for changed in (original.replace(b'\n', b'\r\n'), original + b' ',
-                        original.replace(b'8.1.2', b'8.1.3')):
+                         original.replace(b'9.0.2', b'9.0.3')):
             with self.subTest(digest=hashlib.sha256(changed).hexdigest()):
                 policy.write_bytes(changed)
                 with mock.patch.object(interfaces, 'POLICY', policy):

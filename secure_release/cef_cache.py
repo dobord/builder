@@ -148,6 +148,22 @@ RELEASE_050_BINARY_CACHES = {
 }
 
 
+# Completed and published 0.5.1 release. Preserve the original encryption and
+# hosted-image contexts; vcpkg, not this transport policy, decides ABI reuse.
+RELEASE_051_BINARY_CACHES = {
+    "linux": {"run": 39195808918, "attempt": 1,
+              "revision": "5cc5b9a74566c28d18cc6091c15e7d934f9b1de6",
+              "artifact_id": 12165108727,
+              "artifact_sha256": "c1a8c5f644ef78c53fdc0f4d9c511da17989079ef91fe7103c4ed832d918d59c",
+              "image": "20261012.334.1"},
+    "windows": {"run": 39195808918, "attempt": 1,
+                "revision": "5cc5b9a74566c28d18cc6091c15e7d934f9b1de6",
+                "artifact_id": 12164110125,
+                "artifact_sha256": "9d02975de16494781d61c2e5f47b773adc8926f54623edf8a0baca33afabc502",
+                "image": "20261012.333.1"},
+}
+
+
 def continuation_record(run: int) -> dict | None:
     return next((record for record in (LINUX_CONTINUATION, LINUX_RUNTIME_CONTINUATION,
                                       LINUX_INSTALL_CONTINUATION, LINUX_INVENTORY_CONTINUATION,
@@ -168,6 +184,12 @@ def producer_revision(platform: str, kind: str, run: int, attempt: int, revision
 def selected_revision(selected: dict | None, platform: str, kind: str, revision: str) -> str:
     if selected is None:
         return revision
+    if selected["run"] == 39195808918:
+        record = RELEASE_051_BINARY_CACHES.get(platform)
+        require(record is not None and kind == "vcpkg-binaries"
+                and all(selected[name] == record[name] for name in ("run", "attempt", "artifact_id", "artifact_sha256")),
+                "Reviewed 0.5.1 release package cache selector changed")
+        return record["revision"]
     if selected["run"] == 39103476664:
         record = RELEASE_050_BINARY_CACHES.get(platform)
         require(record is not None and kind == "vcpkg-binaries"
@@ -203,6 +225,8 @@ def selected_revision(selected: dict | None, platform: str, kind: str, revision:
 
 def binary_cache_image(selected: dict, platform: str, revision: str) -> str | None:
     selected_revision(selected, platform, "vcpkg-binaries", revision)
+    if selected["run"] == 39195808918:
+        return RELEASE_051_BINARY_CACHES[platform]["image"]
     if selected["run"] == 39103476664:
         return RELEASE_050_BINARY_CACHES[platform]["image"]
     if selected["run"] == LINUX_SUCCESSFUL_RELEASE_PACKAGES["run"]:
@@ -341,7 +365,7 @@ def fetch(api, selected: dict, directory: Path, *, platform: str, kind: str, key
     producer = api.get(f"/repos/{BUILDER}/actions/runs/{run}/attempts/{attempt}")
     workflow = build_workflow(producer.get("path", ""))
     require(platform in BUILD_WORKFLOWS[workflow], "Cache platform differs from producer workflow")
-    if run in {38583556953, 39103476664, LINUX_SUCCESSFUL_RELEASE_PACKAGES["run"]}:
+    if run in {38583556953, 39103476664, 39195808918, LINUX_SUCCESSFUL_RELEASE_PACKAGES["run"]}:
         require(workflow == "build-combined-release.yml", "Reviewed completed-package cache workflow changed")
     if continuation_record(run) is not None:
         require(workflow == "build-linux-release.yml", "Reviewed Linux continuation workflow changed")
@@ -350,7 +374,7 @@ def fetch(api, selected: dict, directory: Path, *, platform: str, kind: str, key
     current = api.get(f"/repos/{BUILDER}/actions/runs/{run}")
     require(current["run_attempt"] == attempt and current["status"] == "completed", "Cache producer was rerun")
     if run in {LINUX_RELEASE_CONTINUATION["run"], WINDOWS_RELEASE_BINARY_CACHE["run"],
-               LINUX_SUCCESSFUL_RELEASE_PACKAGES["run"], 39103476664}:
+               LINUX_SUCCESSFUL_RELEASE_PACKAGES["run"], 39103476664, 39195808918}:
         require(producer.get("conclusion") == "success" and current.get("conclusion") == "success"
                 and current.get("head_sha") == revision, "Qualified release cache producer changed or failed")
     name = f"{kind}-{platform}-{run}-{attempt}"

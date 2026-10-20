@@ -448,6 +448,10 @@ def build():
         windows_isolation = windows_runtime_isolation.install(
             installed, Path(env("RUNNER_TEMP")) / "w/download/chromium/src", root / "windows-runtime-isolation")
     linux_review = None
+    windows_objects = None
+    if platform == "windows" and "freerdp[full]" in packages:
+        from . import windows_multimedia
+        windows_objects = windows_multimedia.capture(root / "workspace", installed)
     linux_publication = workflow == "build-linux-release.yml" and cfg is not None
     if linux_publication:
         from . import linux_sdk
@@ -462,11 +466,15 @@ def build():
     source_review = None
     if linux_review is not None:
         source_review = linux_sdk.package(root, sdk, package, linux_review, platform_probe)
+    elif windows_objects is not None:
+        source_review = windows_multimedia.package(sdk, package, windows_objects)
     else:
         safeio.sdk_zip(sdk, package)
     if windows_isolation is not None:
         windows_runtime_isolation.validate_archive(package, windows_isolation)
     safeio.extract_zip(package, root / "consumer-sdk")
+    if windows_objects is not None:
+        windows_multimedia.relocated(root / "consumer-sdk", windows_objects, source_review)
     source = root / "workspace" / payload["plan"]["smoke_path"]
     smoke_fixture = root / "cef-recipe/vcpkg/ports/cef-static/smoke.c"
     if workflow == "build-windows-release.yml" and cfg is not None:
@@ -506,7 +514,8 @@ def build():
     cef_proof = cef_build.verify_consumer(
         root, cfg, platform, execute, platform_sha256, platform_probe,
         **({"reviewed_objects": linux_review["objects"]["objects"],
-            "reviewed_host_tools": linux_review["host_tools"]["records"]} if linux_review is not None else {})
+            "reviewed_host_tools": linux_review["host_tools"]["records"]} if linux_review is not None else
+           {"reviewed_objects": windows_objects["objects"]} if windows_objects is not None else {})
     ) if cfg is not None else None
     cpp_proof = linux_sdk.verify_cpp(root, root / "consumer-sdk", linux_review, execute) if linux_review is not None else None
     platform_preflight = None
@@ -528,6 +537,8 @@ def build():
         manifest["cef"] = {"build_contract_sha256": cef_contract.build_key(cfg, platform, platform_sha256),
                             "profile": cfg["profile"], "consumer": cef_proof}
         if workflow == "build-windows-release.yml":
+            if windows_objects is not None:
+                manifest["cef"]["windows_multimedia_sources"] = source_review
             manifest["cef"]["windows_engine"] = windows_sdk.binding(cfg)
             manifest["cef"]["windows_runtime_isolation"] = windows_isolation
             manifest["cef"]["windows_consumer_linker"] = crypto.parse((root / "windows-consumer-linker.json").read_bytes())

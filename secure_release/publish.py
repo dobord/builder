@@ -122,6 +122,10 @@ def verify_result():
         if "scripts/buildsystems/vcpkg.cmake" not in names or not any(n.startswith(f"installed/{triplet}/lib/") and n.endswith((".a", ".lib")) for n in names):
             raise ValueError("SDK layout invalid")
         reviewed_sources = set()
+        if platform == "windows" and "freerdp[full]" in payload["plan"]["platforms"]["windows"]["packages"]:
+            from . import windows_multimedia
+            reviewed_sources = windows_multimedia.validate_archive_sources(
+                sdk, manifest.get("cef", {}).get("windows_multimedia_sources"))
         if (workflow_name == "build-linux-release.yml" or joint and platform == "linux") and payload["plan"].get("cef") is not None:
             from . import linux_sdk
             reviewed_sources = linux_sdk.validate_archive_sources(sdk, manifest.get("cef", {}).get("sdk_sources"))

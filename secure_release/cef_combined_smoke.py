@@ -18,6 +18,9 @@ MAIN_BLOB = "3ae25fe8e6324236313c57f942f5e541e5cf8db5"
 # only the exact CMake/runtime version checks changed from 0.3.1 to 0.5.0.
 # Accept complete pairs, never a CMake file from one release with another main.
 CONSUMER_BLOBS = frozenset({
+    # 0.5.2 also links and probes the complete FFmpeg/FreeRDP provider graph.
+    ("e88561e9874662e2abf9017b8e4b3eedb242c078",
+     "a0b571b7c3da572ee20f1ab4aa6441855b318d29"),
     (PROJECT_BLOB, MAIN_BLOB),
     ("fba548add26ad29463c01309b98312013c58b3b9",
      "cb380928ef3ad9029fd382f362ec09ab9fbba63c"),

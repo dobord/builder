@@ -225,7 +225,7 @@ class NativeTests(unittest.TestCase):
             if hashlib.sha512(Path(path).read_bytes()).hexdigest()!=POLICY['archive_sha512'][pkg]:raise AssertionError('Wrong source archive')
             dst=cls.root/pkg;dst.mkdir()
             with tarfile.open(path,'r:gz') as tar:tar.extractall(dst,filter='data')
-        ff=cls.root/'ffmpeg/FFmpeg-n8.1.2';xt=cls.root/'xtrans/libxtrans-xtrans-1.6.0'
+        ff=cls.root/'ffmpeg/FFmpeg-n9.0.2';xt=cls.root/'xtrans/libxtrans-xtrans-1.6.0'
         for path,key in ((ff/'doc/examples/Makefile','ffmpeg_makefile'),(xt/'Makefile.am','xtrans_makefile')):
             if checked.blob(path.read_bytes())!=POLICY['source_inputs'][key]:raise AssertionError('Install recipe drift')
         for n,digest in POLICY['source_inputs']['xtrans_unpatched'].items():

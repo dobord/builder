@@ -221,9 +221,11 @@ def _source_review(records: dict | None, *, include_headers: bool = False,
             scope = (len(path) == 7 and path[0] == "installed"
                      and path[2:4] == ("share", "doc") and path[5] == "examples")
         if shared_interfaces:
-            scope = (path[:2] == ("installed", "x64-linux-static-release") and
-                     (len(path) == 6 and path[2:5] == ("share", "ffmpeg", "examples") or
-                      len(path) == 8 and path[2:7] == ("share", "xtrans", "include", "X11", "Xtrans")))
+            scope = (path[0] == "installed" and
+                     (path[1] in {"x64-linux-static-release", "x64-windows-static-release"} and
+                      len(path) == 6 and path[2:5] == ("share", "ffmpeg", "examples") or
+                      path[1] == "x64-linux-static-release" and len(path) == 8 and
+                      path[2:7] == ("share", "xtrans", "include", "X11", "Xtrans")))
         if (name != "/".join(path) or not scope
                 or PurePosixPath(name).suffix.casefold() not in SOURCE_SUFFIXES
                 or forbidden_sdk_tree(name) or not isinstance(record, dict)
@@ -341,10 +343,15 @@ MAX_REVIEWED_OBJECT_TOTAL = 256 * 1024**2
 def object_member(name: str) -> bool:
     """Only installed Release FreeRDP channel objects, never arbitrary .o files."""
     parts(name)
-    return re.fullmatch(
+    linux = re.fullmatch(
         r"installed/x64-linux-static-release/lib/freerdp3/objects-Release/"
         r"[A-Za-z0-9_+.-]+/(?:[A-Za-z0-9_+.-]+/)*[A-Za-z0-9_+.-]+\.(?:c|cc|cpp|cxx)\.o",
         name) is not None
+    windows = re.fullmatch(
+        r"installed/x64-windows-static-release/lib/freerdp3/objects-Release/"
+        r"[A-Za-z0-9_+.-]+/(?:[A-Za-z0-9_+.-]+/)*[A-Za-z0-9_+.-]+\.(?:c|cc|cpp|cxx)\.obj",
+        name) is not None
+    return linux or windows
 
 
 def _object_review(records: dict | None) -> dict:
@@ -369,7 +376,7 @@ def _object_review(records: dict | None) -> dict:
     return {name: dict(record) for name, record in records.items()}
 
 
-def _object_bytes(path: Path, record: dict | None = None) -> bytes:
+def _object_bytes(path: Path, record: dict | None = None, *, platform: str = "linux") -> bytes:
     for parent in (path, *path.parents):
         st = parent.lstat()
         if stat.S_ISLNK(st.st_mode) or getattr(st, "st_file_attributes", 0) & 0x400:
@@ -377,18 +384,29 @@ def _object_bytes(path: Path, record: dict | None = None) -> bytes:
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
     with os.fdopen(os.open(path, flags), "rb") as stream:
         st = os.fstat(stream.fileno())
-        if not stat.S_ISREG(st.st_mode) or stat.S_IMODE(st.st_mode) != 0o644:
+        modes = {0o644, 0o666} if platform == "windows" else {0o644}
+        if not stat.S_ISREG(st.st_mode) or stat.S_IMODE(st.st_mode) not in modes:
             raise ValueError("invalid installed object kind or mode")
         if not 64 <= st.st_size <= MAX_REVIEWED_OBJECT_BYTES:
             raise ValueError("invalid installed object size")
         data = stream.read(MAX_REVIEWED_OBJECT_BYTES + 1)
     if len(data) != st.st_size:
         raise ValueError("installed object size changed")
-    return _object_payload(data, record)
+    return _object_payload(data, record, platform=platform)
 
 
-def _object_payload(data: bytes, record: dict | None = None) -> bytes:
+def _object_payload(data: bytes, record: dict | None = None, *, platform: str = "linux") -> bytes:
     """Validate the same native relocatable bytes before ZIP and inside audit."""
+    if platform not in {"linux", "windows"}:
+        raise ValueError("invalid installed object platform")
+    if platform == "windows":
+        from .static_audit import coff_kind
+        if not 64 <= len(data) <= MAX_REVIEWED_OBJECT_BYTES or coff_kind(data) != "coff-object":
+            raise ValueError("installed object is not native x64 COFF code")
+        if record is not None and (len(data) != record["size"] or
+                                  hashlib.sha256(data).hexdigest() != record["sha256"]):
+            raise ValueError("reviewed installed object bytes changed")
+        return data
     if (not 64 <= len(data) <= MAX_REVIEWED_OBJECT_BYTES or data[:7] != b"\x7fELF\x02\x01\x01"
             or int.from_bytes(data[16:18], "little") != 1
             or int.from_bytes(data[18:20], "little") != 62
@@ -480,7 +498,8 @@ def sdk_zip(root: Path, archive: Path, *, reviewed_sources: dict | None = None,
                     continue
                 approved = None
                 if name in objects:
-                    approved = _object_bytes(item, objects[name])
+                    approved = _object_bytes(item, objects[name],
+                                             platform="windows" if name.startswith("installed/x64-windows-") else "linux")
                     object_seen.add(name)
                 if name in aliases:
                     record = aliases[name]

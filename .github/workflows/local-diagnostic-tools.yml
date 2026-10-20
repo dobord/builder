@@ -53,8 +53,8 @@ jobs:
           cp requirements.lock "$kit/requirements.lock"
           git rev-parse HEAD > "$kit/source-commit.txt"
           git rev-parse 'HEAD^{tree}' > "$kit/source-tree.txt"
-          curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o "$kit/upstream/ffmpeg-source.tar.gz" https://github.com/FFmpeg/FFmpeg/archive/n8.1.2.tar.gz
-          echo "c72f4062aecc16d8b2b1e8678d5efe3af4cfaa0cc7c0997052248f9e499e60c2463acf07877cf3b78b246ce3e8078cb043e8d97e90a6b50d06af32ff7369a788  $kit/upstream/ffmpeg-source.tar.gz" | sha512sum -c -
+          curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o "$kit/upstream/ffmpeg-source.tar.gz" https://github.com/FFmpeg/FFmpeg/archive/n9.0.2.tar.gz
+          echo "21bf3fbcdfd2f41ea6edeab40433fecfe362b09ecaa177a652471b54f9357011b4f74dab18245ab1c26f1a473b94205490baecb42289afd2effd603cd0b22b59  $kit/upstream/ffmpeg-source.tar.gz" | sha512sum -c -
           curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' -o "$kit/upstream/xtrans-source.tar.gz" https://gitlab.freedesktop.org/xorg/lib/libxtrans/-/archive/xtrans-1.6.0/libxtrans-xtrans-1.6.0.tar.gz
           echo "c7037cb6d2fb641486a43c9203949edec2038735ba758f8556add63598dbb3205166a2ec272700639884b1952642c171806e3dab566722cadd4c71ca98c0a1bf  $kit/upstream/xtrans-source.tar.gz" | sha512sum -c -
           for port in ffmpeg xtrans; do
