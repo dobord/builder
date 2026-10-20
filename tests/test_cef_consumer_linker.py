@@ -98,7 +98,12 @@ class NativeTests(unittest.TestCase):
         gxx = shutil.which("g++-14")
         if not found or not gxx:
             self.skipTest("Local GCC14/LLD pair is unavailable")
-        linker = Path(found)
+        # Debian's /usr/bin/ld.lld is a symlink into the LLVM bin directory.
+        # Production deliberately rejects a linker escaping its pinned folder;
+        # exercise that same invariant using the actual local tool directory.
+        linker = Path(found).resolve().parent / "ld.lld"
+        if not linker.is_file():
+            self.skipTest("Local LLVM directory has no GNU-compatible ld.lld entry")
         version = subprocess.check_output(
             [str(linker), "--version"], text=True, timeout=30
         ).strip()
