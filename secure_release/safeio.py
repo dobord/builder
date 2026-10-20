@@ -221,7 +221,7 @@ def _source_review(records: dict | None, *, include_headers: bool = False,
             scope = (len(path) == 7 and path[0] == "installed"
                      and path[2:4] == ("share", "doc") and path[5] == "examples")
         if shared_interfaces:
-            scope = (path[0] == "installed" and
+            scope = (len(path) >= 2 and path[0] == "installed" and
                      (path[1] in {"x64-linux-static-release", "x64-windows-static-release"} and
                       len(path) == 6 and path[2:5] == ("share", "ffmpeg", "examples") or
                       path[1] == "x64-linux-static-release" and len(path) == 8 and

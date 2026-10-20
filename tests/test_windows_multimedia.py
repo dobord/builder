@@ -68,6 +68,8 @@ class WindowsMultimediaTests(unittest.TestCase):
 
     def test_no_default_object_exemption_or_cross_platform_payload(self):
         with self.assertRaises(ValueError):
+            safeio._source_review({"installed": {"size": 64, "sha256": "a" * 64}}, shared_interfaces=True)
+        with self.assertRaises(ValueError):
             safeio.sdk_zip(self.sdk, self.root / "unreviewed.zip")
         for data in (coff(b".idata"), coff(machine=0x14c), b"BC\xc0\xde" + b"\0" * 64, b"MZ" + b"\0" * 64):
             with self.subTest(header=data[:4]), self.assertRaises(ValueError):
