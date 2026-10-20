@@ -1,17 +1,20 @@
-# Online project-CI runtime only: CPython 3.12, Linux/Windows/macOS.
+# Online project-CI runtime only: CPython 3.12, Linux x86-64/ARM64, Windows x64 and macOS.
 # The offline release wheelhouse and requirements.lock remain unchanged.
 tink==1.16.1 \
  --hash=sha256:99766688b84b362516488fbf371b4f801c5b2833a86cc8b70f58d607a636d951 \
  --hash=sha256:af3519dfa01704e9f1ae1020db6076dcff89b5f799deba08a1adf901d977fc4e \
- --hash=sha256:9305eaf686fc67552925ef4d1e1f5dc2254fd8d24d55f3090987d0d6803d2636
+ --hash=sha256:9305eaf686fc67552925ef4d1e1f5dc2254fd8d24d55f3090987d0d6803d2636 \
+ --hash=sha256:e453324348208e5cb81e35d506717ed83c8c4cf2473f4b31f6269fd8bca81fb2
 absl-py==2.3.1 --hash=sha256:eeecf07f0c2a93ace0772c92e596ace6d3d3996c042b2128459aaae2a76de11d
 bazel-runfiles==1.6.3 --hash=sha256:76a6c2d1e9cc2b8fc9ae657901aff0dbf4da46ee1eeab67cce8fd907e3196857
 protobuf==6.33.5 \
  --hash=sha256:3093804752167bcab3998bec9f1048baae6e29505adaf1afd14a37bddede533c \
  --hash=sha256:cbf16ba3350fb7b889fca858fb215967792dc125b35c7976ca4818bee3521cf0 \
- --hash=sha256:a5cb85982d95d906df1e2210e58f8e4f1e3cdc088e52c921a041f9c9a0386de5
+ --hash=sha256:a5cb85982d95d906df1e2210e58f8e4f1e3cdc088e52c921a041f9c9a0386de5 \
+ --hash=sha256:9b71e0281f36f179d00cbcb119cb19dec4d14a81393e5ea220f64b286173e190
 PyYAML==6.0.3 \
  --hash=sha256:7f047e29dcae44602496db43be01ad42fc6f1cc0d8cd6c83d342306c32270196 \
  --hash=sha256:fc09d0aa354569bc501d4e787133afc08552722d3ab34836a80547331bb5d4a0 \
  --hash=sha256:ba1cc08a7ccde2d2ec775841541641e4548226580ab850948cbfda66a1befcdc \
- --hash=sha256:5fcd34e47f6e0b794d17de1b4ff496c00986e1c83f7ab2fb8fcfe9616ff7477b
+ --hash=sha256:5fcd34e47f6e0b794d17de1b4ff496c00986e1c83f7ab2fb8fcfe9616ff7477b \
+ --hash=sha256:9149cad251584d5fb4981be1ecde53a1ca46c891a79788c0df828d2f166bda28

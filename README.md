@@ -275,7 +275,10 @@ without overwriting SDK secrets or backup files. Shared-key compromise/rotation
 then affects both contours; authenticated protocol contexts remain distinct.
 It does not alter the
 offline wheelhouse. `project-ci-requirements.lock` pins the official online
-CPython 3.12 Linux, Windows and macOS runtime. Source identity and legacy schema-1
+CPython 3.12 Linux x86-64/ARM64, Windows x64 and macOS runtime. Linux ARM64
+uses official binary wheels with independently verified SHA-256 pins; the
+offline SDK wheelhouse and its supported platforms remain unchanged.
+Source identity and legacy schema-1
 approval patterns are private operator-provisioned policy, not discovered from
 source code.
 `project_ci_bootstrap.py` generates protected local backups and provisions keys
