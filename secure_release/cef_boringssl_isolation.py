@@ -39,7 +39,7 @@ FFMPEG_NAMESPACE = "CEF_CHROMIUM_FFMPEG_"
 ATOMIC_NAMESPACE = "CEF_CHROMIUM_ATOMIC_"
 OPENSSL_ARCHIVES = ("lib/libssl.a", "lib/libcrypto.a")
 FFMPEG_VERSION = "9.0.2"
-FFMPEG_PORT_VERSION = 2
+FFMPEG_PORT_VERSION = 3
 FFMPEG_ARCHIVES = (
     "lib/libavcodec.a",
     "lib/libavdevice.a",
