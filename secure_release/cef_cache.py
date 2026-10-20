@@ -182,6 +182,15 @@ RELEASE_052_WINDOWS_PACKAGE_CONTINUATION = {
     "artifact_sha256": "5a8545be86afac9fb51dfa19bfdf21894f201153ebb95bb3084439327c8b3925",
     "image": "20261012.333.1",
 }
+# Candidate 3 completed Linux compilation and reached portable SDK packaging.
+# Keep its exact package cache only; the failed SDK/checkpoint is not admitted.
+RELEASE_052_LINUX_NATIVE_PACKAGE_CONTINUATION = {
+    "run": 39427010834, "attempt": 1,
+    "revision": "3e664e396b1b2098045709ae8237aeeff01e87fb",
+    "artifact_id": 12276985638,
+    "artifact_sha256": "f879306eae36b2dbe03d9cd2725749f67b65a00ed7425eca3055003971b54d30",
+    "image": "20261012.334.1",
+}
 
 
 def continuation_record(run: int) -> dict | None:
@@ -204,6 +213,12 @@ def producer_revision(platform: str, kind: str, run: int, attempt: int, revision
 def selected_revision(selected: dict | None, platform: str, kind: str, revision: str) -> str:
     if selected is None:
         return revision
+    if selected["run"] == RELEASE_052_LINUX_NATIVE_PACKAGE_CONTINUATION["run"]:
+        record = RELEASE_052_LINUX_NATIVE_PACKAGE_CONTINUATION
+        require(platform == "linux" and kind == "vcpkg-binaries"
+                and all(selected[name] == record[name] for name in ("run", "attempt", "artifact_id", "artifact_sha256")),
+                "Reviewed 0.5.2 Linux native package continuation selector changed")
+        return record["revision"]
     if selected["run"] == RELEASE_052_LINUX_PACKAGE_CONTINUATION["run"]:
         record = RELEASE_052_LINUX_PACKAGE_CONTINUATION
         require(platform == "linux" and kind == "vcpkg-binaries"
@@ -257,6 +272,8 @@ def selected_revision(selected: dict | None, platform: str, kind: str, revision:
 
 def binary_cache_image(selected: dict, platform: str, revision: str) -> str | None:
     selected_revision(selected, platform, "vcpkg-binaries", revision)
+    if selected["run"] == RELEASE_052_LINUX_NATIVE_PACKAGE_CONTINUATION["run"]:
+        return RELEASE_052_LINUX_NATIVE_PACKAGE_CONTINUATION["image"]
     if selected["run"] == RELEASE_052_LINUX_PACKAGE_CONTINUATION["run"]:
         return RELEASE_052_LINUX_PACKAGE_CONTINUATION["image"]
     if selected["run"] == RELEASE_052_WINDOWS_PACKAGE_CONTINUATION["run"]:
@@ -402,7 +419,8 @@ def fetch(api, selected: dict, directory: Path, *, platform: str, kind: str, key
     workflow = build_workflow(producer.get("path", ""))
     require(platform in BUILD_WORKFLOWS[workflow], "Cache platform differs from producer workflow")
     if run in {38583556953, 39103476664, 39195808918, LINUX_SUCCESSFUL_RELEASE_PACKAGES["run"],
-               RELEASE_052_LINUX_PACKAGE_CONTINUATION["run"], RELEASE_052_WINDOWS_PACKAGE_CONTINUATION["run"]}:
+               RELEASE_052_LINUX_PACKAGE_CONTINUATION["run"], RELEASE_052_WINDOWS_PACKAGE_CONTINUATION["run"],
+               RELEASE_052_LINUX_NATIVE_PACKAGE_CONTINUATION["run"]}:
         require(workflow == "build-combined-release.yml", "Reviewed completed-package cache workflow changed")
     if continuation_record(run) is not None:
         require(workflow == "build-linux-release.yml", "Reviewed Linux continuation workflow changed")
@@ -410,7 +428,8 @@ def fetch(api, selected: dict, directory: Path, *, platform: str, kind: str, key
     require(producer["status"] == "completed", "Cache producer is still running")
     current = api.get(f"/repos/{BUILDER}/actions/runs/{run}")
     require(current["run_attempt"] == attempt and current["status"] == "completed", "Cache producer was rerun")
-    if run in {RELEASE_052_LINUX_PACKAGE_CONTINUATION["run"], RELEASE_052_WINDOWS_PACKAGE_CONTINUATION["run"]}:
+    if run in {RELEASE_052_LINUX_PACKAGE_CONTINUATION["run"], RELEASE_052_WINDOWS_PACKAGE_CONTINUATION["run"],
+               RELEASE_052_LINUX_NATIVE_PACKAGE_CONTINUATION["run"]}:
         require(producer.get("conclusion") == "failure" and current.get("conclusion") == "failure"
                 and current.get("head_sha") == revision, "Reviewed package-only continuation producer changed")
     if run in {LINUX_RELEASE_CONTINUATION["run"], WINDOWS_RELEASE_BINARY_CACHE["run"],
