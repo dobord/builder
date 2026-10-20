@@ -113,6 +113,15 @@ class LatestLinuxCandidatePackageContinuationTests(CandidatePackageContinuationT
     record = cache.RELEASE_052_LINUX_NATIVE_PACKAGE_CONTINUATION
 
 
+class RC4LinuxPackageContinuationTests(CandidatePackageContinuationTests):
+    record = cache.RELEASE_052_RC4_PACKAGE_CACHES["linux"]
+
+
+class RC4WindowsPackageContinuationTests(CandidatePackageContinuationTests):
+    platform = "windows"
+    record = cache.RELEASE_052_RC4_PACKAGE_CACHES["windows"]
+
+
 class FullCodecProviderTests(unittest.TestCase):
     def test_complete_provider_ownership_and_bytes_survive_relocation(self):
         with tempfile.TemporaryDirectory() as folder:
