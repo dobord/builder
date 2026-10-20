@@ -1,9 +1,13 @@
 # Static multimedia 0.5.2 validation
 
-The 0.5.2 source plans request full GPL FFmpeg 9.0.2#1 and FreeRDP
+The 0.5.2 source plans request full GPL FFmpeg 9.0.2#2 and FreeRDP
 3.32.2#1 on both platforms, with the qualified CEF recipes/checkpoints and
 unchanged triplets. The previous successful 0.5.1 package caches remain
 authenticated under their original producer/image context.
+Exact package-only continuation artifacts additionally preserve completed
+dependencies from candidates; they do not admit failed SDKs or engine proofs.
+Linux image `20261018.339.1` is admitted only with the unchanged critical host
+fingerprint and exact checkpoint identity beyond the reviewed image field.
 
 ## Completed local Linux checks
 

@@ -26,8 +26,14 @@ class LinuxCheckpointHostTests(unittest.TestCase):
                     host.prepare(selected, expected, original, {})
             with self.assertRaises(ValueError):
                 host.prepare(dict(selected, artifact_sha256='0'*64), expected, original, {})
-            with patch.dict('os.environ', ImageVersion=host.IMAGES[2]):
-                host.prepare(selected, dict(expected, image=host.IMAGES[2]), original, {})
+            for image in host.IMAGES[2:]:
+                with self.subTest(image=image), patch.dict('os.environ', ImageVersion=image):
+                    result = host.prepare(selected, dict(expected, image=image), original, {})
+                    self.assertEqual(result['runner_image_actual'], image)
+                    # New image admission must never waive content identity.
+                    with patch.object(host, 'fingerprint', return_value=dict(host.HOST, ninja='99.0.0')):
+                        with self.assertRaises(ValueError):
+                            host.prepare(selected, dict(expected, image=image), original, {})
             with patch.dict('os.environ', ImageVersion='20990101.1.1'):
                 with self.assertRaises(ValueError):
                     host.prepare(selected, dict(expected, image='20990101.1.1'), original, {})
