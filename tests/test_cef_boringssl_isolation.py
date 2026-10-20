@@ -344,6 +344,28 @@ class NativeTests(unittest.TestCase):
         ffmpeg_patcher.start()
         self.addCleanup(ffmpeg_patcher.stop)
 
+    def test_full_graph_codec_collision_is_private_to_cef_and_provider_is_unchanged(self):
+        archive(self.root, "cef_codec", "int aom_codec_probe(void){return 71;}\n"
+                "int cef_codec_value(void){return aom_codec_probe();}\n")
+        run(["ar", "rcs", self.prefix / self.names[0], self.root / "cef_codec.o"], self.root)
+        provider = archive(self.root, "aom_codec", "int aom_codec_probe(void){return 173;}\n"
+                           "int aom_consumer_value(void){return aom_codec_probe();}\n")
+        self.ffmpeg_providers.append(("lib/libaom.a", provider))
+        original = isolation.digest(provider)
+        main = self.root / "codec_main.c"
+        main.write_text("int cef_codec_value(void); int aom_consumer_value(void);\n"
+                        "int main(void){return cef_codec_value()!=71 || aom_consumer_value()!=173;}\n")
+        exe = self.root / "codec-probe"
+        command = ["cc", main, "-Wl,--start-group", self.prefix / self.names[0], provider,
+                   "-Wl,--end-group", "-o", exe]
+        self.assertNotEqual(run(command, self.root, ok=False).returncode, 0)
+        receipt = isolation.install(self.installed, self.source, self.root / "codec-diagnostics")
+        isolation.verify(self.installed, self.source, receipt)
+        self.assertIn("aom_codec_probe", receipt["ffmpeg_symbols"])
+        self.assertEqual(isolation.digest(provider), original)
+        run(command, self.root)
+        run([exe], self.root)
+
     def test_duplicate_ssl_providers_fail_then_namespaced_cef_links_and_relocates(self):
         failed = consumer(
             self.root, self.prefix, self.names,
