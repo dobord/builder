@@ -15,7 +15,9 @@ authenticated under their original producer/image context.
   passed codec/filter/runtime checks. Its only dynamic dependencies were
   glibc/libm and the ELF loader, not shared third-party or C++ runtimes.
 - All 61 installed FreeRDP channel objects matched their external receipt
-  after export; the 16 media-provider archives matched exact package owners.
+  after export; the initial 16 media-provider archives matched exact package owners.
+  A follow-up binds iLBC and all four additional WebP archives as well (21 total),
+  including the mux/SharpYUV items explicitly present in FFmpeg's static closure.
 
 ## Collision resource budget
 
@@ -32,6 +34,10 @@ old 8192-symbol budget. Per-archive counts (overlaps are possible):
 
 Sorted candidate-list SHA-256:
 `e77fb26e4bf14596c36b951cd4f63657ad41fb36061967a89380d34348e3222e`.
+Including iLBC and the four WebP companions yields 10,334 unique candidates
+(iLBC: 100, mux: 57, SharpYUV: 16, demux: 12, decoder: 278; decoder overlaps
+the main WebP archive). The complete sorted-list SHA-256 is
+`4de2228dcf859d26d197eaf3c88da3865c3fe41abb130b7bbdd911f1ae60d605`.
 This is diagnostic evidence against a **previous** SDK, not a release receipt
 or a symbol allowlist. The bounded maximum is now 16,384. Native tests exercise
 more than 8192 definitions, confirm fail-before-mutation under the old bound,

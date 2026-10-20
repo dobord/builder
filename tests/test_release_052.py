@@ -53,7 +53,8 @@ class FullCodecProviderTests(unittest.TestCase):
             info = installed / "vcpkg/info"
             info.mkdir(parents=True)
             specs = [("ffmpeg", isolation.FFMPEG_VERSION, isolation.FFMPEG_PORT_VERSION,
-                      isolation.FFMPEG_ARCHIVES)] + [(name, version, revision, (archive,))
+                      isolation.FFMPEG_ARCHIVES)] + [(name, version, revision,
+                      (archive, *isolation.FFMPEG_CODEC_COMPANIONS.get(name, ())))
                       for name, version, revision, archive in isolation.FFMPEG_CODEC_PROVIDERS]
             statuses = []
             for name, version, revision, archives in specs:
@@ -68,13 +69,20 @@ class FullCodecProviderTests(unittest.TestCase):
             status = installed / "vcpkg/status"
             status.write_text("\n".join(statuses))
             receipt, providers = isolation._ffmpeg_runtime(installed, prefix)
-            self.assertEqual(len(providers), len(isolation.FFMPEG_ARCHIVES) + len(isolation.FFMPEG_CODEC_PROVIDERS))
+            self.assertEqual(len(providers), len(isolation.FFMPEG_ARCHIVES) + len(isolation.FFMPEG_CODEC_PROVIDERS)
+                             + sum(map(len, isolation.FFMPEG_CODEC_COMPANIONS.values())))
             self.assertEqual(set(receipt["codec_ownership"]), {spec[0] for spec in isolation.FFMPEG_CODEC_PROVIDERS})
             status.unlink()
             moved = Path(folder) / "relocated-installed"
             installed.rename(moved)
             installed, prefix = moved, moved / isolation.TRIPLET
             self.assertEqual(isolation._ffmpeg_runtime(installed, prefix, expected=receipt, require_status=False)[0], receipt)
+            companion = prefix / isolation.FFMPEG_CODEC_COMPANIONS["libwebp"][1]
+            original = companion.read_bytes()
+            companion.write_bytes(original + b"tamper")
+            with self.assertRaises(ValueError):
+                isolation._ffmpeg_runtime(installed, prefix, expected=receipt, require_status=False)
+            companion.write_bytes(original)
             path = prefix / isolation.FFMPEG_CODEC_PROVIDERS[0][3]
             path.write_bytes(b"!<arch>\nchanged")
             with self.assertRaises(ValueError):

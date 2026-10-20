@@ -62,7 +62,13 @@ FFMPEG_CODEC_PROVIDERS = (
     ("openjpeg", "2.5.4", 0, "lib/libopenjp2.a"),
     ("snappy", "1.2.2", 2, "lib/libsnappy.a"),
     ("libxml2", "2.15.3", 0, "lib/libxml2.a"),
+    ("libilbc", "3.0.4", 0, "lib/libilbc.a"),
 )
+# WebP's static pkg-config closure also links mux and SharpYUV. The decoder
+# and demux exports share the same package and may be consumed independently.
+FFMPEG_CODEC_COMPANIONS = {
+    "libwebp": ("lib/libwebpmux.a", "lib/libsharpyuv.a", "lib/libwebpdemux.a", "lib/libwebpdecoder.a"),
+}
 GXX = Path("/usr/bin/g++-14")
 GCC_ROOT = Path("/usr/lib/gcc/x86_64-linux-gnu/14")
 GCC_RUNTIME_ARCHIVES = ("libstdc++.a", "libgcc.a", "libgcc_eh.a")
@@ -400,12 +406,13 @@ def _ffmpeg_runtime(
     providers = [(name, regular(prefix, name)) for name in FFMPEG_ARCHIVES]
     codec_ownership = {}
     for package, version, port_version, name in FFMPEG_CODEC_PROVIDERS:
+        names = (name, *FFMPEG_CODEC_COMPANIONS.get(package, ()))
         codec_ownership[package] = _owner(
-            installed, package, version, port_version, {TRIPLET + "/" + name},
+            installed, package, version, port_version, {TRIPLET + "/" + item for item in names},
             expected=None if expected is None else expected.get("codec_ownership", {}).get(package),
             require_status=require_status,
         )
-        providers.append((name, regular(prefix, name)))
+        providers.extend((item, regular(prefix, item)) for item in names)
     archives = {name: digest(path) for name, path in providers}
     result = {
         "version": FFMPEG_VERSION,
