@@ -173,6 +173,15 @@ RELEASE_052_LINUX_PACKAGE_CONTINUATION = {
     "artifact_sha256": "44c424c1ec43cc6da5aad8d6343e59aca88000724d35471fda147fd98e4c3de7",
     "image": "20261012.334.1",
 }
+# Windows completed dependencies before FFmpeg configure failed in candidate 2.
+# Like Linux above, this admits only the exact encrypted package artifact.
+RELEASE_052_WINDOWS_PACKAGE_CONTINUATION = {
+    "run": 39411801386, "attempt": 1,
+    "revision": "c9827b15d293cd47e3f633ee2c9931713b3e8a5e",
+    "artifact_id": 12263527603,
+    "artifact_sha256": "5a8545be86afac9fb51dfa19bfdf21894f201153ebb95bb3084439327c8b3925",
+    "image": "20261012.333.1",
+}
 
 
 def continuation_record(run: int) -> dict | None:
@@ -200,6 +209,12 @@ def selected_revision(selected: dict | None, platform: str, kind: str, revision:
         require(platform == "linux" and kind == "vcpkg-binaries"
                 and all(selected[name] == record[name] for name in ("run", "attempt", "artifact_id", "artifact_sha256")),
                 "Reviewed 0.5.2 Linux package continuation selector changed")
+        return record["revision"]
+    if selected["run"] == RELEASE_052_WINDOWS_PACKAGE_CONTINUATION["run"]:
+        record = RELEASE_052_WINDOWS_PACKAGE_CONTINUATION
+        require(platform == "windows" and kind == "vcpkg-binaries"
+                and all(selected[name] == record[name] for name in ("run", "attempt", "artifact_id", "artifact_sha256")),
+                "Reviewed 0.5.2 Windows package continuation selector changed")
         return record["revision"]
     if selected["run"] == 39195808918:
         record = RELEASE_051_BINARY_CACHES.get(platform)
@@ -244,6 +259,8 @@ def binary_cache_image(selected: dict, platform: str, revision: str) -> str | No
     selected_revision(selected, platform, "vcpkg-binaries", revision)
     if selected["run"] == RELEASE_052_LINUX_PACKAGE_CONTINUATION["run"]:
         return RELEASE_052_LINUX_PACKAGE_CONTINUATION["image"]
+    if selected["run"] == RELEASE_052_WINDOWS_PACKAGE_CONTINUATION["run"]:
+        return RELEASE_052_WINDOWS_PACKAGE_CONTINUATION["image"]
     if selected["run"] == 39195808918:
         return RELEASE_051_BINARY_CACHES[platform]["image"]
     if selected["run"] == 39103476664:
@@ -385,7 +402,7 @@ def fetch(api, selected: dict, directory: Path, *, platform: str, kind: str, key
     workflow = build_workflow(producer.get("path", ""))
     require(platform in BUILD_WORKFLOWS[workflow], "Cache platform differs from producer workflow")
     if run in {38583556953, 39103476664, 39195808918, LINUX_SUCCESSFUL_RELEASE_PACKAGES["run"],
-               RELEASE_052_LINUX_PACKAGE_CONTINUATION["run"]}:
+               RELEASE_052_LINUX_PACKAGE_CONTINUATION["run"], RELEASE_052_WINDOWS_PACKAGE_CONTINUATION["run"]}:
         require(workflow == "build-combined-release.yml", "Reviewed completed-package cache workflow changed")
     if continuation_record(run) is not None:
         require(workflow == "build-linux-release.yml", "Reviewed Linux continuation workflow changed")
@@ -393,7 +410,7 @@ def fetch(api, selected: dict, directory: Path, *, platform: str, kind: str, key
     require(producer["status"] == "completed", "Cache producer is still running")
     current = api.get(f"/repos/{BUILDER}/actions/runs/{run}")
     require(current["run_attempt"] == attempt and current["status"] == "completed", "Cache producer was rerun")
-    if run == RELEASE_052_LINUX_PACKAGE_CONTINUATION["run"]:
+    if run in {RELEASE_052_LINUX_PACKAGE_CONTINUATION["run"], RELEASE_052_WINDOWS_PACKAGE_CONTINUATION["run"]}:
         require(producer.get("conclusion") == "failure" and current.get("conclusion") == "failure"
                 and current.get("head_sha") == revision, "Reviewed package-only continuation producer changed")
     if run in {LINUX_RELEASE_CONTINUATION["run"], WINDOWS_RELEASE_BINARY_CACHE["run"],
