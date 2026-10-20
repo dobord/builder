@@ -253,7 +253,8 @@ def inspect_sdk(path: Path, platform: str, *, reviewed_objects: dict | None = No
     if reviewed_objects is not None:
         from . import safeio
         object_records = safeio._object_review(reviewed_objects)
-        require(platform == 'linux', 'Installed object review is Linux-only')
+        require(all(name.startswith(prefix) for name in object_records),
+                'Installed object review differs from target platform')
     with path.open('rb') as source:
         sdk_digest = hashlib.file_digest(source, 'sha256').hexdigest()
     with zipfile.ZipFile(path) as archive:
@@ -286,8 +287,9 @@ def inspect_sdk(path: Path, platform: str, *, reviewed_objects: dict | None = No
                     require(entry.file_size == record['size'], 'Reviewed object size changed')
                     with archive.open(entry) as stream:
                         data = stream.read(record['size'] + 1)
-                    safeio._object_payload(data, record)
-                    require(object_kind(data, relative, platform) == 'elf-object', 'Not a native target object')
+                    safeio._object_payload(data, record, platform=platform)
+                    expected_kind = 'coff-object' if platform == 'windows' else 'elf-object'
+                    require(object_kind(data, relative, platform) == expected_kind, 'Not a native target object')
                     objects.append({'path': relative, **record})
                     seen_objects.add(entry.filename)
                 except (ValueError, struct.error) as error:

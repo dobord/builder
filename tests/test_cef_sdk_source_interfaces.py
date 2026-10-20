@@ -225,13 +225,16 @@ class NativeTests(unittest.TestCase):
             if hashlib.sha512(Path(path).read_bytes()).hexdigest()!=POLICY['archive_sha512'][pkg]:raise AssertionError('Wrong source archive')
             dst=cls.root/pkg;dst.mkdir()
             with tarfile.open(path,'r:gz') as tar:tar.extractall(dst,filter='data')
-        ff=cls.root/'ffmpeg/FFmpeg-n8.1.2';xt=cls.root/'xtrans/libxtrans-xtrans-1.6.0'
+        ff=cls.root/'ffmpeg/FFmpeg-n9.0.2';xt=cls.root/'xtrans/libxtrans-xtrans-1.6.0'
         for path,key in ((ff/'doc/examples/Makefile','ffmpeg_makefile'),(xt/'Makefile.am','xtrans_makefile')):
             if checked.blob(path.read_bytes())!=POLICY['source_inputs'][key]:raise AssertionError('Install recipe drift')
         for n,digest in POLICY['source_inputs']['xtrans_unpatched'].items():
             if checked.blob((xt/n).read_bytes())!=digest:raise AssertionError('Xtrans source drift')
         for patch in ('win32.patch','symbols.patch'):
-            run(['git','apply','--ignore-space-change',cls.upstream/'ports/xtrans'/patch],xt)
+            # The real worker ignores the operator's global Git configuration.
+            # Xtrans intentionally contains four CRLF lines; preserve their
+            # pinned bytes instead of letting core.autocrlf=input rewrite them.
+            run(['git','-c','core.autocrlf=false','apply','--ignore-space-change',cls.upstream/'ports/xtrans'/patch],xt)
         cls.prefix=cls.root/'built-prefix';cls.prefix.mkdir();build=cls.root/'ff-build';build.mkdir()
         flags=['--disable-everything','--disable-autodetect','--disable-x86asm','--disable-programs','--disable-doc',
                '--disable-avcodec','--disable-avformat','--disable-avdevice','--disable-avfilter',
@@ -255,7 +258,7 @@ class NativeTests(unittest.TestCase):
             for n,e in sp['files'].items():
                 data=(cls.prefix/sp['directory']/n).read_bytes()
                 if checked.record(data)!={'size':e['size'],'sha256':e['sha256']} or checked.blob(data)!=e['blob']:
-                    raise AssertionError('Installed interface does not match source-derived policy')
+                    raise AssertionError('Installed interface does not match source-derived policy: ' + pkg + '/' + n)
         # X11 headers supply declarations only; no host X11 library is linked.
         if not Path('/usr/include/X11/Xfuncproto.h').is_file():raise AssertionError('x11proto-dev test prerequisite missing')
         shutil.rmtree(cls.root/'ffmpeg');shutil.rmtree(cls.root/'xtrans');shutil.rmtree(build)
