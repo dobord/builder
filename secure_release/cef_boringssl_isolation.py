@@ -73,7 +73,11 @@ SYMBOL = re.compile(r"[A-Za-z_.$][A-Za-z0-9_.$@]*\Z")
 MAX_CEF_ARCHIVES = 4096
 MAX_COLLISIONS = 8192
 MAX_CXX_COLLISIONS = 8192
-MAX_FFMPEG_COLLISIONS = 8192
+# The reviewed full graph has 10,149 candidates against the previous CEF SDK
+# (including AOM, dav1d, VPX and libxml2). This is a resource bound, not an
+# approval list: exact current provider owners/bytes and all rewritten CEF
+# definitions/references must still verify on every native release build.
+MAX_FFMPEG_COLLISIONS = 16384
 MAX_ATOMIC_COLLISIONS = 4096
 MAX_SOURCE_ARCHIVE_BYTES = 1024**3
 MAX_NM_OUTPUT_BYTES = 2 * 1024**3

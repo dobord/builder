@@ -366,6 +366,41 @@ class NativeTests(unittest.TestCase):
         run(command, self.root)
         run([exe], self.root)
 
+    def test_full_graph_more_than_8192_collisions_are_verified_not_truncated(self):
+        count = 8300
+        cef_source = "\n".join(f"int codec_probe_{index}(void){{return 71;}}" for index in range(count))
+        provider_source = "\n".join(f"int codec_probe_{index}(void){{return 173;}}" for index in range(count))
+        archive(self.root, "cef_many_codecs", cef_source +
+                "\nint (*volatile cef_many_ptr)(void)=codec_probe_8299;\n"
+                "int cef_many_value(void){return cef_many_ptr();}\n")
+        run(["ar", "rcs", self.prefix / self.names[0], self.root / "cef_many_codecs.o"], self.root)
+        provider = archive(self.root, "many_codecs", provider_source +
+                           "\nint (*volatile consumer_many_ptr)(void)=codec_probe_8299;\n"
+                           "int consumer_many_value(void){return consumer_many_ptr();}\n")
+        self.ffmpeg_providers.append(("lib/libaom.a", provider))
+        original = isolation.digest(provider)
+        before = isolation.digest(self.prefix / self.names[0])
+        with mock.patch.object(isolation, "MAX_FFMPEG_COLLISIONS", 8192):
+            with self.assertRaisesRegex(ValueError, "FFmpeg collision"):
+                isolation.install(self.installed, self.source, self.root / "too-many-codecs")
+        self.assertEqual(isolation.digest(self.prefix / self.names[0]), before)
+        receipt = isolation.install(self.installed, self.source, self.root / "many-codecs")
+        self.assertEqual(len(receipt["ffmpeg_symbols"]), count + len(isolation.FFMPEG_ANCHORS))
+        self.assertIn("codec_probe_8299", receipt["ffmpeg_symbols"])
+        isolation.verify(self.installed, self.source, receipt)
+        self.assertEqual(isolation.digest(provider), original)
+        main = self.root / "many_codecs_main.c"
+        main.write_text("int cef_many_value(void); int consumer_many_value(void);\n"
+                        "int main(void){return cef_many_value()!=71 || consumer_many_value()!=173;}\n")
+        exe = self.root / "many-codecs-probe"
+        run(["cc", main, "-Wl,--start-group", self.prefix / self.names[0], provider,
+             "-Wl,--end-group", "-o", exe], self.root)
+        run([exe], self.root)
+        # The same hard bound applies at verification; no receipt can bypass it.
+        with mock.patch.object(isolation, "MAX_FFMPEG_COLLISIONS", 8192):
+            with self.assertRaises(ValueError):
+                isolation.verify(self.installed, self.source, receipt)
+
     def test_duplicate_ssl_providers_fail_then_namespaced_cef_links_and_relocates(self):
         failed = consumer(
             self.root, self.prefix, self.names,
