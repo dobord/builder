@@ -191,6 +191,21 @@ RELEASE_052_LINUX_NATIVE_PACKAGE_CONTINUATION = {
     "artifact_sha256": "f879306eae36b2dbe03d9cd2725749f67b65a00ed7425eca3055003971b54d30",
     "image": "20261012.334.1",
 }
+# Candidate 4: Linux qualification passed, Windows stopped in final FreeRDP
+# linkage. Both exact caches preserve compiled packages, including Windows
+# FFmpeg. Neither a failed combined release nor a prior SDK is promoted.
+RELEASE_052_RC4_PACKAGE_CACHES = {
+    "linux": {"run": 39450676455, "attempt": 1,
+              "revision": "dca625f732bac081cad1f09e125487b3599f60ee",
+              "artifact_id": 12285507734,
+              "artifact_sha256": "e51f367a0be0b06fa9381326c2ba84484624e9112e6d5e02ea632d4a287dbbb3",
+              "image": "20261012.334.1"},
+    "windows": {"run": 39450676455, "attempt": 1,
+                "revision": "dca625f732bac081cad1f09e125487b3599f60ee",
+                "artifact_id": 12280308910,
+                "artifact_sha256": "22ffdfe611e1eacfb3164d5f21d6cc601f54f51cf35410b0dad365b41b93e12d",
+                "image": "20261012.333.1"},
+}
 
 
 def continuation_record(run: int) -> dict | None:
@@ -213,6 +228,12 @@ def producer_revision(platform: str, kind: str, run: int, attempt: int, revision
 def selected_revision(selected: dict | None, platform: str, kind: str, revision: str) -> str:
     if selected is None:
         return revision
+    if selected["run"] == 39450676455:
+        record = RELEASE_052_RC4_PACKAGE_CACHES.get(platform)
+        require(record is not None and kind == "vcpkg-binaries"
+                and all(selected[name] == record[name] for name in ("run", "attempt", "artifact_id", "artifact_sha256")),
+                "Reviewed 0.5.2 candidate 4 package selector changed")
+        return record["revision"]
     if selected["run"] == RELEASE_052_LINUX_NATIVE_PACKAGE_CONTINUATION["run"]:
         record = RELEASE_052_LINUX_NATIVE_PACKAGE_CONTINUATION
         require(platform == "linux" and kind == "vcpkg-binaries"
@@ -272,6 +293,8 @@ def selected_revision(selected: dict | None, platform: str, kind: str, revision:
 
 def binary_cache_image(selected: dict, platform: str, revision: str) -> str | None:
     selected_revision(selected, platform, "vcpkg-binaries", revision)
+    if selected["run"] == 39450676455:
+        return RELEASE_052_RC4_PACKAGE_CACHES[platform]["image"]
     if selected["run"] == RELEASE_052_LINUX_NATIVE_PACKAGE_CONTINUATION["run"]:
         return RELEASE_052_LINUX_NATIVE_PACKAGE_CONTINUATION["image"]
     if selected["run"] == RELEASE_052_LINUX_PACKAGE_CONTINUATION["run"]:
@@ -420,7 +443,7 @@ def fetch(api, selected: dict, directory: Path, *, platform: str, kind: str, key
     require(platform in BUILD_WORKFLOWS[workflow], "Cache platform differs from producer workflow")
     if run in {38583556953, 39103476664, 39195808918, LINUX_SUCCESSFUL_RELEASE_PACKAGES["run"],
                RELEASE_052_LINUX_PACKAGE_CONTINUATION["run"], RELEASE_052_WINDOWS_PACKAGE_CONTINUATION["run"],
-               RELEASE_052_LINUX_NATIVE_PACKAGE_CONTINUATION["run"]}:
+               RELEASE_052_LINUX_NATIVE_PACKAGE_CONTINUATION["run"], 39450676455}:
         require(workflow == "build-combined-release.yml", "Reviewed completed-package cache workflow changed")
     if continuation_record(run) is not None:
         require(workflow == "build-linux-release.yml", "Reviewed Linux continuation workflow changed")
@@ -429,7 +452,7 @@ def fetch(api, selected: dict, directory: Path, *, platform: str, kind: str, key
     current = api.get(f"/repos/{BUILDER}/actions/runs/{run}")
     require(current["run_attempt"] == attempt and current["status"] == "completed", "Cache producer was rerun")
     if run in {RELEASE_052_LINUX_PACKAGE_CONTINUATION["run"], RELEASE_052_WINDOWS_PACKAGE_CONTINUATION["run"],
-               RELEASE_052_LINUX_NATIVE_PACKAGE_CONTINUATION["run"]}:
+               RELEASE_052_LINUX_NATIVE_PACKAGE_CONTINUATION["run"], 39450676455}:
         require(producer.get("conclusion") == "failure" and current.get("conclusion") == "failure"
                 and current.get("head_sha") == revision, "Reviewed package-only continuation producer changed")
     if run in {LINUX_RELEASE_CONTINUATION["run"], WINDOWS_RELEASE_BINARY_CACHE["run"],
