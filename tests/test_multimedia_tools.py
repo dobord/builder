@@ -65,6 +65,22 @@ class StaticToolsTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 tools.validate_archive(archive, proof)
 
+    def test_full_freerdp_requires_all_five_static_tools(self):
+        data = elf()
+        record = {"sha256": hashlib.sha256(data).hexdigest(), "dt_needed": 0, "interpreter": False}
+        proof = {"tools": {name: dict(record) for name in ("ffmpeg", "ffprobe")},
+                 "freerdp_tools": {name: dict(record) for name in tools.FREERDP_TOOLS}, "h264_roundtrip": True}
+        with tempfile.TemporaryDirectory() as folder:
+            archive = Path(folder) / "sdk.zip"
+            with zipfile.ZipFile(archive, "w") as sdk:
+                for package, records in (("ffmpeg", proof["tools"]), ("freerdp", proof["freerdp_tools"])):
+                    for name in records:
+                        sdk.writestr("installed/x64-linux-static-release/tools/" + package + "/" + name, data)
+            tools.validate_archive(archive, proof, freerdp_full=True)
+            proof["freerdp_tools"].pop("xfreerdp")
+            with self.assertRaises(ValueError):
+                tools.validate_archive(archive, proof, freerdp_full=True)
+
 
 if __name__ == "__main__":
     unittest.main()

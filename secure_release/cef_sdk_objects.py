@@ -15,9 +15,11 @@ from . import cef_sdk_example as checked, safeio
 
 TRIPLET = "x64-linux-static-release"
 ORIGINS = {
-    "ports/freerdp/portfile.cmake": "2d7b81cde26b4039ae731b0380b0f8fea17848cf",
-    "ports/freerdp/vcpkg.json": "a53f710fac8f6ab397cb52bb5cf80de241aae9c1",
+    "ports/freerdp/portfile.cmake": "f13cefe0a069b471f1ee369e213620df54decf1d",
+    "ports/freerdp/vcpkg.json": "80228c5669503110f10d653ff4150ed1bd5a37a0",
     "ports/freerdp/install-layout.patch": "fb8a0fd11b462818de12e749505e69dc45084e14",
+    "ports/freerdp/ffmpeg.diff": "c98a67b057d4da58600432bea56b680ea4bb781c",
+    "ports/freerdp/fix-aom-target.patch": "120e2463bbb3c79dab6e217a4844f290ba721e57",
 }
 EXPORTS = (
     "share/freerdp-client3/FreeRDP-ClientTargets",

@@ -476,7 +476,8 @@ def build():
     multimedia_tools_proof = None
     if platform == "linux" and "ffmpeg[static-full-gpl]" in packages:
         from . import multimedia_tools
-        multimedia_tools_proof = multimedia_tools.verify_linux(root / "consumer-sdk", root, execute)
+        multimedia_tools_proof = multimedia_tools.verify_linux(
+            root / "consumer-sdk", root, execute, freerdp_full="freerdp[full]" in packages)
     if windows_objects is not None:
         windows_multimedia.relocated(root / "consumer-sdk", windows_objects, source_review)
     source = root / "workspace" / payload["plan"]["smoke_path"]

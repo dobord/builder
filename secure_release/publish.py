@@ -124,7 +124,9 @@ def verify_result():
         reviewed_sources = set()
         if platform == "linux" and "ffmpeg[static-full-gpl]" in payload["plan"]["platforms"]["linux"]["packages"]:
             from . import multimedia_tools
-            multimedia_tools.validate_archive(sdk, manifest.get("cef", {}).get("multimedia_tools"))
+            multimedia_tools.validate_archive(
+                sdk, manifest.get("cef", {}).get("multimedia_tools"),
+                freerdp_full="freerdp[full]" in payload["plan"]["platforms"]["linux"]["packages"])
         if platform == "windows" and "freerdp[full]" in payload["plan"]["platforms"]["windows"]["packages"]:
             from . import windows_multimedia
             reviewed_sources = windows_multimedia.validate_archive_sources(

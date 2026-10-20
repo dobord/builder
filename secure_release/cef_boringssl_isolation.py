@@ -59,6 +59,9 @@ FFMPEG_CODEC_PROVIDERS = (
     ("opus", "1.5.2", 1, "lib/libopus.a"),
     ("libwebp", "1.6.0", 2, "lib/libwebp.a"),
     ("openh264", "2.6.0", 4, "lib/libopenh264.a"),
+    ("openjpeg", "2.5.4", 0, "lib/libopenjp2.a"),
+    ("snappy", "1.2.2", 2, "lib/libsnappy.a"),
+    ("libxml2", "2.15.3", 0, "lib/libxml2.a"),
 )
 GXX = Path("/usr/bin/g++-14")
 GCC_ROOT = Path("/usr/lib/gcc/x86_64-linux-gnu/14")
