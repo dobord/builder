@@ -48,9 +48,10 @@ def validate_sources(upstream: Path) -> None:
                         "Pinned XZ documentation installation policy changed")
 
 
-def verify(sdk: Path) -> dict:
+def verify(sdk: Path, *, triplet: str = TRIPLET) -> dict:
     """Require the entire original doc subtree and unique liblzma ownership."""
-    directory = checked.clean(sdk / "installed" / TRIPLET / DIRECTORY)
+    checked.require(triplet in {TRIPLET, "x64-windows-static-release"}, "Invalid XZ documentation triplet")
+    directory = checked.clean(sdk / "installed" / triplet / DIRECTORY)
     checked.require(directory.is_dir() and {p.name for p in directory.iterdir()} == set(FILES),
                     "XZ documentation file inventory changed")
     expected_paths = set()
@@ -60,13 +61,13 @@ def verify(sdk: Path) -> dict:
         record = {"size": size, "sha256": digest}
         checked.require(checked.record(data) == record and checked.blob(data) == source_blob,
                         "XZ documentation differs from pinned upstream bytes")
-        member = TRIPLET + "/" + DIRECTORY + "/" + name
+        member = triplet + "/" + DIRECTORY + "/" + name
         expected_paths.add(member)
         if Path(name).suffix in safeio.SOURCE_SUFFIXES:
             review["installed/" + member] = record
     info = checked.clean(sdk / "installed/vcpkg/info")
     checked.require(info.is_dir(), "Missing XZ documentation ownership")
-    lists = sorted(info.glob("*_" + TRIPLET + ".list"))
+    lists = sorted(info.glob("*_" + triplet + ".list"))
     checked.require(0 < len(lists) <= 4096, "Invalid XZ ownership inventory")
     found, total = set(), 0
     for listing in lists:
@@ -77,15 +78,15 @@ def verify(sdk: Path) -> dict:
             if line in expected_paths:
                 checked.require(line not in found, "Duplicate XZ documentation owner")
                 checked.require(re.fullmatch(
-                    "liblzma_" + re.escape(VERSION) + "_" + re.escape(TRIPLET) + r"\.list",
+                    "liblzma_" + re.escape(VERSION) + "_" + re.escape(triplet) + r"\.list",
                     listing.name) is not None, "XZ documentation lost its pinned owning package")
                 found.add(line)
     checked.require(found == expected_paths, "Unowned XZ documentation file")
     return review
 
 
-def inventory_sources(sdk: Path, *, examples: dict, headers: dict, docs: dict,
-                      aliases: dict, diagnostics: Path, interfaces: dict | None = None) -> int:
+def inventory_sources(sdk: Path, *, examples: dict | None, headers: dict | None, docs: dict,
+                      aliases: dict | None, diagnostics: Path, interfaces: dict | None = None) -> int:
     """Record ALL source-suffix entries before ZIP; discovery grants NO approval.
 
     #80 revealed an upstream documentation source after earlier reviews passed.

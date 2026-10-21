@@ -10,7 +10,7 @@ import unittest
 from unittest import mock
 
 from secure_release import (cef_sdk_objects as objects, cef_sdk_source_interfaces as interfaces,
-                            safeio, static_audit, windows_multimedia as subject)
+                            cef_sdk_xz as xz, safeio, static_audit, windows_multimedia as subject)
 
 T = subject.TRIPLET
 
@@ -118,17 +118,51 @@ class WindowsMultimediaTests(unittest.TestCase):
             listed.append(T + "/" + spec["directory"] + "/" + name)
         info = self.sdk / "installed/vcpkg/info"
         (info / ("ffmpeg_9.0.2_" + T + ".list")).write_text("\n".join(listed) + "\n")
-        with mock.patch.object(interfaces, "policy", return_value=policy):
+        docs_policy = {}
+        docs_owner = []
+        for name in xz.FILES:
+            data = ("/* synthetic XZ companion " + name + " */\n").encode()
+            path = self.prefix / xz.DIRECTORY / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+            docs_policy[name] = (len(data), hashlib.sha256(data).hexdigest(),
+                hashlib.sha1(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest())
+            docs_owner.append(T + "/" + xz.DIRECTORY + "/" + name)
+        (info / ("liblzma_5.8.3_" + T + ".list")).write_text("\n".join(docs_owner) + "\n")
+        with mock.patch.object(interfaces, "policy", return_value=policy), mock.patch.object(xz, "FILES", docs_policy):
             source_review = interfaces.verify(self.sdk, triplet=T)
             self.assertEqual(len(source_review), 24)
             receipt = objects.capture(self.sdk / "installed", triplet=T)
             archive = self.root / "complete.zip"
-            self.assertEqual(subject.package(self.sdk, archive, receipt), source_review)
-            self.assertEqual(subject.validate_archive_sources(archive, source_review), set(source_review))
-            wrong = dict(source_review)
-            wrong.pop(next(iter(wrong)))
+            # Reproduce the missing Windows doc review before granting it.
+            with self.assertRaisesRegex(ValueError, "implementation source"):
+                safeio.sdk_zip(self.sdk, archive, reviewed_interface_sources=source_review,
+                               reviewed_objects=receipt["objects"])
+            review = subject.package(self.sdk, archive, receipt)
+            self.assertEqual(review["interfaces"], source_review)
+            self.assertEqual(len(review["docs"]), 5)
+            self.assertEqual(subject.validate_archive_sources(archive, review), set(source_review) | set(review["docs"]))
+            wrong = copy.deepcopy(review)
+            wrong["docs"].pop(next(iter(wrong["docs"])))
             with self.assertRaises(ValueError):
                 subject.validate_archive_sources(archive, wrong)
+            moved = self.root / "complete-moved"
+            safeio.extract_zip(archive, moved)
+            subject.relocated(moved, receipt, review)
+            (moved / "installed" / T / xz.DIRECTORY / "00_README.txt").write_text("tampered companion")
+            with self.assertRaises(ValueError):
+                subject.relocated(moved, receipt, review)
+            listing = info / ("liblzma_5.8.3_" + T + ".list")
+            before = listing.read_bytes()
+            listing.write_text("")
+            with self.assertRaises(ValueError):
+                xz.verify(self.sdk, triplet=T)
+            listing.write_bytes(before)
+            foreign = self.prefix / "share/doc/foreign/examples/foreign.c"
+            foreign.parent.mkdir(parents=True)
+            foreign.write_text("int arbitrary_source;\n")
+            with self.assertRaisesRegex(ValueError, "unreviewed sources"):
+                subject.package(self.sdk, self.root / "refused.zip", receipt)
 
 
 if __name__ == "__main__":
