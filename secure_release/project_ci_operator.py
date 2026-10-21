@@ -194,7 +194,7 @@ def package(args, credential):
         recipe.unlink()
     lanes = ci.expand_recipes(value["suite"], raw_recipes)
     lane_ids = [lane["id"] for lane in lanes]
-    if not 1 <= len(lane_ids) <= 100 or len(set(lane_ids)) != len(lane_ids) or (args.suite == "release" and len(lane_ids) != 39):
+    if not 1 <= len(lane_ids) <= 100 or len(set(lane_ids)) != len(lane_ids) or (args.suite == "release" and len(lane_ids) != ci.RELEASE_LANE_COUNT):
         raise ValueError("incomplete lane inventory")
     plain = args.work / "repository.bundle"
     ci.checked(["git", "-C", str(repo), "bundle", "create", str(plain), "--all"], args.work, env, log)
@@ -249,7 +249,7 @@ def validate_state(state, signing_public):
     lanes = state["lanes"]
     if (not isinstance(lanes, list) or not 1 <= len(lanes) <= 100 or len(set(lanes)) != len(lanes) or
             any(not re.fullmatch(r"[a-z0-9-]+", lane) for lane in lanes) or
-            (state["payload"]["suite"] == "release" and len(lanes) != 39)):
+            (state["payload"]["suite"] == "release" and len(lanes) != ci.RELEASE_LANE_COUNT)):
         raise ValueError("local qualification inventory incomplete")
 
 

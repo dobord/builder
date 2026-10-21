@@ -20,7 +20,7 @@ from tests.test_project_ci_operator import operator_payload
 def synthetic_recipes():
     """An independently supplied test contract; never candidate-provided pins."""
     result = {}
-    for profile, count in zip(ci.SUITES["release"], (20, 5, 5, 6, 3)):
+    for profile, count in zip(ci.SUITES["release"], (21, 5, 5, 6, 3)):
         recipe = {"jobs": {"synthetic": {"runs-on": "${{ matrix.os }}", "strategy": {
             "matrix": {"include": [{"os": "ubuntu-24.04", "case": index} for index in range(count)]}},
             "steps": [{"run": "exit 0"}]}}}
@@ -76,7 +76,7 @@ class RecipeContractTests(unittest.TestCase):
         raw = synthetic_recipes()
         pins = {profile: ci.digest_bytes(data) for profile, data in raw.items()}
         with patch.object(ci, "RELEASE_RECIPE_DIGESTS", pins):
-            self.assertEqual(len(ci.expand_recipes("release", raw)), 39)
+            self.assertEqual(len(ci.expand_recipes("release", raw)), 40)
             cases = []
             replacement = dict(raw)
             replacement["performance"] = replacement["performance"].replace(b"exit 0", b"exit 1")
@@ -102,7 +102,7 @@ class RecipeContractTests(unittest.TestCase):
             directory.mkdir(parents=True)
             for profile, data in raw.items():
                 (directory / (profile + ".yml")).write_bytes(data)
-            self.assertEqual(len(ci.recipes(root, "release")), 39)
+            self.assertEqual(len(ci.recipes(root, "release")), 40)
             (directory / "ci.yml").write_bytes(raw["ci"].replace(b"ubuntu-24.04", b"macos-14"))
             with self.assertRaises(ValueError):
                 ci.recipes(root, "release")

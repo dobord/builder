@@ -38,14 +38,15 @@ MAX_ARCHIVE = 2 * 1024**3
 MAX_GIT_INPUT = 90 * 1024**2  # Below GitHub's 100 MB blob API limit.
 MAX_RECIPE = 1024 * 1024
 MAX_LANES = 100
+RELEASE_LANE_COUNT = 40
 MAX_MATRIX_DIMENSIONS = 16
 # Builder-owned, reviewed byte contract. No request, policy, environment or
 # candidate recipe may replace these pins; changes require a reviewed revision.
 RELEASE_RECIPE_DIGESTS = {
-    "ci": "62e43aa051f7da623c0a655f68e3a2eee92ea4a27a58e3f9b3f0894fa732f57d",
+    "ci": "756f1a4c27dc0ed22692e42cc49008876db0c14ca38563cc2fda18e7dd135307",
     "wasm-async": "d3f5f2bb2641333c4b68337ec723379746fe701ae06307b1099946d64080082c",
-    "nightly-stress": "6399682b004cde5f7b724d46594644edf6b7130e42440fa6f022d97303c79160",
-    "performance": "fb897358ef7c5ff886aad6f520fea6d82c372f7038d7fb9511d8865abcb22d7c",
+    "nightly-stress": "bd6fd50160ee7bb7aa1733e9230efea7ff935cb16fdc96f0f0e7f3dd81534885",
+    "performance": "8531239834140c1aaf5c9e3a8e890aac9321ade3674ae57b1ed7ccac0ab40b9d",
     "vcpkg-port": "263a8c59ac57ff06993b408aa24ce4bf0caa43965f88bd647056c9377f7513f6",
 }
 SUITES = {"ci": ("ci", "wasm-async"), "async": ("wasm-async",),
@@ -426,8 +427,8 @@ def expand_recipes(suite, raw_recipes):
         lanes.extend(expand_recipe(profile, document, limit=MAX_LANES - len(lanes)))
     if not 1 <= len(lanes) <= MAX_LANES or len({lane["id"] for lane in lanes}) != len(lanes):
         raise ValueError("invalid lane inventory")
-    if suite == "release" and len(lanes) != 39:
-        raise ValueError("release requires the complete 39-lane qualification")
+    if suite == "release" and len(lanes) != RELEASE_LANE_COUNT:
+        raise ValueError("release requires the complete 40-lane qualification")
     return lanes
 
 
