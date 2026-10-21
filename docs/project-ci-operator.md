@@ -19,8 +19,8 @@ decoded only inside trusted prepare. This prevents Actions' structured-secret ma
 classifying short schema values such as `2` as secrets in the public matrix.
 Masking remains enabled; no private policy data is exposed through job outputs.
 The policy must
-retain its repository, repository ID, authorizer branch and ordinary CI approval
-boundaries, and explicitly add:
+retain its repository, repository ID, authorizer branch and legacy schema-1 CI
+approval boundaries, and explicitly add:
 
 ```json
 {"operator_origin":"local-operator","operator_id":5323024,"request_schemas":[2]}
@@ -32,15 +32,20 @@ its own policy, the signed operator identity, workflow actor ID, run actor and
 triggering actor. A PR must be open, same-repository on both sides, and match the
 exact current head/base; its base branch must match the policy's authorizer
 branch. A non-PR must name exact current source main as both
-head/base. Schema 2 queries no source Actions API. Ordinary CI retains sensitive
-current-head independent review requirements; release adds no manual approval.
+head/base. Schema 2 queries no source Actions or PR review API. The authenticated
+local operator signature authorizes CI and all other qualification profiles,
+including sensitive changes, without external manual or independent PR approval.
+It does not authorize merging or publishing a release. Legacy schema-1 ordinary
+CI retains its existing current-head independent review gate. Cryptographic,
+source identity, dependency and complete exact-SHA qualification checks remain
+mandatory.
 The optional `request_schemas` field is a nonempty, unique list drawn from
 `[1, 2]`. Setting `[2]` denies legacy source Actions origins before any admission
 API call, both in prepare and local policy preflight. Policies omitting the field
 retain legacy admission behavior. Candidate requests cannot override this policy.
 
-The source-read token in builder reads only source identity, PR/review policy and
-published stable baseline metadata. The builder read token fetches the public
+The source-read token in builder reads only source identity, PR identity (and
+legacy schema-1 review policy) and published stable baseline metadata. The builder read token fetches the public
 input Git objects. Native build commands retain their credential-free contract.
 The local authenticated GitHub CLI account needs source metadata/content read,
 source commit-status write, and builder contents/actions read/write permission.
@@ -116,6 +121,46 @@ process command line or owner is queried. Existing authenticated encrypted-log
 collection carries these files; no plaintext artifact or public report is added.
 This is diagnostic hardening, not proof that a historical Windows hang is fixed.
 Native exact-SHA qualification and all 39 release lanes remain mandatory.
+
+## Private prepare-failure diagnostics
+
+Prepare failures retain a bounded owner-private record before the fixed public
+stage-failure marker. It contains exception type, an exact allowlisted reason,
+and at most 16 sanitized module/function/line entries from a bounded stack walk.
+An HTTP error may add only an integer status from 400 through 599. No arbitrary
+exception string, chained exception, local, source line, path, URL, header, body,
+request, environment or key bytes are recorded. Unknown/invalid strings use fixed
+placeholders. These code identifiers are metadata, not DLP/content inspection.
+
+Fresh exclusive staging uses POSIX directory/file modes `0700`/`0600`; Windows
+inherits the trusted runner temporary directory's ACLs. Links, overwrites,
+hardlinked records and broadened POSIX permissions are rejected. Recording errors
+cannot replace admission failure or expose diagnostic exceptions publicly.
+
+The same reviewed Tink encrypted-log context and public log recipient encrypt
+prepare diagnostics in always-run steps; only `.enc` is uploaded before always-run
+plaintext cleanup. A fixed `no-prepare-error-record` header covers absent records
+(including pre-prepare installer failure) without asserting successful admission.
+If the reviewed crypto runtime itself is unavailable, encryption/upload fail
+closed: no plaintext or alternate cipher is published. Failure still blocks all
+qualification lanes; source/input uploads retain their implicit success guard.
+Diagnostics do not authorize replay: retry needs a fresh signed request/nonce and
+any implementation change needs a newly reviewed immutable builder revision.
+
+## Source-backed coverage report names
+Report collection keeps the credential-like filename guard. A narrow exception
+admits direct-child `coverage.<C/C++ basename>.<gcovr MD5>.html` pages only when
+bounded gcovr format `0.6` metadata maps the exact name to an existing, nonlinked
+C/C++ source inside the materialized source tree. Missing, malformed or unsupported
+metadata grants no exception; raw credential-like files, key-source extensions,
+unmapped/wrong-hash HTML, nested pages, links and escaping paths remain rejected.
+Metadata is capped at 64 MiB and 20,000 records; archive bounds are unchanged.
+
+The approved recipe output and materialized source are trusted inputs. This is
+filename classification for private source-coverage reports, not HTML body/DLP
+inspection. The MD5 is only gcovr's existing filename identifier, explicitly not a
+security digest. SHA-256 archive manifests, source/lane binding, recipient roles,
+authenticated context and ciphertext-only publication remain unchanged.
 
 ## Signed transport
 
