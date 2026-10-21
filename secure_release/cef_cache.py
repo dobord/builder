@@ -121,6 +121,91 @@ JOINT_COMPLETED_BINARY_CACHES = {
                 "artifact_sha256": "cb1ce3974f74a849166e835b67cffdf470b0b14196cbbf7358b5e0d680f3d7a1",
                 "image": "20261004.326.1"},
 }
+# The operator selected Linux packages from the previous successful combined
+# release, not from an incomplete or runtime-failed build. Bind the exact
+# original producer, artifact and hosted image; SDK gates still run afresh.
+LINUX_SUCCESSFUL_RELEASE_PACKAGES = {
+    "run": 38608203966, "attempt": 1,
+    "revision": "4ce8f380b24fb16dd80018cc12cd42d2e2bb2348",
+    "artifact_id": 11927207987,
+    "artifact_sha256": "839a22eeecbb6644f69723df9dd69b95f3a83ad6927b756154229be18622ed3e",
+    "image": "20261004.327.1",
+}
+# Completed 0.5.0 SDK release: both native jobs and publication succeeded.
+# Reuse package bytes under their original authenticated contexts, never as a
+# replacement for the new source version's final consumer/runtime checks.
+RELEASE_050_BINARY_CACHES = {
+    "linux": {"run": 39103476664, "attempt": 1,
+              "revision": "93560bb7133492bd1e62dbf6a8a666f200691056",
+              "artifact_id": 12129986122,
+              "artifact_sha256": "3232d94beaab645c0071afe665bb5c6131b25767e8f45242eb0c85ba8f8186fa",
+              "image": "20261012.334.1"},
+    "windows": {"run": 39103476664, "attempt": 1,
+                "revision": "93560bb7133492bd1e62dbf6a8a666f200691056",
+                "artifact_id": 12129087010,
+                "artifact_sha256": "fe7053465f57536f2fbb9a2f8333bef2c120a2573ef84bb4d9d0f8d761794b35",
+                "image": "20261012.333.1"},
+}
+
+
+# Completed and published 0.5.1 release. Preserve the original encryption and
+# hosted-image contexts; vcpkg, not this transport policy, decides ABI reuse.
+RELEASE_051_BINARY_CACHES = {
+    "linux": {"run": 39195808918, "attempt": 1,
+              "revision": "5cc5b9a74566c28d18cc6091c15e7d934f9b1de6",
+              "artifact_id": 12165108727,
+              "artifact_sha256": "c1a8c5f644ef78c53fdc0f4d9c511da17989079ef91fe7103c4ed832d918d59c",
+              "image": "20261012.334.1"},
+    "windows": {"run": 39195808918, "attempt": 1,
+                "revision": "5cc5b9a74566c28d18cc6091c15e7d934f9b1de6",
+                "artifact_id": 12164110125,
+                "artifact_sha256": "9d02975de16494781d61c2e5f47b773adc8926f54623edf8a0baca33afabc502",
+                "image": "20261012.333.1"},
+}
+
+# Exact completed 0.5.2 candidate: compilation finished, then the independent
+# CEF collision-domain gate failed. Reuse completed package bytes only; this
+# record never admits its checkpoint, SDK, runtime proof or publication.
+RELEASE_052_LINUX_PACKAGE_CONTINUATION = {
+    "run": 39394809178, "attempt": 1,
+    "revision": "cf876e6ccce1de62a158dd15f6ab59f4ef808c03",
+    "artifact_id": 12257245846,
+    "artifact_sha256": "44c424c1ec43cc6da5aad8d6343e59aca88000724d35471fda147fd98e4c3de7",
+    "image": "20261012.334.1",
+}
+# Windows completed dependencies before FFmpeg configure failed in candidate 2.
+# Like Linux above, this admits only the exact encrypted package artifact.
+RELEASE_052_WINDOWS_PACKAGE_CONTINUATION = {
+    "run": 39411801386, "attempt": 1,
+    "revision": "c9827b15d293cd47e3f633ee2c9931713b3e8a5e",
+    "artifact_id": 12263527603,
+    "artifact_sha256": "5a8545be86afac9fb51dfa19bfdf21894f201153ebb95bb3084439327c8b3925",
+    "image": "20261012.333.1",
+}
+# Candidate 3 completed Linux compilation and reached portable SDK packaging.
+# Keep its exact package cache only; the failed SDK/checkpoint is not admitted.
+RELEASE_052_LINUX_NATIVE_PACKAGE_CONTINUATION = {
+    "run": 39427010834, "attempt": 1,
+    "revision": "3e664e396b1b2098045709ae8237aeeff01e87fb",
+    "artifact_id": 12276985638,
+    "artifact_sha256": "f879306eae36b2dbe03d9cd2725749f67b65a00ed7425eca3055003971b54d30",
+    "image": "20261012.334.1",
+}
+# Candidate 4: Linux qualification passed, Windows stopped in final FreeRDP
+# linkage. Both exact caches preserve compiled packages, including Windows
+# FFmpeg. Neither a failed combined release nor a prior SDK is promoted.
+RELEASE_052_RC4_PACKAGE_CACHES = {
+    "linux": {"run": 39450676455, "attempt": 1,
+              "revision": "dca625f732bac081cad1f09e125487b3599f60ee",
+              "artifact_id": 12285507734,
+              "artifact_sha256": "e51f367a0be0b06fa9381326c2ba84484624e9112e6d5e02ea632d4a287dbbb3",
+              "image": "20261012.334.1"},
+    "windows": {"run": 39450676455, "attempt": 1,
+                "revision": "dca625f732bac081cad1f09e125487b3599f60ee",
+                "artifact_id": 12280308910,
+                "artifact_sha256": "22ffdfe611e1eacfb3164d5f21d6cc601f54f51cf35410b0dad365b41b93e12d",
+                "image": "20261012.333.1"},
+}
 
 
 def continuation_record(run: int) -> dict | None:
@@ -143,6 +228,48 @@ def producer_revision(platform: str, kind: str, run: int, attempt: int, revision
 def selected_revision(selected: dict | None, platform: str, kind: str, revision: str) -> str:
     if selected is None:
         return revision
+    if selected["run"] == 39450676455:
+        record = RELEASE_052_RC4_PACKAGE_CACHES.get(platform)
+        require(record is not None and kind == "vcpkg-binaries"
+                and all(selected[name] == record[name] for name in ("run", "attempt", "artifact_id", "artifact_sha256")),
+                "Reviewed 0.5.2 candidate 4 package selector changed")
+        return record["revision"]
+    if selected["run"] == RELEASE_052_LINUX_NATIVE_PACKAGE_CONTINUATION["run"]:
+        record = RELEASE_052_LINUX_NATIVE_PACKAGE_CONTINUATION
+        require(platform == "linux" and kind == "vcpkg-binaries"
+                and all(selected[name] == record[name] for name in ("run", "attempt", "artifact_id", "artifact_sha256")),
+                "Reviewed 0.5.2 Linux native package continuation selector changed")
+        return record["revision"]
+    if selected["run"] == RELEASE_052_LINUX_PACKAGE_CONTINUATION["run"]:
+        record = RELEASE_052_LINUX_PACKAGE_CONTINUATION
+        require(platform == "linux" and kind == "vcpkg-binaries"
+                and all(selected[name] == record[name] for name in ("run", "attempt", "artifact_id", "artifact_sha256")),
+                "Reviewed 0.5.2 Linux package continuation selector changed")
+        return record["revision"]
+    if selected["run"] == RELEASE_052_WINDOWS_PACKAGE_CONTINUATION["run"]:
+        record = RELEASE_052_WINDOWS_PACKAGE_CONTINUATION
+        require(platform == "windows" and kind == "vcpkg-binaries"
+                and all(selected[name] == record[name] for name in ("run", "attempt", "artifact_id", "artifact_sha256")),
+                "Reviewed 0.5.2 Windows package continuation selector changed")
+        return record["revision"]
+    if selected["run"] == 39195808918:
+        record = RELEASE_051_BINARY_CACHES.get(platform)
+        require(record is not None and kind == "vcpkg-binaries"
+                and all(selected[name] == record[name] for name in ("run", "attempt", "artifact_id", "artifact_sha256")),
+                "Reviewed 0.5.1 release package cache selector changed")
+        return record["revision"]
+    if selected["run"] == 39103476664:
+        record = RELEASE_050_BINARY_CACHES.get(platform)
+        require(record is not None and kind == "vcpkg-binaries"
+                and all(selected[name] == record[name] for name in ("run", "attempt", "artifact_id", "artifact_sha256")),
+                "Reviewed 0.5.0 release package cache selector changed")
+        return record["revision"]
+    if selected["run"] == LINUX_SUCCESSFUL_RELEASE_PACKAGES["run"]:
+        record = LINUX_SUCCESSFUL_RELEASE_PACKAGES
+        require(platform == "linux" and kind == "vcpkg-binaries"
+                and all(selected[name] == record[name] for name in ("run", "attempt", "artifact_id", "artifact_sha256")),
+                "Reviewed successful Linux release cache selector changed")
+        return record["revision"]
     if selected["run"] == 38583556953:
         record = JOINT_COMPLETED_BINARY_CACHES.get(platform)
         require(record is not None and kind == "vcpkg-binaries"
@@ -166,6 +293,20 @@ def selected_revision(selected: dict | None, platform: str, kind: str, revision:
 
 def binary_cache_image(selected: dict, platform: str, revision: str) -> str | None:
     selected_revision(selected, platform, "vcpkg-binaries", revision)
+    if selected["run"] == 39450676455:
+        return RELEASE_052_RC4_PACKAGE_CACHES[platform]["image"]
+    if selected["run"] == RELEASE_052_LINUX_NATIVE_PACKAGE_CONTINUATION["run"]:
+        return RELEASE_052_LINUX_NATIVE_PACKAGE_CONTINUATION["image"]
+    if selected["run"] == RELEASE_052_LINUX_PACKAGE_CONTINUATION["run"]:
+        return RELEASE_052_LINUX_PACKAGE_CONTINUATION["image"]
+    if selected["run"] == RELEASE_052_WINDOWS_PACKAGE_CONTINUATION["run"]:
+        return RELEASE_052_WINDOWS_PACKAGE_CONTINUATION["image"]
+    if selected["run"] == 39195808918:
+        return RELEASE_051_BINARY_CACHES[platform]["image"]
+    if selected["run"] == 39103476664:
+        return RELEASE_050_BINARY_CACHES[platform]["image"]
+    if selected["run"] == LINUX_SUCCESSFUL_RELEASE_PACKAGES["run"]:
+        return LINUX_SUCCESSFUL_RELEASE_PACKAGES["image"]
     if selected["run"] == 38583556953:
         return JOINT_COMPLETED_BINARY_CACHES[platform]["image"]
     if selected["run"] == LINUX_RELEASE_CONTINUATION["run"]:
@@ -300,7 +441,9 @@ def fetch(api, selected: dict, directory: Path, *, platform: str, kind: str, key
     producer = api.get(f"/repos/{BUILDER}/actions/runs/{run}/attempts/{attempt}")
     workflow = build_workflow(producer.get("path", ""))
     require(platform in BUILD_WORKFLOWS[workflow], "Cache platform differs from producer workflow")
-    if run == 38583556953:
+    if run in {38583556953, 39103476664, 39195808918, LINUX_SUCCESSFUL_RELEASE_PACKAGES["run"],
+               RELEASE_052_LINUX_PACKAGE_CONTINUATION["run"], RELEASE_052_WINDOWS_PACKAGE_CONTINUATION["run"],
+               RELEASE_052_LINUX_NATIVE_PACKAGE_CONTINUATION["run"], 39450676455}:
         require(workflow == "build-combined-release.yml", "Reviewed completed-package cache workflow changed")
     if continuation_record(run) is not None:
         require(workflow == "build-linux-release.yml", "Reviewed Linux continuation workflow changed")
@@ -308,7 +451,12 @@ def fetch(api, selected: dict, directory: Path, *, platform: str, kind: str, key
     require(producer["status"] == "completed", "Cache producer is still running")
     current = api.get(f"/repos/{BUILDER}/actions/runs/{run}")
     require(current["run_attempt"] == attempt and current["status"] == "completed", "Cache producer was rerun")
-    if run in {LINUX_RELEASE_CONTINUATION["run"], WINDOWS_RELEASE_BINARY_CACHE["run"]}:
+    if run in {RELEASE_052_LINUX_PACKAGE_CONTINUATION["run"], RELEASE_052_WINDOWS_PACKAGE_CONTINUATION["run"],
+               RELEASE_052_LINUX_NATIVE_PACKAGE_CONTINUATION["run"], 39450676455}:
+        require(producer.get("conclusion") == "failure" and current.get("conclusion") == "failure"
+                and current.get("head_sha") == revision, "Reviewed package-only continuation producer changed")
+    if run in {LINUX_RELEASE_CONTINUATION["run"], WINDOWS_RELEASE_BINARY_CACHE["run"],
+               LINUX_SUCCESSFUL_RELEASE_PACKAGES["run"], 39103476664, 39195808918}:
         require(producer.get("conclusion") == "success" and current.get("conclusion") == "success"
                 and current.get("head_sha") == revision, "Qualified release cache producer changed or failed")
     name = f"{kind}-{platform}-{run}-{attempt}"

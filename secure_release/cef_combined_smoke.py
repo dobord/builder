@@ -14,6 +14,20 @@ from . import cef_sdk_example as checked
 
 PROJECT_BLOB = "627e8c62adb018fef6e5974e655e72fca3addba3"
 MAIN_BLOB = "3ae25fe8e6324236313c57f942f5e541e5cf8db5"
+# Reviewed registry 0.5.0 candidate e93e1da73fd8d228e7a00e90eeaf0f71bfa4b716:
+# only the exact CMake/runtime version checks changed from 0.3.1 to 0.5.0.
+# Accept complete pairs, never a CMake file from one release with another main.
+CONSUMER_BLOBS = frozenset({
+    # 0.5.2 also links and probes the complete FFmpeg/FreeRDP provider graph.
+    ("e88561e9874662e2abf9017b8e4b3eedb242c078",
+     "a0b571b7c3da572ee20f1ab4aa6441855b318d29"),
+    (PROJECT_BLOB, MAIN_BLOB),
+    ("fba548add26ad29463c01309b98312013c58b3b9",
+     "cb380928ef3ad9029fd382f362ec09ab9fbba63c"),
+    # Release 0.5.1 changes only the exact package/runtime version checks.
+    ("b6cac082dc833ea3fd721b245476d78929aac340",
+     "f5e6b29845cb2cb317f93b5a4e4a84953c17dc7a"),
+})
 SMOKE_BLOB = "2b152219424a2ca9f944bf231577a5ae1d7f8999"
 MARKER = b"  cef_run_message_loop();"
 LEGACY = r'''    string(REGEX MATCHALL "  cef_run_message_loop\\(\\);" _matches "${_source}")
@@ -32,9 +46,8 @@ def validate(source: Path, smoke: Path) -> dict[str, bytes]:
     checked.require(source.is_dir() and {p.name for p in source.iterdir()} ==
                     {"CMakeLists.txt", "main.cpp"}, "Combined consumer source inventory changed")
     files = {name: checked.read(source / name) for name in ("CMakeLists.txt", "main.cpp")}
-    for name, expected in (("CMakeLists.txt", PROJECT_BLOB), ("main.cpp", MAIN_BLOB)):
-        checked.require(checked.blob(files[name]) == expected,
-                        "Pinned combined consumer source changed")
+    identity = tuple(checked.blob(files[name]) for name in ("CMakeLists.txt", "main.cpp"))
+    checked.require(identity in CONSUMER_BLOBS, "Pinned combined consumer source changed")
     original = checked.read(smoke)
     checked.require(checked.blob(original) == SMOKE_BLOB and original.count(MARKER) == 1,
                     "Pinned combined CEF smoke changed")

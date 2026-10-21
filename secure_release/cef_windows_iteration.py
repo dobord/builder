@@ -49,6 +49,13 @@ REVIEWED_LEGACY_IMAGE_MIGRATIONS = {
         "llvm": "20.1.8",
     },
 }
+# Native contracts job 117584706073 (run 39096752136) verified the complete
+# critical fingerprint against the existing baseline on 20261012.333.1; only
+# the previously unreviewed hosted-image label was rejected. Keep exact image
+# pairing and every ABI/toolchain field mandatory before checkpoint restore.
+REVIEWED_LEGACY_IMAGE_MIGRATIONS[("20260927.320.1", "20261012.333.1")] = dict(
+    REVIEWED_LEGACY_IMAGE_MIGRATIONS[("20260927.320.1", "20261004.326.1")]
+)
 
 
 # The unchanged private checkpoint codec binds the absolute work path. Exact #51

@@ -100,6 +100,25 @@ class ProfileTests(unittest.TestCase):
             self.assertEqual(before, profile.verify(root / "relocated"))
             self.assertTrue(before["freerdp_ffmpeg_features_verified"])
 
+    def test_3322_requires_effective_hardware_switch_not_removed_legacy_names(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            header, pc = self.fixture(root)
+            pc.write_text(pc.read_text().replace("3.31.1", "3.32.2"))
+            text = header.read_text()
+            for name in profile.REQUIRED_OFF:
+                text = text.replace(name + "=OFF", "")
+            text = text.replace('"\n', ' WITH_FFMPEG_HWACCEL=OFF"\n')
+            header.write_text(text)
+            self.assertTrue(profile.verify(root)["freerdp_host_vaapi_excluded"])
+            for replacement in ("", "WITH_FFMPEG_HWACCEL=ON", "WITH_FFMPEG_HWACCEL=MAYBE"):
+                header.write_text(text.replace("WITH_FFMPEG_HWACCEL=OFF", replacement))
+                with self.assertRaises(RuntimeError):
+                    profile.verify(root)
+            header.write_text(text.replace("WITH_FFMPEG_HWACCEL=OFF", "WITH_FFMPEG_HWACCEL=OFF WITH_VAAPI=ON"))
+            with self.assertRaises(RuntimeError):
+                profile.verify(root)
+
     def test_feature_missing_disabled_or_ambiguous_fails(self):
         for name in sorted(profile.REQUIRED_ON | profile.REQUIRED_OFF):
             with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:

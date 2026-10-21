@@ -38,8 +38,8 @@ CXX_NAMESPACE = "CEF_CHROMIUM_CXX_"
 FFMPEG_NAMESPACE = "CEF_CHROMIUM_FFMPEG_"
 ATOMIC_NAMESPACE = "CEF_CHROMIUM_ATOMIC_"
 OPENSSL_ARCHIVES = ("lib/libssl.a", "lib/libcrypto.a")
-FFMPEG_VERSION = "8.1.2"
-FFMPEG_PORT_VERSION = 4
+FFMPEG_VERSION = "9.0.2"
+FFMPEG_PORT_VERSION = 3
 FFMPEG_ARCHIVES = (
     "lib/libavcodec.a",
     "lib/libavdevice.a",
@@ -49,6 +49,30 @@ FFMPEG_ARCHIVES = (
     "lib/libswresample.a",
     "lib/libswscale.a",
 )
+# The full software graph may overlap Chromium's own WebRTC/image codecs too.
+# Bind exact installed owners and derive collisions from their actual archives;
+# rewrite only CEF definitions/references, never these consumer providers.
+FFMPEG_CODEC_PROVIDERS = (
+    ("aom", "3.13.3", 0, "lib/libaom.a"),
+    ("dav1d", "1.5.3", 0, "lib/libdav1d.a"),
+    ("libvpx", "1.17.0", 0, "lib/libvpx.a"),
+    ("opus", "1.5.2", 1, "lib/libopus.a"),
+    ("libwebp", "1.6.0", 2, "lib/libwebp.a"),
+    ("openh264", "2.6.0", 4, "lib/libopenh264.a"),
+    ("openjpeg", "2.5.4", 0, "lib/libopenjp2.a"),
+    ("snappy", "1.2.2", 2, "lib/libsnappy.a"),
+    ("libxml2", "2.15.3", 0, "lib/libxml2.a"),
+    ("libilbc", "3.0.4", 0, "lib/libilbc.a"),
+)
+# WebP's static pkg-config closure also links mux and SharpYUV. The decoder
+# and demux exports share the same package and may be consumed independently.
+FFMPEG_CODEC_COMPANIONS = {
+    "libwebp": ("lib/libwebpmux.a", "lib/libsharpyuv.a", "lib/libwebpdemux.a", "lib/libwebpdecoder.a"),
+}
+# C++ codec objects carry this weak exception-personality reference too.
+# It belongs to the independently pinned GCC runtime, not the media namespace.
+# Do not grant precedence to arbitrary duplicate provider definitions.
+MEDIA_CXX_SHARED_DEFINITIONS = frozenset({"DW.ref.__gxx_personality_v0"})
 GXX = Path("/usr/bin/g++-14")
 GCC_ROOT = Path("/usr/lib/gcc/x86_64-linux-gnu/14")
 GCC_RUNTIME_ARCHIVES = ("libstdc++.a", "libgcc.a", "libgcc_eh.a")
@@ -59,7 +83,11 @@ SYMBOL = re.compile(r"[A-Za-z_.$][A-Za-z0-9_.$@]*\Z")
 MAX_CEF_ARCHIVES = 4096
 MAX_COLLISIONS = 8192
 MAX_CXX_COLLISIONS = 8192
-MAX_FFMPEG_COLLISIONS = 8192
+# The reviewed full graph has 10,149 candidates against the previous CEF SDK
+# (including AOM, dav1d, VPX and libxml2). This is a resource bound, not an
+# approval list: exact current provider owners/bytes and all rewritten CEF
+# definitions/references must still verify on every native release build.
+MAX_FFMPEG_COLLISIONS = 16384
 MAX_ATOMIC_COLLISIONS = 4096
 MAX_SOURCE_ARCHIVE_BYTES = 1024**3
 MAX_NM_OUTPUT_BYTES = 2 * 1024**3
@@ -380,11 +408,21 @@ def _ffmpeg_runtime(
         require_status=require_status,
     )
     providers = [(name, regular(prefix, name)) for name in FFMPEG_ARCHIVES]
+    codec_ownership = {}
+    for package, version, port_version, name in FFMPEG_CODEC_PROVIDERS:
+        names = (name, *FFMPEG_CODEC_COMPANIONS.get(package, ()))
+        codec_ownership[package] = _owner(
+            installed, package, version, port_version, {TRIPLET + "/" + item for item in names},
+            expected=None if expected is None else expected.get("codec_ownership", {}).get(package),
+            require_status=require_status,
+        )
+        providers.extend((item, regular(prefix, item)) for item in names)
     archives = {name: digest(path) for name, path in providers}
     result = {
         "version": FFMPEG_VERSION,
         "port_version": FFMPEG_PORT_VERSION,
         "ownership": owner,
+        "codec_ownership": codec_ownership,
         "archives": archives,
     }
     if expected is not None:
@@ -796,6 +834,7 @@ def install(installed: Path, source: Path, diagnostics: Path) -> dict:
         table = _symbols(nm, path)
         ffmpeg_defined.update(_defined(table))
         ffmpeg_names.update(name for name, _ in table)
+    ffmpeg_defined.difference_update(MEDIA_CXX_SHARED_DEFINITIONS & gcc_defined)
 
     collisions: set[str] = set()
     cxx_collisions: set[str] = set()

@@ -17,7 +17,7 @@ ARM64 = {
 
 class ProjectRuntimeContractTests(unittest.TestCase):
     def test_linux_arm64_official_wheels_have_exact_hash_pins(self):
-        lock = (ROOT / "project-ci-requirements.lock").read_text()
+        lock = (ROOT / "project-ci-requirements.lock").read_text(encoding="utf-8")
         requirements = lock.replace("\\\n", " ")
         for package, (version, filename, digest) in ARM64.items():
             with self.subTest(wheel=filename):
@@ -26,11 +26,11 @@ class ProjectRuntimeContractTests(unittest.TestCase):
                 self.assertIn("--hash=sha256:" + digest, matched.group(1))
 
     def test_online_install_preserves_wheel_only_hash_enforcement(self):
-        workflow = (ROOT / ".github/workflows/encrypted-project-ci.yml").read_text()
+        workflow = (ROOT / ".github/workflows/encrypted-project-ci.yml").read_text(encoding="utf-8")
         self.assertEqual(workflow.count("--only-binary=:all: -r project-ci-requirements.lock"), 2)
         self.assertEqual(workflow.count("--require-hashes"), 2)
         # The offline SDK wheelhouse has a separate reviewed platform contract.
-        offline = (ROOT / "requirements.lock").read_text()
+        offline = (ROOT / "requirements.lock").read_text(encoding="utf-8")
         for _, _, digest in ARM64.values():
             self.assertNotIn(digest, offline)
 

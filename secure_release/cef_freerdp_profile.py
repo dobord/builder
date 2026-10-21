@@ -43,9 +43,20 @@ def verify(prefix: Path) -> dict:
         raise RuntimeError("Duplicate FreeRDP build-configuration flags")
     if any(values.get(name) != "ON" for name in REQUIRED_ON):
         raise RuntimeError("Requested FreeRDP/FFmpeg SDK features are not enabled")
-    if any(values.get(name) != "OFF" for name in REQUIRED_OFF):
-        raise RuntimeError("Undeclared host VAAPI is enabled in the FreeRDP SDK")
     pc = _text(prefix, "lib/pkgconfig/freerdp3.pc")
+    versions = re.findall(r"^Version:\s*(\S+)\s*$", pc, re.M)
+    if versions == ["3.32.2"]:
+        # 3.32.2 replaced the old VAAPI switches with one FFmpeg hardware
+        # acceleration option. Require the effective option to be OFF; absent
+        # legacy names are not evidence that a hardware dependency was enabled.
+        if (values.get("WITH_FFMPEG_HWACCEL") != "OFF" or
+                any(name in values and values[name] != "OFF" for name in REQUIRED_OFF)):
+            raise RuntimeError("Undeclared host VAAPI or FFmpeg hardware acceleration is enabled")
+    elif versions == ["3.31.1"]:
+        if any(values.get(name) != "OFF" for name in REQUIRED_OFF):
+            raise RuntimeError("Undeclared host VAAPI is enabled in the FreeRDP SDK")
+    else:
+        raise RuntimeError("Unreviewed or ambiguous FreeRDP profile version")
     # Both the upstream typo (va) and a corrected host dependency (libva) are
     # invalid here. Do not make va.pc aliases or silently delete Requires fields.
     if re.search(r"(?<![A-Za-z0-9_])(?:libva|va|-lva)(?:-(?:drm|x11|wayland))?(?![A-Za-z0-9_])", pc):

@@ -15,9 +15,12 @@ from . import cef_sdk_example as checked, safeio
 
 TRIPLET = "x64-linux-static-release"
 ORIGINS = {
-    "ports/freerdp/portfile.cmake": "8d68d304ce0a117c7237418a3d65fcf1588834f4",
-    "ports/freerdp/vcpkg.json": "cde94ab640afd287a20a56b94098f651fc78557c",
-    "ports/freerdp/install-layout.patch": "8514875506f93a9370e27cc03618619891b07113",
+    "ports/freerdp/portfile.cmake": "1490f9e214ec08f15b15417b8770d2c210173da2",
+    "ports/freerdp/vcpkg.json": "a377f1bfee11d8c70b6e627af5a8363ef56c8c83",
+    "ports/freerdp/cmake-project-include.cmake": "4b8ac592ef3aa6c24d70149c5022468a613e04ad",
+    "ports/freerdp/install-layout.patch": "fb8a0fd11b462818de12e749505e69dc45084e14",
+    "ports/freerdp/ffmpeg.diff": "c98a67b057d4da58600432bea56b680ea4bb781c",
+    "ports/freerdp/fix-aom-target.patch": "120e2463bbb3c79dab6e217a4844f290ba721e57",
 }
 EXPORTS = (
     "share/freerdp-client3/FreeRDP-ClientTargets",
@@ -34,8 +37,12 @@ def validate_sources(registry: Path) -> None:
                         "FreeRDP object installation policy changed")
 
 
-def imported_objects(declarations: str, configuration: str) -> dict[str, list[str]]:
+def imported_objects(declarations: str, configuration: str, *, triplet: str = TRIPLET) -> dict[str, list[str]]:
     """Read the limited CMake-generated Release OBJECT export grammar only."""
+    # Parse either native line ending; snapshot() still hashes the original
+    # unmodified bytes, so this never canonicalizes an ownership/transport proof.
+    declarations = declarations.replace("\r\n", "\n")
+    configuration = configuration.replace("\r\n", "\n")
     declared = re.findall(r"^add_library\((" + TARGET + r") OBJECT IMPORTED\)$",
                           declarations, re.M)
     checked.require(len(declared) == len(set(declared)) and
@@ -55,7 +62,7 @@ def imported_objects(declarations: str, configuration: str) -> dict[str, list[st
             prefix = "${_IMPORT_PREFIX}/"
             checked.require(value.startswith(prefix), "Non-relocatable FreeRDP object reference")
             path = value[len(prefix):]
-            member = "installed/" + TRIPLET + "/" + path
+            member = "installed/" + triplet + "/" + path
             checked.require(safeio.object_member(member) and
                             path.startswith(OBJECT_ROOT + "/" + target + "/"),
                             "FreeRDP object escapes its imported target")
@@ -75,10 +82,10 @@ def imported_objects(declarations: str, configuration: str) -> dict[str, list[st
     return result
 
 
-def ownership(installed: Path, required: set[str]) -> None:
+def ownership(installed: Path, required: set[str], *, triplet: str = TRIPLET) -> None:
     info = checked.clean(installed / "vcpkg/info")
     checked.require(info.is_dir(), "Missing FreeRDP object ownership")
-    lists = sorted(info.glob("*_" + TRIPLET + ".list"))
+    lists = sorted(info.glob("*_" + triplet + ".list"))
     checked.require(0 < len(lists) <= 4096, "Invalid FreeRDP owner inventory")
     found, total = set(), 0
     for listing in lists:
@@ -87,22 +94,23 @@ def ownership(installed: Path, required: set[str]) -> None:
         for name in data.decode().splitlines():
             if name in required:
                 checked.require(name not in found and re.fullmatch(
-                    r"freerdp_3\.31\.1(?:#[0-9]+)?_" + re.escape(TRIPLET) + r"\.list",
+                    r"freerdp_3\.32\.2(?:#[0-9]+)?_" + re.escape(triplet) + r"\.list",
                     listing.name) is not None, "FreeRDP object or export lost its unique owner")
                 found.add(name)
     checked.require(found == required, "Unowned FreeRDP object or CMake export")
 
 
-def snapshot(installed: Path) -> dict:
+def snapshot(installed: Path, *, triplet: str = TRIPLET) -> dict:
     """Bind installed object bytes AND the CMake declarations that require them."""
-    prefix = checked.clean(installed / TRIPLET)
+    checked.require(triplet in {TRIPLET, "x64-windows-static-release"}, "Invalid FreeRDP object triplet")
+    prefix = checked.clean(installed / triplet)
     metadata, bindings = {}, {}
     for export in EXPORTS:
         names = (export + ".cmake", export + "-release.cmake")
         data = [checked.read(prefix / name) for name in names]
         for name, content in zip(names, data):
             metadata[name] = checked.record(content)
-        targets = imported_objects(*(content.decode() for content in data))
+        targets = imported_objects(*(content.decode() for content in data), triplet=triplet)
         checked.require(not set(bindings).intersection(targets), "Duplicate FreeRDP object target")
         bindings.update(targets)
     checked.require("drdynvc-client" in bindings and 0 < len(bindings) <= 256,
@@ -118,26 +126,26 @@ def snapshot(installed: Path) -> dict:
     objects, total = {}, 0
     for path in sorted(paths):
         file = checked.clean(prefix / path)
-        data = safeio._object_bytes(file)
+        data = safeio._object_bytes(file, platform="windows" if triplet == "x64-windows-static-release" else "linux")
         total += len(data)
         checked.require(total <= safeio.MAX_REVIEWED_OBJECT_TOTAL, "FreeRDP object closure too large")
-        objects["installed/" + TRIPLET + "/" + path] = checked.record(data)
+        objects["installed/" + triplet + "/" + path] = checked.record(data)
     safeio._object_review(objects)
-    ownership(installed, {TRIPLET + "/" + p for p in (*paths, *metadata)})
+    ownership(installed, {triplet + "/" + p for p in (*paths, *metadata)}, triplet=triplet)
     return dict(schema=1, kind="installed-freerdp-object-closure", origins=dict(ORIGINS),
                 objects=objects, metadata=metadata, bindings=bindings)
 
 
-def capture(installed: Path) -> dict:
+def capture(installed: Path, *, triplet: str = TRIPLET) -> dict:
     """Called after the pinned install succeeds and before vcpkg raw export."""
-    return snapshot(installed)
+    return snapshot(installed, triplet=triplet)
 
 
-def verify(installed: Path, receipt: dict) -> dict:
+def verify(installed: Path, receipt: dict, *, triplet: str = TRIPLET) -> dict:
     checked.require(isinstance(receipt, dict) and set(receipt) == {
         "schema", "kind", "origins", "objects", "metadata", "bindings"}
         and receipt["schema"] == 1 and receipt["kind"] == "installed-freerdp-object-closure"
         and receipt["origins"] == ORIGINS, "Missing external FreeRDP object receipt")
     safeio._object_review(receipt["objects"])
-    checked.require(snapshot(installed) == receipt, "FreeRDP object or export bytes changed in transport")
+    checked.require(snapshot(installed, triplet=triplet) == receipt, "FreeRDP object or export bytes changed in transport")
     return receipt["objects"]

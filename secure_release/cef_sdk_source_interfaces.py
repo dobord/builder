@@ -12,7 +12,7 @@ import re
 from . import cef_sdk_example as checked, safeio
 
 POLICY = Path(__file__).resolve().parents[1] / "ci/cef-sdk-source-interfaces.json"
-POLICY_SHA256 = "14dce87d5f147f200e08c998632306c7b2614240481ff117aa18522bcf64ab0d"
+POLICY_SHA256 = "5bbd46061b29f5cb0d9f2fafcf59f4df70edd2ac820914332e6b2e6c137aa101"
 TRIPLET = "x64-linux-static-release"
 
 
@@ -30,16 +30,19 @@ def validate_sources(upstream: Path) -> None:
                         "Pinned FFmpeg/Xtrans installation inputs changed")
 
 
-def verify(sdk: Path) -> dict:
+def verify(sdk: Path, *, triplet: str = TRIPLET) -> dict:
     """Require both exact directories and unique, versioned vcpkg ownership.
 
     The port's two reviewed Xtrans patches are included in expected bytes.
     FFmpeg's installed Makefile is Makefile.example, not its build-tree recipe.
     No installed source, manifest or library is rewritten by this check.
     """
-    prefix = checked.clean(sdk / "installed" / TRIPLET)
+    checked.require(triplet in {TRIPLET, "x64-windows-static-release"}, "Invalid source-interface triplet")
+    prefix = checked.clean(sdk / "installed" / triplet)
     expected, review = {}, {}
     for package, spec in policy()["packages"].items():
+        if triplet == "x64-windows-static-release" and package != "ffmpeg":
+            continue
         directory = checked.clean(prefix / spec["directory"])
         checked.require(directory.is_dir() and
                         {p.name for p in directory.iterdir()} == set(spec["files"]),
@@ -49,18 +52,18 @@ def verify(sdk: Path) -> dict:
             record = {"size": entry["size"], "sha256": entry["sha256"]}
             checked.require(checked.record(data) == record and checked.blob(data) == entry["blob"],
                             "SDK source-interface bytes changed: " + package + "/" + name)
-            member = TRIPLET + "/" + spec["directory"] + "/" + name
-            expected[member] = package + "_" + spec["version"] + "_" + TRIPLET + ".list"
+            member = triplet + "/" + spec["directory"] + "/" + name
+            expected[member] = package + "_" + spec["version"] + "_" + triplet + ".list"
             if Path(name).suffix.casefold() in safeio.SOURCE_SUFFIXES:
                 review["installed/" + member] = record
     info = checked.clean(sdk / "installed/vcpkg/info")
     checked.require(info.is_dir(), "Missing SDK source-interface owners")
-    lists = sorted(info.glob("*_" + TRIPLET + ".list"))
+    lists = sorted(info.glob("*_" + triplet + ".list"))
     checked.require(0 < len(lists) <= 4096, "Invalid SDK source-interface owner inventory")
     found, total = set(), 0
     for listing in lists:
         checked.require(re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*_[^/]+_" +
-                                    re.escape(TRIPLET) + r"\.list", listing.name) is not None,
+                                    re.escape(triplet) + r"\.list", listing.name) is not None,
                         "Invalid SDK source-interface owner label")
         data = checked.read_listing(listing)
         total += len(data)
@@ -71,5 +74,6 @@ def verify(sdk: Path) -> dict:
                                 "SDK source-interface owner changed or duplicated")
                 found.add(line)
     checked.require(found == set(expected), "Unowned SDK source-interface file")
-    checked.require(len(review) == 29, "Incomplete FFmpeg/Xtrans source-interface review")
+    checked.require(len(review) == (24 if triplet == "x64-windows-static-release" else 29),
+                    "Incomplete FFmpeg/Xtrans source-interface review")
     return review

@@ -448,6 +448,10 @@ def build():
         windows_isolation = windows_runtime_isolation.install(
             installed, Path(env("RUNNER_TEMP")) / "w/download/chromium/src", root / "windows-runtime-isolation")
     linux_review = None
+    windows_objects = None
+    if platform == "windows" and "freerdp[full]" in packages:
+        from . import windows_multimedia
+        windows_objects = windows_multimedia.capture(root / "workspace", installed)
     linux_publication = workflow == "build-linux-release.yml" and cfg is not None
     if linux_publication:
         from . import linux_sdk
@@ -462,11 +466,20 @@ def build():
     source_review = None
     if linux_review is not None:
         source_review = linux_sdk.package(root, sdk, package, linux_review, platform_probe)
+    elif windows_objects is not None:
+        source_review = windows_multimedia.package(sdk, package, windows_objects)
     else:
         safeio.sdk_zip(sdk, package)
     if windows_isolation is not None:
         windows_runtime_isolation.validate_archive(package, windows_isolation)
     safeio.extract_zip(package, root / "consumer-sdk")
+    multimedia_tools_proof = None
+    if platform == "linux" and "ffmpeg[static-full-gpl]" in packages:
+        from . import multimedia_tools
+        multimedia_tools_proof = multimedia_tools.verify_linux(
+            root / "consumer-sdk", root, execute, freerdp_full="freerdp[full]" in packages)
+    if windows_objects is not None:
+        windows_multimedia.relocated(root / "consumer-sdk", windows_objects, source_review)
     source = root / "workspace" / payload["plan"]["smoke_path"]
     smoke_fixture = root / "cef-recipe/vcpkg/ports/cef-static/smoke.c"
     if workflow == "build-windows-release.yml" and cfg is not None:
@@ -506,7 +519,8 @@ def build():
     cef_proof = cef_build.verify_consumer(
         root, cfg, platform, execute, platform_sha256, platform_probe,
         **({"reviewed_objects": linux_review["objects"]["objects"],
-            "reviewed_host_tools": linux_review["host_tools"]["records"]} if linux_review is not None else {})
+            "reviewed_host_tools": linux_review["host_tools"]["records"]} if linux_review is not None else
+           {"reviewed_objects": windows_objects["objects"]} if windows_objects is not None else {})
     ) if cfg is not None else None
     cpp_proof = linux_sdk.verify_cpp(root, root / "consumer-sdk", linux_review, execute) if linux_review is not None else None
     platform_preflight = None
@@ -527,7 +541,11 @@ def build():
     if cfg is not None:
         manifest["cef"] = {"build_contract_sha256": cef_contract.build_key(cfg, platform, platform_sha256),
                             "profile": cfg["profile"], "consumer": cef_proof}
+        if multimedia_tools_proof is not None:
+            manifest["cef"]["multimedia_tools"] = multimedia_tools_proof
         if workflow == "build-windows-release.yml":
+            if windows_objects is not None:
+                manifest["cef"]["windows_multimedia_sources"] = source_review
             manifest["cef"]["windows_engine"] = windows_sdk.binding(cfg)
             manifest["cef"]["windows_runtime_isolation"] = windows_isolation
             manifest["cef"]["windows_consumer_linker"] = crypto.parse((root / "windows-consumer-linker.json").read_bytes())
@@ -597,7 +615,9 @@ def diagnostics():
                 candidates.extend(sorted((root / "cef-consumer-evidence").rglob(pattern)))
         runtime_logs = root / "upstream/buildtrees/cef-static/diagnostics"
         if runtime_logs.is_dir() and not runtime_logs.is_symlink():
-            for pattern in ("smoke-progress-*.json", "stdout.txt", "stderr.txt", "cef-static.log"):
+            for pattern in ("smoke-progress-*.json", "smoke-modules-*.txt",
+                            "static-smoke.log", "static-smoke-status.json", "smoke-runs.json",
+                            "stdout.txt", "stderr.txt", "cef-static.log"):
                 candidates.extend(sorted(runtime_logs.rglob(pattern)))
         for folder in sorted((root / "upstream/buildtrees").glob("*")):
             if folder.is_dir() and not folder.is_symlink():

@@ -78,7 +78,7 @@ install(TARGETS sdk-base ARCHIVE DESTINATION lib)
 
 
 def own(installed):
-    listing=installed/'vcpkg/info'/('freerdp_3.31.1_'+T+'.list')
+    listing=installed/'vcpkg/info'/('freerdp_3.32.2_'+T+'.list')
     listing.parent.mkdir(parents=True)
     listing.write_text(''.join(T+'/'+p.relative_to(installed/T).as_posix()+'\n'
                               for p in sorted((installed/T).rglob('*')) if p.is_file()))
@@ -259,7 +259,7 @@ class PolicyTests(unittest.TestCase):
         objects.validate_sources(registry)
         port=(registry/'ports/freerdp/portfile.cmake').read_text()
         self.assertEqual(port.count('-DCMAKE_INTERPROCEDURAL_OPTIMIZATION=OFF'),1)
-        self.assertIn('if(VCPKG_TARGET_IS_LINUX AND VCPKG_LIBRARY_LINKAGE STREQUAL "static")',port)
+        self.assertIn('if(VCPKG_LIBRARY_LINKAGE STREQUAL "static")',port)
 
 
 @unittest.skipUnless(sys.platform=='linux','Native exported object installation')
