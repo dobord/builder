@@ -8,6 +8,10 @@ Exact package-only continuation artifacts additionally preserve completed
 dependencies from candidates; they do not admit failed SDKs or engine proofs.
 Linux image `20261018.339.1` is admitted only with the unchanged critical host
 fingerprint and exact checkpoint identity beyond the reviewed image field.
+Windows transports the same seven pinned XZ documentation companions as Linux
+and approves only their five C examples. FFmpeg and XZ source reviews remain
+separate, with whole-source inventory before ZIP, ownership/hash checks after
+relocation, and independent publisher comparison against its own source pins.
 
 ## Completed local Linux checks
 
