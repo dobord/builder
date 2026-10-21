@@ -1,5 +1,13 @@
 # Static multimedia 0.5.2 validation
 
+Artifact transport restarts at most three times for a read/connect timeout,
+connection failure or truncated HTTP stream. Every restart reacquires the
+signed URL without forwarding Authorization and hashes the full bounded
+payload against the original digest. Partial output is removed, existing
+complete output is preserved until atomic replacement, and digest/size/policy
+failures remain fatal without retry. No cache selection or qualification gate
+is changed by this network-only recovery.
+
 The 0.5.2 source plans request full GPL FFmpeg 9.0.2#5 and FreeRDP
 3.32.2#3 on both platforms, with the qualified CEF recipes/checkpoints and
 unchanged triplets. The previous successful 0.5.1 package caches remain
