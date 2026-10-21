@@ -8,6 +8,11 @@ complete output is preserved until atomic replacement, and digest/size/policy
 failures remain fatal without retry. No cache selection or qualification gate
 is changed by this network-only recovery.
 
+Exact candidate-10 completed-package caches may be reused with their original
+builder/image/artifact digest contexts only. Its failed Windows SDK and runtime
+evidence are not promoted. The repaired libusb recipe gets a new vcpkg ABI;
+its old anonymous MSVC LTCG objects remain rejected by the unchanged auditor.
+
 The 0.5.2 source plans request full GPL FFmpeg 9.0.2#5 and FreeRDP
 3.32.2#3 on both platforms, with the qualified CEF recipes/checkpoints and
 unchanged triplets. The previous successful 0.5.1 package caches remain
