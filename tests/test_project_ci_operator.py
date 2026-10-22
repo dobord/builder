@@ -26,7 +26,24 @@ def operator_payload():
 
 
 class OperatorTests(unittest.TestCase):
-    def test_release_inventory_requires_all_39_native_lanes(self):
+    def test_signed_release_inventory_requires_exactly_40_lanes(self):
+        signing, verification = crypto.generate("sign")
+        value = dict(operator_payload(), suite="release")
+        for count in (39, 40, 41):
+            with self.subTest(count=count):
+                lanes = [f"synthetic-{index}" for index in range(count)]
+                state = {"payload": value, "request": "PUBLIC_SYNTHETIC_REQUEST",
+                         "request_digest": ci.digest_bytes(b"PUBLIC_SYNTHETIC_REQUEST"),
+                         "lanes": lanes, "builder_ref": "refs/tags/synthetic"}
+                inventory = {key: state[key] for key in ("payload", "lanes", "request_digest", "builder_ref")}
+                state["inventory"] = crypto.sign(inventory, signing)
+                if count == 40:
+                    operator.validate_state(state, verification)
+                else:
+                    with self.assertRaisesRegex(ValueError, "inventory incomplete"):
+                        operator.validate_state(state, verification)
+
+    def test_release_inventory_requires_all_40_native_lanes(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "ci/builder").mkdir(parents=True)
@@ -90,7 +107,7 @@ class OperatorTests(unittest.TestCase):
                     return {"sha": value["input_blob"], "encoding": "base64", "size": len(raw), "content": crypto.b64(raw)}
                 raise AssertionError(path)
             from secure_release import project_dependency_review
-            with patch.dict(os.environ, env), patch.object(ci, "pages", return_value=[run]), patch.object(ci, "api_json", side_effect=reply), patch.object(ci, "checked"), patch.object(ci, "recipes", return_value=[{"id": f"synthetic-{i}", "runner": ["ubuntu-24.04"]} for i in range(39)]), patch.object(project_dependency_review, "verify", return_value={"synthetic": True}) as osv:
+            with patch.dict(os.environ, env), patch.object(ci, "pages", return_value=[run]), patch.object(ci, "api_json", side_effect=reply), patch.object(ci, "checked"), patch.object(ci, "recipes", return_value=[{"id": f"synthetic-{i}", "runner": ["ubuntu-24.04"]} for i in range(40)]), patch.object(project_dependency_review, "verify", return_value={"synthetic": True}) as osv:
                 for invalid in ({"actor": {"id": 7}}, {"triggering_actor": {"id": 7}}, {"run_attempt": 2},
                                 {"path": ".github/workflows/other.yml"}, {"head_sha": "0" * 40}):
                     with self.subTest(invalid=invalid), patch.object(ci, "pages", return_value=[dict(run, **invalid)]), self.assertRaises(ValueError):
