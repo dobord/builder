@@ -89,6 +89,26 @@ sampling, variance and regression thresholds. Historical failed comparisons
 stay failed; the fresh request is new evidence, not a rerun or reclassification.
 Remove the narrowly scoped policy exception after its approved use.
 
+For the explicitly approved same-source A/A case only, native execution first
+requires all six independently built benchmark products to be regular,
+nonlinked, bounded files with stable fingerprints and identical SHA-256 values
+between builds. Any mismatch fails qualification; it cannot fall back to a
+different baseline. The exact reviewed paired-measurement command then binds
+both roles to the verified candidate products, giving both roles the same
+physical executable paths and file identities. This is an identical-artifact
+calibration, not evidence of improvement over a previous release. Both builds,
+their lifecycle controls and all twenty alternating executions per test remain.
+
+An exclusive owner-private `owner-self-baseline.json` records the authenticated
+request/source/baseline/builder identities, both build-product fingerprints and
+hashes, and the original/executed command hashes. Existing encrypted diagnostics
+carry this record; native per-launch bindings still authenticate the actual
+physical executable and raw output. No source file, binary or sample is rewritten
+or copied. Cross-revision/default-baseline commands remain byte-for-byte
+unchanged. Sampling, raw data, comparisons, thresholds, complete lane inventory
+and exact-SHA publication evidence remain mandatory, including calibration
+failures or inconclusive results.
+
 The source-read token in builder reads only source identity, PR identity (and
 legacy schema-1 review policy), published stable baseline metadata or an exactly
 approved baseline commit. The builder read token fetches the public
