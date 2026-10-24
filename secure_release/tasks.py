@@ -451,7 +451,7 @@ def build():
     windows_objects = None
     if platform == "windows" and "freerdp[full]" in packages:
         from . import windows_multimedia
-        windows_objects = windows_multimedia.capture(root / "workspace", installed)
+        windows_objects = windows_multimedia.capture(root / "workspace", installed, upstream)
     linux_publication = workflow == "build-linux-release.yml" and cfg is not None
     if linux_publication:
         from . import linux_sdk
@@ -467,7 +467,8 @@ def build():
     if linux_review is not None:
         source_review = linux_sdk.package(root, sdk, package, linux_review, platform_probe)
     elif windows_objects is not None:
-        source_review = windows_multimedia.package(sdk, package, windows_objects)
+        source_review = windows_multimedia.package(sdk, package, windows_objects,
+            diagnostics=root / "windows-runtime-isolation/sdk-source-inventory.json")
     else:
         safeio.sdk_zip(sdk, package)
     if windows_isolation is not None:

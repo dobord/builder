@@ -206,6 +206,35 @@ RELEASE_052_RC4_PACKAGE_CACHES = {
                 "artifact_sha256": "22ffdfe611e1eacfb3164d5f21d6cc601f54f51cf35410b0dad365b41b93e12d",
                 "image": "20261012.333.1"},
 }
+# Candidate 6 completed the Windows graph and stopped at SDK source review.
+# Reuse exact completed package bytes only, never its unqualified SDK.
+RELEASE_052_RC6_PACKAGE_CACHES = {
+    "linux": {"run": 39541599659, "attempt": 1,
+              "revision": "5bfe643890181f9995e1de7b4457e9b67e1f380e",
+              "artifact_id": 12322367832,
+              "artifact_sha256": "d5728418b9d54495cb041eb3f9cef0843d31cd8f5b098938b224da70d363dc68",
+              "image": "20261012.334.1"},
+    "windows": {"run": 39541599659, "attempt": 1,
+                "revision": "5bfe643890181f9995e1de7b4457e9b67e1f380e",
+                "artifact_id": 12320943510,
+                "artifact_sha256": "5ff4f298f007ff2eb6c46a2083659672a54a038cb5f7e64ff9a047a614d3a819",
+                "image": "20261012.333.1"},
+}
+# Candidate 10 passed the consumer link/tests; its Windows libusb archive
+# failed strict format audit. Admit completed packages only. The repaired
+# libusb port gets a new ABI; never reuse its old archive as a qualified SDK.
+RELEASE_052_RC10_PACKAGE_CACHES = {
+    "linux": {"run": 39625824076, "attempt": 1,
+              "revision": "6d911dface03e8f66e798c7b6616d0d5123b4720",
+              "artifact_id": 12365871221,
+              "artifact_sha256": "264205f25e0233fc946fb6b89dd33a41362ae68b4d1e4a62f5e72811b796c96b",
+              "image": "20261012.334.1"},
+    "windows": {"run": 39625824076, "attempt": 1,
+                "revision": "6d911dface03e8f66e798c7b6616d0d5123b4720",
+                "artifact_id": 12365180041,
+                "artifact_sha256": "a783a452f65f47c736009c21acb1a9812c8b937a479f2ca5c4b43d63ae4cdbb5",
+                "image": "20261012.333.1"},
+}
 
 
 def continuation_record(run: int) -> dict | None:
@@ -228,6 +257,18 @@ def producer_revision(platform: str, kind: str, run: int, attempt: int, revision
 def selected_revision(selected: dict | None, platform: str, kind: str, revision: str) -> str:
     if selected is None:
         return revision
+    if selected["run"] == 39625824076:
+        record = RELEASE_052_RC10_PACKAGE_CACHES.get(platform)
+        require(record is not None and kind == "vcpkg-binaries"
+                and all(selected[name] == record[name] for name in ("run", "attempt", "artifact_id", "artifact_sha256")),
+                "Reviewed 0.5.2 candidate 10 package selector changed")
+        return record["revision"]
+    if selected["run"] == 39541599659:
+        record = RELEASE_052_RC6_PACKAGE_CACHES.get(platform)
+        require(record is not None and kind == "vcpkg-binaries"
+                and all(selected[name] == record[name] for name in ("run", "attempt", "artifact_id", "artifact_sha256")),
+                "Reviewed 0.5.2 candidate 6 package selector changed")
+        return record["revision"]
     if selected["run"] == 39450676455:
         record = RELEASE_052_RC4_PACKAGE_CACHES.get(platform)
         require(record is not None and kind == "vcpkg-binaries"
@@ -293,6 +334,10 @@ def selected_revision(selected: dict | None, platform: str, kind: str, revision:
 
 def binary_cache_image(selected: dict, platform: str, revision: str) -> str | None:
     selected_revision(selected, platform, "vcpkg-binaries", revision)
+    if selected["run"] == 39625824076:
+        return RELEASE_052_RC10_PACKAGE_CACHES[platform]["image"]
+    if selected["run"] == 39541599659:
+        return RELEASE_052_RC6_PACKAGE_CACHES[platform]["image"]
     if selected["run"] == 39450676455:
         return RELEASE_052_RC4_PACKAGE_CACHES[platform]["image"]
     if selected["run"] == RELEASE_052_LINUX_NATIVE_PACKAGE_CONTINUATION["run"]:
@@ -443,7 +488,7 @@ def fetch(api, selected: dict, directory: Path, *, platform: str, kind: str, key
     require(platform in BUILD_WORKFLOWS[workflow], "Cache platform differs from producer workflow")
     if run in {38583556953, 39103476664, 39195808918, LINUX_SUCCESSFUL_RELEASE_PACKAGES["run"],
                RELEASE_052_LINUX_PACKAGE_CONTINUATION["run"], RELEASE_052_WINDOWS_PACKAGE_CONTINUATION["run"],
-               RELEASE_052_LINUX_NATIVE_PACKAGE_CONTINUATION["run"], 39450676455}:
+               RELEASE_052_LINUX_NATIVE_PACKAGE_CONTINUATION["run"], 39450676455, 39541599659, 39625824076}:
         require(workflow == "build-combined-release.yml", "Reviewed completed-package cache workflow changed")
     if continuation_record(run) is not None:
         require(workflow == "build-linux-release.yml", "Reviewed Linux continuation workflow changed")
@@ -452,7 +497,7 @@ def fetch(api, selected: dict, directory: Path, *, platform: str, kind: str, key
     current = api.get(f"/repos/{BUILDER}/actions/runs/{run}")
     require(current["run_attempt"] == attempt and current["status"] == "completed", "Cache producer was rerun")
     if run in {RELEASE_052_LINUX_PACKAGE_CONTINUATION["run"], RELEASE_052_WINDOWS_PACKAGE_CONTINUATION["run"],
-               RELEASE_052_LINUX_NATIVE_PACKAGE_CONTINUATION["run"], 39450676455}:
+               RELEASE_052_LINUX_NATIVE_PACKAGE_CONTINUATION["run"], 39450676455, 39541599659, 39625824076}:
         require(producer.get("conclusion") == "failure" and current.get("conclusion") == "failure"
                 and current.get("head_sha") == revision, "Reviewed package-only continuation producer changed")
     if run in {LINUX_RELEASE_CONTINUATION["run"], WINDOWS_RELEASE_BINARY_CACHE["run"],

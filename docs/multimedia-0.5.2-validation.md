@@ -1,6 +1,19 @@
 # Static multimedia 0.5.2 validation
 
-The 0.5.2 source plans request full GPL FFmpeg 9.0.2#3 and FreeRDP
+Artifact transport restarts at most three times for a read/connect timeout,
+connection failure or truncated HTTP stream. Every restart reacquires the
+signed URL without forwarding Authorization and hashes the full bounded
+payload against the original digest. Partial output is removed, existing
+complete output is preserved until atomic replacement, and digest/size/policy
+failures remain fatal without retry. No cache selection or qualification gate
+is changed by this network-only recovery.
+
+Exact candidate-10 completed-package caches may be reused with their original
+builder/image/artifact digest contexts only. Its failed Windows SDK and runtime
+evidence are not promoted. The repaired libusb recipe gets a new vcpkg ABI;
+its old anonymous MSVC LTCG objects remain rejected by the unchanged auditor.
+
+The 0.5.2 source plans request full GPL FFmpeg 9.0.2#5 and FreeRDP
 3.32.2#3 on both platforms, with the qualified CEF recipes/checkpoints and
 unchanged triplets. The previous successful 0.5.1 package caches remain
 authenticated under their original producer/image context.
@@ -8,6 +21,10 @@ Exact package-only continuation artifacts additionally preserve completed
 dependencies from candidates; they do not admit failed SDKs or engine proofs.
 Linux image `20261018.339.1` is admitted only with the unchanged critical host
 fingerprint and exact checkpoint identity beyond the reviewed image field.
+Windows transports the same seven pinned XZ documentation companions as Linux
+and approves only their five C examples. FFmpeg and XZ source reviews remain
+separate, with whole-source inventory before ZIP, ownership/hash checks after
+relocation, and independent publisher comparison against its own source pins.
 
 ## Completed local Linux checks
 

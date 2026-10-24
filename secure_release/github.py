@@ -1,9 +1,11 @@
 """Small GitHub API client: no shell expansion, no authenticated redirects."""
 from __future__ import annotations
 import hashlib
+import http.client
 import json
 from pathlib import Path
 import re
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -46,6 +48,22 @@ class Client:
         return self.json("GET", path)
 
     def download(self, path: str, target: Path, expected: str, *, max_size=2 * 1024**3):
+        # A stalled signed artifact response must not consume an entire native
+        # qualification. Restart a bounded number of times, never resume bytes
+        # or retry digest/size/policy errors. Each attempt reacquires its signed
+        # URL and verifies the SAME complete digest before atomic publication.
+        for attempt in range(3):
+            try:
+                return self._download_once(path, target, expected, max_size=max_size)
+            except (TimeoutError, ConnectionError, http.client.IncompleteRead):
+                if attempt == 2:
+                    raise
+            except urllib.error.URLError as error:
+                if not isinstance(error.reason, (TimeoutError, ConnectionError)) or attempt == 2:
+                    raise
+            time.sleep(attempt + 1)
+
+    def _download_once(self, path: str, target: Path, expected: str, *, max_size: int):
         if not re.fullmatch(r"[0-9a-f]{64}", expected):
             raise ValueError("artifact digest required")
         try:
@@ -62,19 +80,23 @@ class Client:
         h = hashlib.sha256()
         size = 0
         temporary = target.with_suffix(target.suffix + ".part")
+        owned = False
         try:
-            with response, temporary.open("xb") as out:
-                while chunk := response.read(1024 * 1024):
-                    size += len(chunk)
-                    if size > max_size:
-                        raise ValueError("artifact download too large")
-                    h.update(chunk)
-                    out.write(chunk)
+            with response:
+                with temporary.open("xb") as out:
+                    owned = True
+                    while chunk := response.read(1024 * 1024):
+                        size += len(chunk)
+                        if size > max_size:
+                            raise ValueError("artifact download too large")
+                        h.update(chunk)
+                        out.write(chunk)
             if h.hexdigest() != expected:
                 raise ValueError("download digest mismatch")
             temporary.replace(target)
         finally:
-            temporary.unlink(missing_ok=True)
+            if owned:
+                temporary.unlink(missing_ok=True)
 
     def dispatch(self, repo: str, workflow: str, inputs: dict):
         return self.json("POST", f"/repos/{repo}/actions/workflows/{workflow}/dispatches", {"ref": "main", "inputs": inputs})
