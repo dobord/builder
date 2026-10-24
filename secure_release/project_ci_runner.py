@@ -14,6 +14,7 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import shutil
+import stat
 import tarfile
 import time
 
@@ -235,6 +236,56 @@ def prepare_vcpkg(root, env, log, payload):
     return staged
 
 
+def self_baseline_command(body, root, payload, profile, audit):
+    """Use one physical product only for an admitted, byte-identical A/A baseline.
+
+    Both independent builds must exist and hash identically before selection.
+    The signed exact-SHA owner exception was authenticated by prepare; this
+    credential-free stage cannot create approval. No samples are copied, and
+    ordinary cross-revision recipes and statistical gates are untouched.
+    """
+    command = ("python3 scripts/measure-paired-benchmarks.py "
+               "out/build/performance-baseline/benchmarks out/build/performance/benchmarks out/performance")
+    if (profile != "performance" or payload["schema"] != 2
+            or payload["suite"] not in {"performance", "release"}
+            or payload["source_sha"] != payload["baseline_sha"]
+            or ci.owner_baseline_sha(payload["baseline_tag"]) != payload["source_sha"]
+            or body.splitlines().count(command) != 1 or body.count(command) != 1):
+        return body
+    products = []
+    for suite in ("queue_throughput", "runtime", "io_backend_submission", "filesystem", "timer_wheel", "variant"):
+        record = {}
+        for role, build in (("baseline", "performance-baseline"), ("candidate", "performance")):
+            path = root / "out/build" / build / "benchmarks" / ("lfc_" + suite + "_benchmark")
+            if path.resolve(strict=True) != path.absolute():
+                raise ValueError("linked self-baseline product")
+            before = path.stat()
+            if not stat.S_ISREG(before.st_mode) or not 0 < before.st_size <= 256 * 1024**2:
+                raise ValueError("invalid self-baseline product")
+            identity = (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns)
+            digest = crypto.digest(path)
+            after = path.stat()
+            if identity != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns):
+                raise ValueError("self-baseline product changed")
+            record[role] = str(path)
+            record[role + "_identity"] = {"sha256": digest, "fingerprint": list(identity)}
+        if record["baseline_identity"]["sha256"] != record["candidate_identity"]["sha256"]:
+            raise ValueError("independent self-baseline builds differ")
+        products.append(record)
+    selected = command.replace("out/build/performance-baseline/benchmarks", "out/build/performance/benchmarks")
+    actual = body.replace(command, selected, 1)
+    record = {"schema": 1, "mode": "owner-approved-identical-artifact-calibration",
+              "source_sha": payload["source_sha"], "baseline_sha": payload["baseline_sha"],
+              "request_id": payload["request_id"], "builder_sha": payload["builder_sha"],
+              "products": products, "original_command_sha256": ci.digest_bytes(body.encode()),
+              "executed_command_sha256": ci.digest_bytes(actual.encode())}
+    # Private diagnostics only; neither source identity nor command data reaches
+    # public Actions output. Preserve an existing record even after interruption.
+    with os.fdopen(os.open(audit, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb") as output:
+        output.write(crypto.canonical(record))
+    return actual
+
+
 def run():
     root = Path(ci.required("GITHUB_WORKSPACE")) / "private-source"
     work = Path(ci.required("RUNNER_TEMP")) / "project-ci"
@@ -306,6 +357,7 @@ def run():
         body = ci.expand(step["run"], context)
         if payload["suite"] == "release":
             body = body.replace(" --allow-missing-baseline", "")
+        body = self_baseline_command(body, root, payload, lane["profile"], work / "owner-self-baseline.json")
         shell = step.get("shell", "pwsh" if ci.required("RUNNER_OS") == "Windows" else "bash")
         windows_preflight(root, work, local, body, lane["runner"], ci.required("RUNNER_OS"),
                           shell, deadline, index, compiler_probes)
