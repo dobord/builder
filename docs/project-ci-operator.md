@@ -44,8 +44,54 @@ The optional `request_schemas` field is a nonempty, unique list drawn from
 API call, both in prepare and local policy preflight. Policies omitting the field
 retain legacy admission behavior. Candidate requests cannot override this policy.
 
+### Owner-approved performance baseline exceptions
+
+Published stable release tags remain the default baseline. Only schema-2
+`performance` and `release` requests may instead name
+`--baseline-tag owner-approved-<40-lowercase-hex-commit-SHA>`. This is an explicit
+signed-request selector, not a Git tag, a published release or permission by
+itself. No release tag is created to admit an unqualified candidate.
+
+Before use, the owner must approve the exact candidate SHA, baseline SHA and
+reason in private source PR/release review notes. Provision the same bounded
+`baseline_exceptions` list in the protected local policy and independently in
+builder's `PROJECT_CI_SOURCE_POLICY_B64`. For example, using synthetic revisions:
+
+```json
+{
+  "baseline_exceptions": [{
+    "candidate_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "baseline_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "suites": ["performance", "release"],
+    "approved_by": 5323024,
+    "reason": "Owner approved resetting this exact candidate's baseline"
+  }]
+}
+```
+
+The field extends the existing policy; never replace its source identity,
+operator, schema or legacy admission fields. At most eight exact, unique
+candidate/baseline pairs are accepted. There are no wildcard SHAs or suites.
+`approved_by` must equal the configured operator ID; the nonempty reason is
+bounded to 1024 characters without control characters. Unknown fields, malformed
+or duplicate approvals fail closed. The candidate request cannot supply or
+change this list. A local preflight policy cannot authorize prepare when the
+independently configured builder policy lacks the exact approval.
+
+Prepare still checks the operator signature and actor, source repository ID,
+current main or exact PR head/base, and immutable builder revision. It resolves
+the approved baseline commit independently through the authorized source
+repository's Git API and verifies that exact commit again in the authenticated
+bundle. An approved pair may use the candidate as baseline, but does not waive
+any recipe, dependency, encryption, complete-lane or exact-SHA evidence check.
+Both trees are still built and measured on the same allocation with unchanged
+sampling, variance and regression thresholds. Historical failed comparisons
+stay failed; the fresh request is new evidence, not a rerun or reclassification.
+Remove the narrowly scoped policy exception after its approved use.
+
 The source-read token in builder reads only source identity, PR identity (and
-legacy schema-1 review policy) and published stable baseline metadata. The builder read token fetches the public
+legacy schema-1 review policy), published stable baseline metadata or an exactly
+approved baseline commit. The builder read token fetches the public
 input Git objects. Native build commands retain their credential-free contract.
 The local authenticated GitHub CLI account needs source metadata/content read,
 source commit-status write, and builder contents/actions read/write permission.
@@ -85,8 +131,10 @@ gate. It uses only the standard library and the reviewed public
 Exactly the two required tests must run and succeed: cancellation before first
 wait (including source stdin EOF), and grandchild retirement after parent exit.
 Skips, expected failures, missing tests and other failures block materialization
-and qualification. No extra job is introduced; the required 39-lane inventory
-and lane names remain unchanged.
+and qualification. No extra job is introduced; the required 40-lane inventory
+and existing lane names remain unchanged. The added ARM64 Linux lane brings
+the complete release inventory to 40; normal CI contains 29 native lanes plus
+three async lanes.
 
 The gate's unittest output and summary stay under
 `runner.temp/project-ci-native-contract/`, separate from source staging so failed
@@ -120,7 +168,7 @@ expansion, and timeout process names/PIDs/parent PIDs. No environment dump,
 process command line or owner is queried. Existing authenticated encrypted-log
 collection carries these files; no plaintext artifact or public report is added.
 This is diagnostic hardening, not proof that a historical Windows hang is fixed.
-Native exact-SHA qualification and all 39 release lanes remain mandatory.
+Native exact-SHA qualification and all 40 release lanes remain mandatory.
 
 ## Private prepare-failure diagnostics
 
@@ -192,7 +240,7 @@ release profiles: `ci`, `wasm-async`, `nightly-stress`, `performance`, and
 `vcpkg-port`. Local packaging and builder `recipes()` share the same admission
 helper: all five must be present and match the builder-owned pins before any
 YAML parsing or lane expansion. Every native job also rechecks this contract.
-The 39-lane count remains a secondary consistency check; it cannot authorize
+The 40-lane count remains a secondary consistency check; it cannot authorize
 replacement commands, omitted profiles or altered runner platforms.
 
 Pins are neither candidate-provided nor policy/environment/CLI overrides. Any
@@ -201,7 +249,15 @@ new builder revision containing updated pins. The public contract contains only
 generic profile names and digests, not private recipe content or package names.
 It authenticates recipe bytes, not all source code or scripts invoked by those
 recipes; normal exact-source admission and complete hosted qualification remain
-necessary. Non-release profiles retain policy-authorized recipe flexibility.
+necessary. Non-release profiles retain policy-authorized recipe flexibility. Standalone
+`ci` and `performance` requests qualify tests and paired measurements without
+authorizing release publication; complete release qualification remains distinct.
+
+The reviewed performance recipe additionally runs the common-value adapter
+benchmarks alongside the existing previous-release regression workload. Its
+expanded raw reports remain within the unchanged 20,000-file / 2-GiB encrypted
+report limits; path, recipient, manifest and authenticated-context checks remain
+mandatory.
 
 All profiles use bounded matrix parsing: validated dictionaries/lists/scalars,
 at most 16 dimensions or include-row fields, at most 100 values/include rows,
@@ -269,7 +325,7 @@ verify it against the separately supplied signing public key.
 Wait verifies exact builder repository/workflow/SHA/request digest, actor,
 attempt 1, completed successful run, exact expected native job inventory and
 successful `prepare` plus `Encrypted qualification required` aggregate. Release
-requires all 39 native lanes. It rechecks input provenance, immutable builder
+requires all 40 native lanes. It rechecks input provenance, immutable builder
 ref and the current run attempt before writing source status
 `Builder release Required` (or `Builder ci Required` for CI). Missing, skipped,
 cancelled or failed qualification cannot produce a success status. Only this
