@@ -83,7 +83,13 @@ def builder_ref(reference, revision, credential):
         raise ValueError("builder ref moved from reviewed revision")
 
 
-def baseline(policy, tag, credential):
+def baseline(policy, tag, credential, *, source_sha=None, suite=None):
+    approved_sha = ci.owner_baseline_sha(tag)
+    if approved_sha:
+        value = {"schema": 2, "source": policy["repository"], "source_id": policy["repository_id"],
+                 "source_sha": source_sha, "suite": suite, "baseline_tag": tag, "baseline_sha": approved_sha}
+        ci.verify_baseline(value, policy, credential)
+        return approved_sha
     if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", tag):
         raise ValueError("stable baseline tag required")
     prefix = f"repos/{policy['repository']}"
@@ -156,7 +162,8 @@ def package(args, credential):
              "source_id": policy["repository_id"], "source_sha": head, "base_sha": base,
              "builder_sha": args.builder_sha, "suite": args.suite, "pr": args.pr,
              "created": now, "expires": now + 21600, "origin": "local-operator", "operator_id": 5323024,
-             "baseline_tag": args.baseline_tag, "baseline_sha": baseline(policy, args.baseline_tag, credential),
+             "baseline_tag": args.baseline_tag, "baseline_sha": baseline(policy, args.baseline_tag, credential,
+                                                                       source_sha=head, suite=args.suite),
              "input_ref": "refs/tags/project-ci-input-" + request_id,
              "input_commit": "0" * 40, "input_blob": "0" * 40, "source_cipher_digest": "0" * 64}
     ci.validate_payload(value)

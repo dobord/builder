@@ -319,9 +319,13 @@ def validate_payload(payload):
     if schema == 2 and (payload["origin"] != "local-operator" or
                         payload["input_ref"] != "refs/tags/project-ci-input-" + payload["request_id"]):
         raise ValueError("invalid operator origin or input ref")
-    if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", payload["baseline_tag"]) or (schema == 1 and payload["baseline_run"]):
+    approved_sha = owner_baseline_sha(payload["baseline_tag"])
+    approved = (schema == 2 and payload["suite"] in {"performance", "release"}
+                and approved_sha == payload["baseline_sha"])
+    if ((not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", payload["baseline_tag"]) and not approved)
+            or (schema == 1 and payload["baseline_run"])):
         raise ValueError("hosted comparisons require an immutable release tag, not a rolling runner baseline")
-    if payload["suite"] in {"performance", "release"} and payload["baseline_sha"] == payload["source_sha"]:
+    if payload["suite"] in {"performance", "release"} and payload["baseline_sha"] == payload["source_sha"] and not approved:
         raise ValueError("benchmark baseline must differ from candidate")
     if (schema == 1 and not HASH.fullmatch(payload["artifact_digest"])) or not HASH.fullmatch(payload["source_cipher_digest"]):
         raise ValueError("invalid artifact digest")
@@ -576,6 +580,73 @@ def verify_request_schema(policy, schema):
         raise ValueError("request schema denied by source policy")
 
 
+def owner_baseline_sha(tag):
+    """An explicit signed-request marker selects policy lookup, never approval."""
+    match = re.fullmatch(r"owner-approved-([0-9a-f]{40})", tag) if isinstance(tag, str) else None
+    return match[1] if match else None
+
+
+def verify_baseline(payload, policy, token):
+    """Revalidate a published release or an exact independently configured waiver.
+
+    Only the trusted builder source policy grants an exception. A signed request,
+    local policy or source-controlled file alone cannot authorize one. Approval
+    changes provenance selection only; sampling and release evidence stay intact.
+    """
+    approved_sha = owner_baseline_sha(payload["baseline_tag"])
+    if approved_sha:
+        if (payload["schema"] != 2 or payload["suite"] not in {"performance", "release"}
+                or approved_sha != payload["baseline_sha"]
+                or payload["source"] != policy["repository"]
+                or payload["source_id"] != policy["repository_id"]
+                or policy.get("operator_origin") != "local-operator"
+                or type(policy.get("operator_id")) is not int):
+            raise ValueError("owner-approved baseline denied")
+        approvals = policy.get("baseline_exceptions", [])
+        if not isinstance(approvals, list) or not 1 <= len(approvals) <= 8:
+            raise ValueError("owner-approved baseline denied")
+        seen, allowed = set(), False
+        for entry in approvals:
+            fields = {"candidate_sha", "baseline_sha", "suites", "approved_by", "reason"}
+            if not isinstance(entry, dict) or set(entry) != fields:
+                raise ValueError("owner-approved baseline denied")
+            suites, reason = entry["suites"], entry["reason"]
+            if (any(not isinstance(entry[name], str) or not SHA.fullmatch(entry[name])
+                    for name in ("candidate_sha", "baseline_sha"))
+                    or type(entry["approved_by"]) is not int
+                    or entry["approved_by"] != policy["operator_id"]
+                    or not isinstance(reason, str) or not 1 <= len(reason) <= 1024
+                    or not reason.strip() or any(ord(c) < 32 or ord(c) == 127 for c in reason)
+                    or not isinstance(suites, list) or not 1 <= len(suites) <= 2
+                    or any(not isinstance(s, str) or s not in {"performance", "release"} for s in suites)
+                    or len(set(suites)) != len(suites)):
+                raise ValueError("owner-approved baseline denied")
+            identity = (entry["candidate_sha"], entry["baseline_sha"])
+            if identity in seen:
+                raise ValueError("owner-approved baseline denied")
+            seen.add(identity)
+            allowed |= (identity == (payload["source_sha"], payload["baseline_sha"])
+                        and payload["suite"] in suites)
+        if not allowed:
+            raise ValueError("owner-approved baseline denied")
+        commit = api_json(f"repos/{payload['source']}/git/commits/{approved_sha}", token)
+        if commit.get("sha") != approved_sha:
+            raise ValueError("owner-approved baseline identity mismatch")
+        return
+    released = api_json(f"repos/{payload['source']}/releases/tags/{payload['baseline_tag']}", token)
+    if released["draft"] or released["prerelease"] or released["tag_name"] != payload["baseline_tag"] or not released["published_at"]:
+        raise ValueError("baseline is not a published stable release")
+    reference = api_json(f"repos/{payload['source']}/git/ref/tags/{payload['baseline_tag']}", token)["object"]
+    for _ in range(4):
+        if reference["type"] == "commit":
+            break
+        if reference["type"] != "tag":
+            raise ValueError("invalid released baseline")
+        reference = api_json(f"repos/{payload['source']}/git/tags/{reference['sha']}", token)["object"]
+    if reference["type"] != "commit" or reference["sha"] != payload["baseline_sha"]:
+        raise ValueError("released baseline identity mismatch")
+
+
 def verify_source_policy(payload, token):
     policy = source_policy()
     verify_request_schema(policy, payload["schema"])
@@ -591,18 +662,7 @@ def verify_source_policy(payload, token):
         if repository["id"] != payload["source_id"] or repository["full_name"] != payload["source"]:
             raise ValueError("source identity mismatch")
     if payload["schema"] == 2 or payload["suite"] in {"performance", "release"}:
-        released = api_json(f"repos/{payload['source']}/releases/tags/{payload['baseline_tag']}", token)
-        if released["draft"] or released["prerelease"] or released["tag_name"] != payload["baseline_tag"] or not released["published_at"]:
-            raise ValueError("baseline is not a published stable release")
-        reference = api_json(f"repos/{payload['source']}/git/ref/tags/{payload['baseline_tag']}", token)["object"]
-        for _ in range(4):
-            if reference["type"] == "commit":
-                break
-            if reference["type"] != "tag":
-                raise ValueError("invalid released baseline")
-            reference = api_json(f"repos/{payload['source']}/git/tags/{reference['sha']}", token)["object"]
-        if reference["type"] != "commit" or reference["sha"] != payload["baseline_sha"]:
-            raise ValueError("released baseline identity mismatch")
+        verify_baseline(payload, policy, token)
     if payload["schema"] == 1:
         run = api_json(f"repos/{payload['source']}/actions/runs/{payload['source_run']}", token)
         if (run["repository"]["id"] != payload["source_id"] or

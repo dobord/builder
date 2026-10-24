@@ -44,8 +44,54 @@ The optional `request_schemas` field is a nonempty, unique list drawn from
 API call, both in prepare and local policy preflight. Policies omitting the field
 retain legacy admission behavior. Candidate requests cannot override this policy.
 
+### Owner-approved performance baseline exceptions
+
+Published stable release tags remain the default baseline. Only schema-2
+`performance` and `release` requests may instead name
+`--baseline-tag owner-approved-<40-lowercase-hex-commit-SHA>`. This is an explicit
+signed-request selector, not a Git tag, a published release or permission by
+itself. No release tag is created to admit an unqualified candidate.
+
+Before use, the owner must approve the exact candidate SHA, baseline SHA and
+reason in private source PR/release review notes. Provision the same bounded
+`baseline_exceptions` list in the protected local policy and independently in
+builder's `PROJECT_CI_SOURCE_POLICY_B64`. For example, using synthetic revisions:
+
+```json
+{
+  "baseline_exceptions": [{
+    "candidate_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "baseline_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "suites": ["performance", "release"],
+    "approved_by": 5323024,
+    "reason": "Owner approved resetting this exact candidate's baseline"
+  }]
+}
+```
+
+The field extends the existing policy; never replace its source identity,
+operator, schema or legacy admission fields. At most eight exact, unique
+candidate/baseline pairs are accepted. There are no wildcard SHAs or suites.
+`approved_by` must equal the configured operator ID; the nonempty reason is
+bounded to 1024 characters without control characters. Unknown fields, malformed
+or duplicate approvals fail closed. The candidate request cannot supply or
+change this list. A local preflight policy cannot authorize prepare when the
+independently configured builder policy lacks the exact approval.
+
+Prepare still checks the operator signature and actor, source repository ID,
+current main or exact PR head/base, and immutable builder revision. It resolves
+the approved baseline commit independently through the authorized source
+repository's Git API and verifies that exact commit again in the authenticated
+bundle. An approved pair may use the candidate as baseline, but does not waive
+any recipe, dependency, encryption, complete-lane or exact-SHA evidence check.
+Both trees are still built and measured on the same allocation with unchanged
+sampling, variance and regression thresholds. Historical failed comparisons
+stay failed; the fresh request is new evidence, not a rerun or reclassification.
+Remove the narrowly scoped policy exception after its approved use.
+
 The source-read token in builder reads only source identity, PR identity (and
-legacy schema-1 review policy) and published stable baseline metadata. The builder read token fetches the public
+legacy schema-1 review policy), published stable baseline metadata or an exactly
+approved baseline commit. The builder read token fetches the public
 input Git objects. Native build commands retain their credential-free contract.
 The local authenticated GitHub CLI account needs source metadata/content read,
 source commit-status write, and builder contents/actions read/write permission.
