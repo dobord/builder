@@ -85,8 +85,10 @@ gate. It uses only the standard library and the reviewed public
 Exactly the two required tests must run and succeed: cancellation before first
 wait (including source stdin EOF), and grandchild retirement after parent exit.
 Skips, expected failures, missing tests and other failures block materialization
-and qualification. No extra job is introduced; the required 39-lane inventory
-and lane names remain unchanged.
+and qualification. No extra job is introduced; the required 40-lane inventory
+and existing lane names remain unchanged. The added ARM64 Linux lane brings
+the complete release inventory to 40; normal CI contains 29 native lanes plus
+three async lanes.
 
 The gate's unittest output and summary stay under
 `runner.temp/project-ci-native-contract/`, separate from source staging so failed
@@ -120,7 +122,7 @@ expansion, and timeout process names/PIDs/parent PIDs. No environment dump,
 process command line or owner is queried. Existing authenticated encrypted-log
 collection carries these files; no plaintext artifact or public report is added.
 This is diagnostic hardening, not proof that a historical Windows hang is fixed.
-Native exact-SHA qualification and all 39 release lanes remain mandatory.
+Native exact-SHA qualification and all 40 release lanes remain mandatory.
 
 ## Private prepare-failure diagnostics
 
@@ -192,7 +194,7 @@ release profiles: `ci`, `wasm-async`, `nightly-stress`, `performance`, and
 `vcpkg-port`. Local packaging and builder `recipes()` share the same admission
 helper: all five must be present and match the builder-owned pins before any
 YAML parsing or lane expansion. Every native job also rechecks this contract.
-The 39-lane count remains a secondary consistency check; it cannot authorize
+The 40-lane count remains a secondary consistency check; it cannot authorize
 replacement commands, omitted profiles or altered runner platforms.
 
 Pins are neither candidate-provided nor policy/environment/CLI overrides. Any
@@ -201,7 +203,15 @@ new builder revision containing updated pins. The public contract contains only
 generic profile names and digests, not private recipe content or package names.
 It authenticates recipe bytes, not all source code or scripts invoked by those
 recipes; normal exact-source admission and complete hosted qualification remain
-necessary. Non-release profiles retain policy-authorized recipe flexibility.
+necessary. Non-release profiles retain policy-authorized recipe flexibility. Standalone
+`ci` and `performance` requests qualify tests and paired measurements without
+authorizing release publication; complete release qualification remains distinct.
+
+The reviewed performance recipe additionally runs the common-value adapter
+benchmarks alongside the existing previous-release regression workload. Its
+expanded raw reports remain within the unchanged 20,000-file / 2-GiB encrypted
+report limits; path, recipient, manifest and authenticated-context checks remain
+mandatory.
 
 All profiles use bounded matrix parsing: validated dictionaries/lists/scalars,
 at most 16 dimensions or include-row fields, at most 100 values/include rows,
@@ -269,7 +279,7 @@ verify it against the separately supplied signing public key.
 Wait verifies exact builder repository/workflow/SHA/request digest, actor,
 attempt 1, completed successful run, exact expected native job inventory and
 successful `prepare` plus `Encrypted qualification required` aggregate. Release
-requires all 39 native lanes. It rechecks input provenance, immutable builder
+requires all 40 native lanes. It rechecks input provenance, immutable builder
 ref and the current run attempt before writing source status
 `Builder release Required` (or `Builder ci Required` for CI). Missing, skipped,
 cancelled or failed qualification cannot produce a success status. Only this
