@@ -127,6 +127,16 @@ commands. Existing cryptographic roles and SDK backups are unchanged.
 
 ## Noninteractive execution and Windows compiler diagnostics
 
+The shared public synthetic Windows host probe validates actual fingerprint
+collection against native OS/Python/LLVM sources and tests historical checkpoint
+admission separately. A mutable `windows-2022` host need not equal a historical
+CEF producer: an unsupported fingerprint or migration image must be rejected by
+the unchanged admission policy. Probe failure remains a test failure. Neither a
+successful probe nor generic project-CI tests qualify a new CEF host, restore a
+checkpoint or prove private codec identity. Actual SDK/checkpoint restoration
+still requires its exact reviewed image/fingerprint policy and independent
+producer/codec evidence; the legacy same-image rule is not expanded by this test.
+
 Approved source commands always receive null stdin. Output remains in private
 files. Wait errors and interruption trigger retirement while preserving the
 original exception, even when cleanup or cleanup logging fails. A bounded timeout

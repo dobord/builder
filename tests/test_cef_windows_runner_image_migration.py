@@ -6,7 +6,10 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -40,6 +43,20 @@ SELECTED = {
 
 
 class ImagePolicyTests(unittest.TestCase):
+    def test_native_probe_verifies_rejection_instead_of_promoting_changed_ubr(self):
+        observed = dict(HOST, ubr=5761)
+        native = NativeWindowsFingerprintTests()
+        with mock.patch.object(worker, "critical_windows_host_fingerprint", return_value=observed), \
+                mock.patch.object(native, "verify_collector_sources", create=True), \
+                mock.patch.dict(os.environ, {"ImageVersion": CURRENT}):
+            native.test_native_collection_and_admission_are_distinct()
+
+    def test_native_probe_collection_failure_is_not_an_expected_admission_rejection(self):
+        native = NativeWindowsFingerprintTests()
+        with mock.patch.object(worker, "critical_windows_host_fingerprint", side_effect=ValueError("probe failed")), \
+                self.assertRaisesRegex(ValueError, "probe failed"):
+            native.test_native_collection_and_admission_are_distinct()
+
     def review(self, actual, fingerprint=None, producer=None, selected=SELECTED):
         report = {}
         with mock.patch.dict(os.environ, {"ImageVersion": actual}, clear=False), \
@@ -185,16 +202,43 @@ class PrivateCodecTests(unittest.TestCase):
 
 @unittest.skipUnless(os.name == "nt", "Native Windows host fingerprint")
 class NativeWindowsFingerprintTests(unittest.TestCase):
-    def test_current_host_matches_reviewed_critical_fingerprint(self):
+    def verify_collector_sources(self, value):
+        import winreg
+        self.assertEqual(value["os_build"], str(sys.getwindowsversion().build))
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                            r"SOFTWARE\Microsoft\Windows NT\CurrentVersion") as key:
+            self.assertEqual(value["ubr"], winreg.QueryValueEx(key, "UBR")[0])
+        self.assertEqual(value["python"], ".".join(str(part) for part in sys.version_info[:3]))
+        clang = Path(os.environ["ProgramFiles"]) / "LLVM/bin/clang-cl.exe"
+        output = subprocess.check_output([str(clang), "--version"], text=True, timeout=30)
+        match = re.search(r"clang version ([0-9]+\.[0-9]+\.[0-9]+)", output)
+        self.assertIsNotNone(match)
+        self.assertEqual(value["llvm"], match[1])
+
+    def test_native_collection_and_admission_are_distinct(self):
         value = worker.critical_windows_host_fingerprint()
-        self.assertEqual(value, HOST)
+        worker._validate_windows_fingerprint(value)
+        self.verify_collector_sources(value)
         actual = os.environ.get("ImageVersion")
-        self.assertIn(actual, {OLD, NEW, CURRENT})
-        print(
-            "CEF_WINDOWS_IMAGE_MIGRATION_NATIVE "
-            f"actual_image={actual} fingerprint_verified=true "
-            "codec_identity_preserved=true source_fresh=false"
-        )
+        # Collection on a mutable public CI host is not checkpoint admission.
+        # Exercise the REAL observation against fixed historical migration cases;
+        # an unsupported host must be rejected, never relabelled as qualified.
+        for image in dict.fromkeys((actual, NEW, CURRENT)):
+            report = {"checkpoint_host_verified": False}
+            with self.subTest(image=image), mock.patch.dict(os.environ, {}, clear=False), \
+                    mock.patch.object(worker, "critical_windows_host_fingerprint", return_value=value):
+                if image is None:
+                    os.environ.pop("ImageVersion", None)
+                else:
+                    os.environ["ImageVersion"] = image
+                if image == OLD or (image in {NEW, CURRENT} and value == HOST):
+                    self.assertEqual(worker.checkpoint_image_identity(SELECTED, {}, report), OLD)
+                    self.assertTrue(report["checkpoint_host_verified"])
+                else:
+                    reason = "not reviewed" if image and re.fullmatch(r"[0-9.]{1,64}", image) else "ImageVersion"
+                    with self.assertRaisesRegex(ValueError, reason):
+                        worker.checkpoint_image_identity(SELECTED, {}, report)
+                    self.assertFalse(report["checkpoint_host_verified"])
 
 
 if __name__ == "__main__":
