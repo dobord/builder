@@ -89,6 +89,13 @@ sampling, variance and regression thresholds. Historical failed comparisons
 stay failed; the fresh request is new evidence, not a rerun or reclassification.
 Remove the narrowly scoped policy exception after its approved use.
 
+The reviewed performance recipe attempts each of its fourteen comparators in an
+independent `always()` step. A nonzero submission or timer comparison cannot
+suppress subsequent reports, and variant comparator control validation is a
+separate step. Failure is retained in the overall lane result; no budget, metric,
+workload, repetition count or lane is waived. Its byte contract requires a newly
+reviewed builder pin; changing a source recipe cannot authorize its own admission.
+
 For the explicitly approved same-source A/A case only, native execution first
 requires all six independently built benchmark products to be regular,
 nonlinked, bounded files with stable fingerprints and identical SHA-256 values
