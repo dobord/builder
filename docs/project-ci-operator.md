@@ -89,6 +89,13 @@ sampling, variance and regression thresholds. Historical failed comparisons
 stay failed; the fresh request is new evidence, not a rerun or reclassification.
 Remove the narrowly scoped policy exception after its approved use.
 
+The reviewed performance recipe attempts each of its fourteen comparators in an
+independent `always()` step. A nonzero submission or timer comparison cannot
+suppress subsequent reports, and variant comparator control validation is a
+separate step. Failure is retained in the overall lane result; no budget, metric,
+workload, repetition count or lane is waived. Its byte contract requires a newly
+reviewed builder pin; changing a source recipe cannot authorize its own admission.
+
 For the explicitly approved same-source A/A case only, native execution first
 requires all six independently built benchmark products to be regular,
 nonlinked, bounded files with stable fingerprints and identical SHA-256 values
@@ -119,6 +126,16 @@ Its token is captured in memory and never printed, saved or passed to build/test
 commands. Existing cryptographic roles and SDK backups are unchanged.
 
 ## Noninteractive execution and Windows compiler diagnostics
+
+The shared public synthetic Windows host probe validates actual fingerprint
+collection against native OS/Python/LLVM sources and tests historical checkpoint
+admission separately. A mutable `windows-2022` host need not equal a historical
+CEF producer: an unsupported fingerprint or migration image must be rejected by
+the unchanged admission policy. Probe failure remains a test failure. Neither a
+successful probe nor generic project-CI tests qualify a new CEF host, restore a
+checkpoint or prove private codec identity. Actual SDK/checkpoint restoration
+still requires its exact reviewed image/fingerprint policy and independent
+producer/codec evidence; the legacy same-image rule is not expanded by this test.
 
 Approved source commands always receive null stdin. Output remains in private
 files. Wait errors and interruption trigger retirement while preserving the
