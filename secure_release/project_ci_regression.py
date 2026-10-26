@@ -115,14 +115,32 @@ def finite(value):
     return type(value) in (int, float) and math.isfinite(value)
 
 
+def finite_report(report):
+    """Reject overflowed JSON statistics too, including fields outside raw pairs."""
+    pending, count = [report], 0
+    while pending:
+        value = pending.pop()
+        count += 1
+        if count > 1000000:
+            return False
+        if isinstance(value, float) and not math.isfinite(value):
+            return False
+        if isinstance(value, dict):
+            pending.extend(value.values())
+        elif isinstance(value, list):
+            pending.extend(value)
+    return True
+
+
 def eligible_timing(report, metric, budget, variant, *, allow_inconclusive=False):
     """Validate timing-only evidence, retaining every non-waivable quality check.
 
 The optional owner permission applies only to CV/interval uncertainty. Missing
 pairs, undersized retained groups, nonfinite data, unknown uncertainty reasons,
 inventory drift and deterministic allocation/layout contracts remain failures.
-"""
-    if (report.get('schema') != 3 or report.get('aggregation') != 'iterative_sigma_clipped_paired_mean'
+    """
+    if (not finite_report(report)
+            or report.get('schema') != 3 or report.get('aggregation') != 'iterative_sigma_clipped_paired_mean'
             or report.get('confidence_level') != 0.95 or report.get('repetitions') != 10
             or report.get('max_regression_percent') != budget or report.get('max_cv_percent') != 20
             or report.get('status') not in {'regressed', 'inconclusive'}

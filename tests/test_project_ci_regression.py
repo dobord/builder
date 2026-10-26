@@ -154,6 +154,11 @@ class RegressionApprovalTests(unittest.TestCase):
                 with self.subTest(report=report):
                     path.write_text(json.dumps(report))
                     self.assertFalse(regression.waive(root, COMMAND, 2, approved, value, audit))
+            report = inconclusive_fixture()
+            report['comparisons'][0]['candidate_mean'] = 1.23
+            report['inconclusive'] = copy.deepcopy(report['comparisons'])
+            path.write_text(json.dumps(report).replace('1.23', '1e999'))
+            self.assertFalse(regression.waive(root, COMMAND, 2, approved, value, audit))
             self.assertEqual(list(audit.iterdir()), [])
 
     def test_malformed_duplicate_or_unbounded_policy_fails_closed(self):
