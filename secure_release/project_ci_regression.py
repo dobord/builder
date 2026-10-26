@@ -1,4 +1,4 @@
-"""Trusted, exact-release timing-budget exceptions; never a failed-lane override.
+"""Trusted, exact-release timing exceptions; never a failed-lane override.
 
 Only prepare reads independently provisioned policy. Its approval receipt travels
 inside the existing run/attempt-authenticated encrypted input, never recipe env.
@@ -21,7 +21,9 @@ def approval(payload, policy):
     seen, selected = set(), None
     for entry in entries:
         fields = {'candidate_sha', 'baseline_sha', 'baseline_tag', 'release_tag', 'approved_by', 'reason'}
-        if not isinstance(entry, dict) or set(entry) != fields:
+        if (not isinstance(entry, dict)
+                or set(entry) not in (fields, fields | {'allow_timing_inconclusive'})
+                or ('allow_timing_inconclusive' in entry and type(entry['allow_timing_inconclusive']) is not bool)):
             raise ValueError('invalid release regression approval')
         reason = entry['reason']
         if (any(not isinstance(entry[name], str) or not ci.SHA.fullmatch(entry[name])
@@ -113,11 +115,18 @@ def finite(value):
     return type(value) in (int, float) and math.isfinite(value)
 
 
-def conclusive(report, metric, budget, variant):
+def eligible_timing(report, metric, budget, variant, *, allow_inconclusive=False):
+    """Validate timing-only evidence, retaining every non-waivable quality check.
+
+The optional owner permission applies only to CV/interval uncertainty. Missing
+pairs, undersized retained groups, nonfinite data, unknown uncertainty reasons,
+inventory drift and deterministic allocation/layout contracts remain failures.
+"""
     if (report.get('schema') != 3 or report.get('aggregation') != 'iterative_sigma_clipped_paired_mean'
             or report.get('confidence_level') != 0.95 or report.get('repetitions') != 10
             or report.get('max_regression_percent') != budget or report.get('max_cv_percent') != 20
-            or report.get('status') != 'regressed' or report.get('inconclusive') != []
+            or report.get('status') not in {'regressed', 'inconclusive'}
+            or (not allow_inconclusive and report.get('inconclusive') != [])
             or 'seeded_baseline' in report
             or (not variant and (report.get('metric') != metric or report.get('missing_benchmarks') != []
                                  or report.get('unexpected_benchmarks') != []))):
@@ -125,19 +134,26 @@ def conclusive(report, metric, budget, variant):
     rows, failures = report.get('comparisons'), report.get('regressions')
     if not isinstance(rows, list) or not 1 <= len(rows) <= 10000 or not isinstance(failures, list):
         return False
-    names, regressed = set(), []
+    names, regressed, inconclusive = set(), [], []
     for row in rows:
+        if not isinstance(row, dict):
+            return False
         name = row.get('name')
         count, indices = row.get('sample_count'), row.get('retained_indices')
         interval = row.get('budget_margin_ci')
+        uncertain = row.get('timing_status') == 'inconclusive'
+        reasons = row.get('inconclusive_reasons')
         if (not isinstance(name, str) or not name or name in names
-                or row.get('timing_status') not in {'passed', 'regressed'}
-                or row.get('inconclusive_reasons') != [] or row.get('raw_sample_count') != 10
+                or row.get('timing_status') not in {'passed', 'regressed', 'inconclusive'}
+                or (uncertain and not allow_inconclusive)
+                or not isinstance(reasons, list)
+                or (uncertain and (not reasons or any(r not in {'excessive_cv', 'budget_interval_overlap'} for r in reasons)))
+                or (not uncertain and reasons != []) or row.get('raw_sample_count') != 10
                 or type(count) is not int or not 5 <= count <= 10
                 or not isinstance(indices, list) or len(indices) != count
                 or any(type(i) is not int or i not in range(10) for i in indices)
                 or indices != sorted(set(indices))
-                or any(not finite(row.get(key)) or not 0 <= row[key] <= 20
+                or any(not finite(row.get(key)) or row[key] < 0 or (not uncertain and row[key] > 20)
                        for key in ('baseline_cv_percent', 'candidate_cv_percent'))
                 or not isinstance(interval, list) or len(interval) != 2
                 or not all(finite(v) for v in interval) or interval[0] > interval[1]):
@@ -145,23 +161,27 @@ def conclusive(report, metric, budget, variant):
         for key in ('baseline_samples', 'candidate_samples'):
             values = row.get(key)
             if (not isinstance(values, list) or len(values) != 10
-                    or any(not finite(v) or v < 0 for v in values)):
+                    or any(not finite(v) or v < 0 or (metric == 'real_time' and v == 0) for v in values)):
                 return False
         if row['timing_status'] == 'regressed':
             if interval[0] <= 0 or (row.get('change_percent') is not None and not finite(row['change_percent'])):
                 return False
             regressed.append(dict(row, metric='real_time') if variant else row)
+        elif uncertain:
+            inconclusive.append(row)
         elif interval[1] > 1e-12:
             return False
         names.add(name)
     # Allocation/leak/layout regressions are not timing-budget failures. Requiring
-    # an exact list also rejects hidden inventory failures or mixed inconclusives.
-    return bool(regressed) and failures == regressed
+    # exact lists also reject hidden inventory failures or omitted uncertainty.
+    status = 'regressed' if regressed else 'inconclusive' if inconclusive else 'passed'
+    return (bool(regressed or inconclusive) and failures == regressed
+            and report.get('inconclusive') == inconclusive and report['status'] == status)
 
 
 def waive(root, command, result, entry, payload, audit):
     selected = comparison(command)
-    if result != 1 or entry is None or selected is None:
+    if type(result) is not int or result not in {1, 2} or entry is None or selected is None:
         return False
     relative, metric, budget, variant = selected
     path = root / relative
@@ -169,14 +189,17 @@ def waive(root, command, result, entry, payload, audit):
         if any(parent.is_symlink() for parent in (path.parent, path.parent.parent)):
             return False
         report = read_json(path, 16 * 1024**2)
-        if not isinstance(report, dict) or not conclusive(report, metric, budget, variant):
+        if (not isinstance(report, dict)
+                or result != {'regressed': 1, 'inconclusive': 2}.get(report.get('status'))
+                or not eligible_timing(report, metric, budget, variant,
+                                       allow_inconclusive=entry.get('allow_timing_inconclusive') is True)):
             return False
     except (OSError, ValueError, KeyError, TypeError, OverflowError):
         return False
     record = {'schema': 1, 'context': ci.builder_context('sources'), 'request_id': payload['request_id'],
               'source_sha': payload['source_sha'], 'baseline_sha': payload['baseline_sha'],
               'approval': entry, 'report_sha256': crypto.digest(path), 'original_exit_code': result,
-              'regressions': report['regressions']}
+              'regressions': report['regressions'], 'inconclusive': report['inconclusive']}
     with os.fdopen(os.open(audit / Path(relative).name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'wb') as out:
         out.write(crypto.canonical(record))
     return True
