@@ -121,21 +121,34 @@ malformed or duplicate entries fail closed. An absent or unmatched approval gran
 no exception. This approval applies only to schema-2 `release`, not `ci` or
 standalone `performance`; the signed request schema is unchanged.
 
+The optional field `allow_timing_inconclusive` defaults to `false`. It accepts
+only a JSON boolean, never strings or numeric truthy values. Setting it to `true`
+requires a separate explicit owner instruction accepting CV/budget-interval timing
+uncertainty for the named release, recorded with the candidate, affected
+comparisons, measured dispersion and reason. A regression-only owner instruction
+does not grant this permission. Provision the flag independently in builder's
+protected policy; neither the request nor local policy alone can enable it.
+
 After normal signature, actor, source, baseline, dependency and recipe admission,
 prepare distributes the selected approval inside the existing encrypted input,
 bound to request ID, repository, builder SHA, digest, run and attempt. Native
 commands receive no policy secret or approval environment variable. The trusted
 runner accepts only an exact reviewed timing-comparator command's exit code 1
-with a fresh bounded schema-3 report containing conclusive passed/regressed rows,
-ten raw pairs, at least five retained pairs, acceptable CVs, and no inventory gaps
-or inconclusives. It never waives allocation/leak/layout contracts, missing or
+(regression) or, with the separately approved flag, exit code 2 (uncertainty).
+A fresh bounded schema-3 report must retain ten raw pairs, at least five retained
+pairs, finite nonnegative CVs and finite timing samples, with no inventory gaps.
+Without the flag, acceptable CVs and conclusive passed/regressed rows remain
+mandatory. With it, only `excessive_cv` and `budget_interval_overlap` findings may
+be accepted; insufficient retained pairs and unknown findings still fail. The exit
+code must match the report's original overall status. It never waives
+allocation/leak/layout contracts, missing or
 malformed reports, comparator errors, timeouts, build/test/control failures or
 other commands. All fourteen comparisons and all forty release lanes remain
 required; a waived comparator cannot clear a prior or subsequent failure.
 
 Original reports and statistical decisions remain unchanged. A separate private
 `release-regression-audit` record preserves the approval, request/run context,
-report SHA-256, original exit code and measured regressions in encrypted
+report SHA-256, original exit code, measured regressions and uncertainty in encrypted
 diagnostics. Public output contains no source identity or measurement. The normal
 successful complete exact-SHA aggregate and local evidence verifier remain the
 publication gate. Historical failed runs remain failed. Deploy the reviewed new
