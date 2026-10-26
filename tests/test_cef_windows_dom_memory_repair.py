@@ -13,7 +13,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
-import urllib.request
+from tests.public_ci_inputs import public_bytes as archived_public_bytes
 from unittest import mock
 
 from secure_release import cef_windows_source_repair as repair
@@ -63,10 +63,7 @@ def public_bytes(name):
             data = stream.read(size + 1)
     else:
         url = "https://raw.githubusercontent.com/chromium/chromium/" + repair.CHROMIUM + "/" + relative
-        with urllib.request.urlopen(url, timeout=30) as stream:
-            if stream.geturl() != url:
-                raise ValueError("Unexpected public XML fixture redirect")
-            data = stream.read(size + 1)
+        data = archived_public_bytes(url, size)
     actual = hashlib.sha1(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest()
     if len(data) != size or actual != blob:
         raise ValueError("Unreviewed public XML header fixture")
