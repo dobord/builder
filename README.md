@@ -46,6 +46,9 @@ Public artifact sizes, timing and opaque release/run IDs are observable.
 - `vendor/wheels/`: official binary wheels for Tink 1.16.1 and its pinned runtime dependencies.
 - `.github/workflows/vendor-offline-wheels.yml`: regenerates the committed wheelhouse from exact lock hashes.
 - `.github/workflows/ci.yml`: PUBLIC synthetic tests only; disposable PUBLIC test keys protect no private data.
+- `tests/fixtures/public-ci-inputs.README.md`: reviewed, hash-pinned offline public
+  Chromium/V8/PDFium compiler fixtures and upstream licenses; test execution never
+  downloads them or substitutes them for real SDK/checkpoint qualification.
 - `.github/workflows/build-release.yml`: real encrypted release build, disabled until configured.
 - `.github/workflows/build-linux-release.yml`: Linux-only static SDK build, with no Windows job or matrix; see [Linux release stages](docs/linux-static-release.md).
 - `.github/workflows/build-windows-release.yml`: Windows-only static SDK build from the exact qualified source checkpoint; see [Windows release stages](docs/windows-static-release.md).

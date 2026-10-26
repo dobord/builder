@@ -3,7 +3,7 @@ from functools import lru_cache
 import hashlib
 import os
 from pathlib import Path
-import urllib.request
+from tests.public_ci_inputs import public_bytes
 
 CHROMIUM = "79460ebecaa5625e57a5fb679a735659e73dc687"
 PREFIX = "chrome/browser/speech/"
@@ -22,10 +22,7 @@ def public_input(name):
             raw = stream.read(size + 1)
     else:
         url = "https://raw.githubusercontent.com/chromium/chromium/" + CHROMIUM + "/" + PREFIX + name
-        with urllib.request.urlopen(url, timeout=30) as stream:
-            if stream.geturl() != url:
-                raise ValueError("Unexpected public speech fixture redirect")
-            raw = stream.read(size + 1)
+        raw = public_bytes(url, size)
     actual = hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest()
     if len(raw) != size or hashlib.sha256(raw).hexdigest() != sha256 or actual != blob:
         raise ValueError("Pinned public speech fixture mismatch")

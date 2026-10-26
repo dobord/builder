@@ -1,14 +1,14 @@
 """Hash-pinned PUBLIC V8 test inputs. Never used by the build worker.
 
 Set CEF_WINDOWS_LAYOUT_SOURCE_ROOT to a pinned V8 checkout for offline tests.
-Otherwise only the fixed official raw URLs below are fetched into bounded memory.
+Otherwise the reviewed local public-input archive supplies the exact bytes.
 No private sources, keys, diagnostics, packages or mutable refs are acquired.
 """
 from functools import lru_cache
 import hashlib
 import os
 from pathlib import Path
-import urllib.request
+from tests.public_ci_inputs import public_bytes
 from tests.cef_windows_accessibility_inputs import fixture_bytes as accessibility_fixture
 from tests.cef_windows_string_inputs import fixture_bytes as string_fixture
 from tests.cef_windows_lock_inputs import LOCK_MANAGER
@@ -42,10 +42,7 @@ def public_input(path):
             data = stream.read(262145)
     else:
         url = "https://raw.githubusercontent.com/v8/v8/" + V8 + "/" + path
-        with urllib.request.urlopen(url, timeout=30) as stream:
-            if stream.geturl() != url:
-                raise ValueError("Unexpected public fixture redirect")
-            data = stream.read(262145)
+        data = public_bytes(url, INPUTS[path][0])
     return verify_public(path, data)
 
 
