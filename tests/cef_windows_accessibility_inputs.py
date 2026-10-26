@@ -1,14 +1,14 @@
 """Bounded, hash-pinned PUBLIC Chromium test inputs, never worker inputs.
 
 CEF_WINDOWS_ACCESSIBILITY_SOURCE_ROOT supplies the exact checkout offline.
-Without it, only the fixed official URLs below may be read. Verify full files
+Without it, the reviewed local public-input archive is used. Verify full files
 before extracting the iterator subsystem; do not replace the iterator logic.
 """
 from functools import lru_cache
 import hashlib
 import os
 from pathlib import Path
-import urllib.request
+from tests.public_ci_inputs import public_bytes
 
 CHROMIUM = "79460ebecaa5625e57a5fb679a735659e73dc687"
 SOURCE_ROOT = os.environ.get("CEF_WINDOWS_ACCESSIBILITY_SOURCE_ROOT")
@@ -53,10 +53,7 @@ def public_input(path):
             data = stream.read(size + 1)
     else:
         url = "https://raw.githubusercontent.com/chromium/chromium/" + CHROMIUM + "/" + path
-        with urllib.request.urlopen(url, timeout=30) as stream:
-            if stream.geturl() != url:
-                raise ValueError("Unexpected public accessibility fixture redirect")
-            data = stream.read(size + 1)
+        data = public_bytes(url, size)
     return verify_public(path, data)
 
 

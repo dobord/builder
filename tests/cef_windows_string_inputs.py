@@ -1,14 +1,14 @@
 """Bounded, hash-pinned PUBLIC Chromium String iterator inputs.
 
 CEF_WINDOWS_STRING_SOURCE_ROOT may provide the exact pinned checkout offline.
-Otherwise only immutable raw URLs at the exact Chromium commit are accepted.
+Otherwise the reviewed local public-input archive supplies the exact bytes.
 These are test inputs only; the build worker never fetches them here.
 """
 from functools import lru_cache
 import hashlib
 import os
 from pathlib import Path
-import urllib.request
+from tests.public_ci_inputs import public_bytes
 
 CHROMIUM = "79460ebecaa5625e57a5fb679a735659e73dc687"
 SOURCE_ROOT = os.environ.get("CEF_WINDOWS_STRING_SOURCE_ROOT")
@@ -53,10 +53,7 @@ def public_input(path):
             "https://raw.githubusercontent.com/chromium/chromium/"
             + CHROMIUM + "/" + path
         )
-        with urllib.request.urlopen(url, timeout=30) as stream:
-            if stream.geturl() != url:
-                raise ValueError("Unexpected Chromium String input redirect")
-            data = stream.read(size + 1)
+        data = public_bytes(url, size)
     return verify_public(path, data)
 
 

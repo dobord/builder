@@ -3,7 +3,7 @@ from functools import lru_cache
 import hashlib
 import os
 from pathlib import Path
-import urllib.request
+from tests.public_ci_inputs import public_bytes
 
 CHROMIUM = "79460ebecaa5625e57a5fb679a735659e73dc687"
 PUBLIC_PATH = "content/browser/locks/lock_manager.h"
@@ -20,10 +20,7 @@ def public_input():
             raw = stream.read(SIZE + 1)
     else:
         url = "https://raw.githubusercontent.com/chromium/chromium/" + CHROMIUM + "/" + PUBLIC_PATH
-        with urllib.request.urlopen(url, timeout=30) as stream:
-            if stream.geturl() != url:
-                raise ValueError("Unexpected public lock-manager fixture redirect")
-            raw = stream.read(SIZE + 1)
+        raw = public_bytes(url, SIZE)
     blob = hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest()
     if len(raw) != SIZE or hashlib.sha256(raw).hexdigest() != SHA256 or blob != BLOB:
         raise ValueError("Pinned public lock-manager fixture mismatch")
