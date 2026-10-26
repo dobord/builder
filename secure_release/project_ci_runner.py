@@ -296,6 +296,11 @@ def run():
     if len(matches) != 1:
         raise ValueError("unrequested lane")
     lane = matches[0]
+    from . import project_ci_regression
+    regression_approval = project_ci_regression.read_receipt(work / "regression-approval.json", payload)
+    regression_audit = work / "release-regression-audit"
+    if regression_approval is not None and lane["profile"] == "performance":
+        regression_audit.mkdir(mode=0o700)
     job = lane["job"]
     env = ci.build_environment(os.environ)
     env.update({"GITHUB_WORKSPACE": str(root), "GITHUB_SHA": payload["source_sha"],
@@ -373,8 +378,15 @@ def run():
         remaining = min(deadline - time.monotonic(), int(step.get("timeout-minutes", 350)) * 60)
         if remaining <= 0:
             raise ValueError("lane timeout")
+        comparison = (project_ci_regression.comparison(body)
+                      if regression_approval is not None and lane["profile"] == "performance" else None)
+        if comparison is not None and (root / comparison[0]).exists():
+            raise ValueError("preexisting release regression report")
         result = ci.quiet(command, root, local, work / f"step-{index}.log", timeout=remaining)
         import_channels(env, channels)
+        if comparison is not None and project_ci_regression.waive(
+                root, body, result, regression_approval, payload, regression_audit):
+            result = 0
         succeeded = succeeded and result == 0
     if not succeeded:
         raise ValueError("qualification failed")

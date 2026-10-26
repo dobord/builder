@@ -85,15 +85,68 @@ repository's Git API and verifies that exact commit again in the authenticated
 bundle. An approved pair may use the candidate as baseline, but does not waive
 any recipe, dependency, encryption, complete-lane or exact-SHA evidence check.
 Both trees are still built and measured on the same allocation with unchanged
-sampling, variance and regression thresholds. Historical failed comparisons
+sampling, variance and regression thresholds (except the separate explicit
+release timing approval below). Historical failed comparisons
 stay failed; the fresh request is new evidence, not a rerun or reclassification.
 Remove the narrowly scoped policy exception after its approved use.
+
+### Owner-approved release timing regressions
+
+An owner may explicitly direct publication of a named release despite confirmed
+performance regressions. This is separate from baseline selection: it changes
+neither the baseline nor any sampling, workload, variance or uncertainty rule.
+Provision a bounded `release_regression_approvals` list in the protected operator
+policy and independently in builder's `PROJECT_CI_SOURCE_POLICY_B64`:
+
+```json
+{
+  "release_regression_approvals": [{
+    "candidate_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "baseline_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "baseline_tag": "v1.1.0",
+    "release_tag": "v1.2.0",
+    "approved_by": 5323024,
+    "reason": "Owner explicitly directs this release despite measured timing regressions"
+  }]
+}
+```
+
+The owner instruction must name the release. Record the exact candidate SHA,
+affected comparisons, measured deltas and reason in private release review notes.
+The operator must publish only the approved release tag at that qualified SHA.
+The candidate, baseline SHA and selector are exact; no wildcard or implicit latest
+is supported. At most eight unique candidate/baseline/selector entries are
+accepted. Approver and reason constraints match baseline exceptions. Unknown,
+malformed or duplicate entries fail closed. An absent or unmatched approval grants
+no exception. This approval applies only to schema-2 `release`, not `ci` or
+standalone `performance`; the signed request schema is unchanged.
+
+After normal signature, actor, source, baseline, dependency and recipe admission,
+prepare distributes the selected approval inside the existing encrypted input,
+bound to request ID, repository, builder SHA, digest, run and attempt. Native
+commands receive no policy secret or approval environment variable. The trusted
+runner accepts only an exact reviewed timing-comparator command's exit code 1
+with a fresh bounded schema-3 report containing conclusive passed/regressed rows,
+ten raw pairs, at least five retained pairs, acceptable CVs, and no inventory gaps
+or inconclusives. It never waives allocation/leak/layout contracts, missing or
+malformed reports, comparator errors, timeouts, build/test/control failures or
+other commands. All fourteen comparisons and all forty release lanes remain
+required; a waived comparator cannot clear a prior or subsequent failure.
+
+Original reports and statistical decisions remain unchanged. A separate private
+`release-regression-audit` record preserves the approval, request/run context,
+report SHA-256, original exit code and measured regressions in encrypted
+diagnostics. Public output contains no source identity or measurement. The normal
+successful complete exact-SHA aggregate and local evidence verifier remain the
+publication gate. Historical failed runs remain failed. Deploy the reviewed new
+builder revision and matching policy before dispatching a fresh request, and
+remove the scoped approval after use.
 
 The reviewed performance recipe attempts each of its fourteen comparators in an
 independent `always()` step. A nonzero submission or timer comparison cannot
 suppress subsequent reports, and variant comparator control validation is a
 separate step. Failure is retained in the overall lane result; no budget, metric,
-workload, repetition count or lane is waived. Its byte contract requires a newly
+workload, repetition count or lane is waived by comparison completeness. Its byte contract requires a newly
 reviewed builder pin; changing a source recipe cannot authorize its own admission.
 
 For the explicitly approved same-source A/A case only, native execution first
