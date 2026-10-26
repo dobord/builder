@@ -663,6 +663,8 @@ def verify_source_policy(payload, token):
             raise ValueError("source identity mismatch")
     if payload["schema"] == 2 or payload["suite"] in {"performance", "release"}:
         verify_baseline(payload, policy, token)
+    from . import project_ci_regression
+    project_ci_regression.approval(payload, policy)
     if payload["schema"] == 1:
         run = api_json(f"repos/{payload['source']}/actions/runs/{payload['source_run']}", token)
         if (run["repository"]["id"] != payload["source_id"] or
@@ -776,11 +778,17 @@ def prepare():
     crypto.encrypt_file(work / "dependency-review.json", Path(required("RUNNER_TEMP")) / "cipher-dependency/dependency-review.enc",
                         crypto.public_text(key_env("CI_INPUT_PRIVATE_KEY_B64")), builder_context("dependency-review"))
     (work / "request.json").write_bytes(crypto.canonical(document))
+    from . import project_ci_regression
+    regression_receipt = project_ci_regression.receipt(payload, source_policy())
+    if regression_receipt is not None:
+        (work / "regression-approval.json").write_bytes(crypto.canonical(regression_receipt))
     # Re-encrypt for this builder run/attempt before distributing to native jobs.
     archive = work / "prepared.tar"
     with tarfile.open(archive, "w") as out:
         out.add(work / "sources.enc", arcname="sources.enc", recursive=False)
         out.add(work / "request.json", arcname="request.json", recursive=False)
+        if regression_receipt is not None:
+            out.add(work / "regression-approval.json", arcname="regression-approval.json", recursive=False)
     crypto.encrypt_file(archive, Path(required("RUNNER_TEMP")) / "cipher-input/sources.enc",
                         crypto.public_text(key_env("CI_INPUT_PRIVATE_KEY_B64")), builder_context("sources"))
     output("matrix", json.dumps({"include": [{"lane": item["id"], "runner": item["runner"]} for item in lanes]}, separators=(",", ":")))
@@ -801,7 +809,10 @@ def materialize():
                         key_env("CI_INPUT_PRIVATE_KEY_B64"), builder_context("sources"))
     with tarfile.open(archive, "r") as incoming:
         entries = incoming.getmembers()
-        if ({item.name for item in entries} != {"sources.enc", "request.json"} or len(entries) != 2 or
+        names = {item.name for item in entries}
+        if (names not in ({"sources.enc", "request.json"},
+                          {"sources.enc", "request.json", "regression-approval.json"}) or len(entries) != len(names) or
+                any(item.name == "regression-approval.json" and item.size > 16384 for item in entries) or
                 any(not item.isfile() or not 0 < item.size <= (24576 if item.name == "request.json" else MAX_ARCHIVE) for item in entries)):
             raise ValueError("unsafe prepared bundle")
         incoming.extractall(work, filter="data")
@@ -811,6 +822,8 @@ def materialize():
     validate_payload(payload)
     if payload["builder_sha"] != required("GITHUB_SHA") or payload["request_id"] != required("CI_REQUEST_ID"):
         raise ValueError("distributed request identity mismatch")
+    from . import project_ci_regression
+    project_ci_regression.read_receipt(work / "regression-approval.json", payload)
     if crypto.digest(work / "sources.enc") != payload["source_cipher_digest"]:
         raise ValueError("distributed source ciphertext digest mismatch")
     crypto.decrypt_file(work / "sources.enc", work / "repository.bundle", key_env("CI_INPUT_PRIVATE_KEY_B64"), source_context(payload))
@@ -890,6 +903,7 @@ def validate_action(action):
 
 PREPARE_DIAGNOSTIC_MAX_BYTES = 16384
 PREPARE_DIAGNOSTIC_REASONS = frozenset({
+    "invalid release regression approval", "duplicate release regression approval",
     "missing configuration", "unapproved builder execution", "request hash mismatch",
     "invalid explicit transport schema", "request schema denied by source policy",
     "CI request replay or ambiguous execution", "expired CI request", "request identity mismatch",
