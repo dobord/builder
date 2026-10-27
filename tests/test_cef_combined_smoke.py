@@ -96,6 +96,8 @@ class CompositionTests(unittest.TestCase):
                    'cb380928ef3ad9029fd382f362ec09ab9fbba63c')
         patch_release = ('b6cac082dc833ea3fd721b245476d78929aac340',
                          'f5e6b29845cb2cb317f93b5a4e4a84953c17dc7a')
+        current_release = ('b2a7a4db928965a125d49c77e71523e7fc223adf',
+                           '34e127fc332f377122a5239655e3af89b938e746')
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             source = root / 'consumer'
@@ -104,12 +106,14 @@ class CompositionTests(unittest.TestCase):
             (source / 'main.cpp').write_bytes(b'synthetic consumer')
             smoke = root / 'smoke.c'
             smoke.write_bytes(subject.MARKER)
-            for pair in (legacy, release, patch_release):
+            for pair in (legacy, release, patch_release, current_release):
                 with self.subTest(pair=pair), mock.patch.object(
                         subject.checked, 'blob', side_effect=[*pair, subject.SMOKE_BLOB]):
                     self.assertEqual(set(subject.validate(source, smoke)),
                                      {'CMakeLists.txt', 'main.cpp', 'smoke.c'})
             for pair in ((legacy[0], release[1]), (release[0], legacy[1]),
+                         (current_release[0], patch_release[1]),
+                         (patch_release[0], current_release[1]),
                          (patch_release[0], release[1]), (release[0], patch_release[1]),
                          (release[0], '0' * 40), ('0' * 40, release[1])):
                 with self.subTest(pair=pair), mock.patch.object(
