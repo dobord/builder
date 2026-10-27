@@ -346,6 +346,14 @@ YAML parsing or lane expansion. Every native job also rechecks this contract.
 The 40-lane count remains a secondary consistency check; it cannot authorize
 replacement commands, omitted profiles or altered runner platforms.
 
+The reviewed native Windows recipe additionally configures a dependency-light
+exit-contract project before the full platform build. Separate matrix-selected
+MSVC and LLVM-MinGW steps use literal generator identities, preserving trusted
+compiler-probe selection. Three mandatory process-exit/reentrant-handler cases
+run through CTest ten times with explicit deadlines and fail-on-missing/skip
+behavior. This is an additional fail-fast check within the existing lanes, not a
+replacement for the complete native tests; all forty release lanes remain.
+
 Pins are neither candidate-provided nor policy/environment/CLI overrides. Any
 recipe-byte change, including comments or line endings, requires review and a
 new builder revision containing updated pins. The public contract contains only

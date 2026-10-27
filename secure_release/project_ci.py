@@ -43,7 +43,7 @@ MAX_MATRIX_DIMENSIONS = 16
 # Builder-owned, reviewed byte contract. No request, policy, environment or
 # candidate recipe may replace these pins; changes require a reviewed revision.
 RELEASE_RECIPE_DIGESTS = {
-    "ci": "756f1a4c27dc0ed22692e42cc49008876db0c14ca38563cc2fda18e7dd135307",
+    "ci": "a7d346013e6de2f8ab0242a0e7605f9a89bd87ffb392b9c3a2b3dba0691ab48d",
     "wasm-async": "d3f5f2bb2641333c4b68337ec723379746fe701ae06307b1099946d64080082c",
     "nightly-stress": "bd6fd50160ee7bb7aa1733e9230efea7ff935cb16fdc96f0f0e7f3dd81534885",
     "performance": "49e60f278fccbd2d6f546ab8803d8b8882cfa4db57f14d1dc1f4d555e15fabab",
