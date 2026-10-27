@@ -3,7 +3,16 @@
   "platform": "windows",
   "vcpkg_commit": "39dccd415da14d8051559d66069019475d95787c",
   "cef_recipe_commit": "03abd124ebe3b8a57fb78470a75b5aa3ce064e31",
-  "checkpoint": null,
+  "checkpoint": {
+    "run": 40524998540,
+    "attempt": 1,
+    "producer_sha": "4b807412dc1aedc97eb065fb9921cb6d9aa66129",
+    "artifact_id": 12754679561,
+    "artifact_sha256": "a3860a99684deb432411a2384401cb89501f5e72f1f455a518d14032d8ec4bc1",
+    "summary_artifact_id": 12755761954,
+    "summary_artifact_sha256": "dd0acda73c0f492abbe3f386923dd658742bce8486aec164e40a17ac3f2f8df2",
+    "build_key": "98a1252a498fc1e65a983f8f5ac9f0096a90b695abe5ba6f1cc4aab5eba6f766"
+  },
   "source_repair": {
     "schema": 2,
     "id": "windows-speech-callback-node-map-v27",
