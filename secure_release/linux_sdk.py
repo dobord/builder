@@ -20,6 +20,8 @@ PORT_BLOB = "f09bda1237f32164dd37fd255e7b6f06ab876c6a"
 LFC_UI_050 = "9ac3eaf69ecdb22651dc3e57b928f54d751edaa1"
 PROXY_050_BLOB = "20ccbf6778308a844fc39b01a780b15815077399"
 PORT_050_BLOB = "fa1905a7c256b1bb3ad6aed9e0a4ca2e9af425f8"
+LFC_UI_061 = "7fb8c310a3fea915479650cb286fb6b79fc1b61b"
+PORT_061_BLOB = "38a53bb8ba14aac9487d5cf9865f878abccdb47b"
 
 
 def validate_cpp_proof(proof: dict) -> None:
@@ -54,10 +56,12 @@ def capture_sources(root: Path, plan: dict) -> dict:
     if not safeio.regular(smoke):
         raise ValueError("Pinned lfc-ui lacks its real CEF proxy runtime regression")
     cef_sdk_objects.validate_sources(root / "workspace")
+    proxy_blob = PROXY_050_BLOB if lfc["sha"] in {LFC_UI_050, LFC_UI_061} else PROXY_BLOB
+    port_blob = (PORT_061_BLOB if lfc["sha"] == LFC_UI_061 else
+                 PORT_050_BLOB if lfc["sha"] == LFC_UI_050 else PORT_BLOB)
     return {"lfc_ui": source,
              "examples": cef_sdk_example.capture(source, root / "workspace",
-                                                  proxy_blob=PROXY_050_BLOB if lfc["sha"] == LFC_UI_050 else PROXY_BLOB,
-                                                  port_blob=PORT_050_BLOB if lfc["sha"] == LFC_UI_050 else PORT_BLOB)}
+                                                   proxy_blob=proxy_blob, port_blob=port_blob)}
 
 
 def prepare_engine(root: Path, cfg: dict, environment: dict) -> None:
