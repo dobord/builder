@@ -146,7 +146,7 @@ class AccessibilityIteratorTests(unittest.TestCase):
         self.assertEqual(worker.qualification_lock(ROOT)['source_repair'], profile)
         selected = worker.qualification_lock(ROOT)['checkpoint']
         self.assertIn(repair.restore_contract(selected, repair.BASE_KEY)[1],
-                      ('legacy', 'resume', 'upgrade-v14', 'upgrade-v15', 'upgrade-v16', 'upgrade-v19', 'upgrade-v21', 'upgrade-v23', 'upgrade-v26'))
+                      ('fresh', 'legacy', 'resume', 'upgrade-v14', 'upgrade-v15', 'upgrade-v16', 'upgrade-v19', 'upgrade-v21', 'upgrade-v23', 'upgrade-v26'))
         self.assertEqual(repair.restore_contract(repair.LEGACY, repair.BASE_KEY), (repair.BASE_KEY, 'legacy'))
         for old in (dict(repair.LEGACY, build_key=V9_KEY),
                     dict(repair.LEGACY, run=37207948153)):
