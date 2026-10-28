@@ -3,7 +3,7 @@ from functools import lru_cache
 import hashlib
 import os
 from pathlib import Path
-import urllib.request
+from tests.public_ci_inputs import public_bytes
 
 PDFIUM = "8f3e90282ef137adf7d380079c3178b24407104a"
 PATH = "core/fxcrt/span.h"
@@ -20,10 +20,7 @@ def public_input():
             raw = stream.read(SIZE + 1)
     else:
         url = "https://raw.githubusercontent.com/chromium/pdfium/" + PDFIUM + "/" + PATH
-        with urllib.request.urlopen(url, timeout=30) as stream:
-            if stream.geturl() != url:
-                raise ValueError("Unexpected public PDFium fixture redirect")
-            raw = stream.read(SIZE + 1)
+        raw = public_bytes(url, SIZE)
     blob = hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest()
     if len(raw) != SIZE or hashlib.sha256(raw).hexdigest() != SHA256 or blob != BLOB:
         raise ValueError("Pinned public PDFium span fixture mismatch")
