@@ -7,6 +7,7 @@ import sys
 
 MINIMUM_FREE = 84825604096
 ANDROID_SDK = r"C:\Android\android-sdk"
+ANDROID_SDK_PHYSICAL = r"C:\Program Files (x86)\Android\android-sdk"
 
 
 def plain(path: Path) -> None:
@@ -37,7 +38,13 @@ def cleanup() -> dict:
         return report
     # Fixed path only: no user-controlled path, glob, toolcache or workspace root.
     if target.is_symlink():
-        raise ValueError("Redirected Android SDK cleanup path")
+        # Exact alias observed on the pinned hosted image, not arbitrary links.
+        physical = Path(ANDROID_SDK_PHYSICAL)
+        for parent in (physical, *physical.parents):
+            plain(parent)
+        if target.resolve(strict=True) != physical:
+            raise ValueError("Unreviewed Android SDK alias destination")
+        target = physical
     if target.exists():
         validate_tree(target)
         shutil.rmtree(target)

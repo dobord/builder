@@ -66,6 +66,41 @@ class HostedDiskTests(unittest.TestCase):
                 worker.validate_tree(sdk)
             self.assertEqual(outside.read_bytes(), b"keep")
 
+    def test_only_reviewed_sdk_alias_destination_is_removed(self):
+        for admitted in (True, False):
+            with self.subTest(admitted=admitted), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                physical = root / "physical-sdk"
+                physical.mkdir()
+                (physical / "unused.bin").write_bytes(b"unused")
+                other = root / "keep"
+                other.mkdir()
+                alias = root / "sdk-alias"
+                try:
+                    alias.symlink_to(physical if admitted else other, target_is_directory=True)
+                except OSError:
+                    self.skipTest("Symlink creation unavailable")
+                worker.validate_tree(physical)
+                def fixed_path(value):
+                    if value == worker.ANDROID_SDK:
+                        return alias
+                    if value == worker.ANDROID_SDK_PHYSICAL:
+                        return physical
+                    raise AssertionError("Unapproved cleanup path")
+                with mock.patch.object(worker.sys, "platform", "win32"), \
+                     mock.patch.dict(worker.os.environ, {"RUNNER_ENVIRONMENT": "github-hosted", "RUNNER_OS": "Windows"}), \
+                     mock.patch.object(worker, "Path", side_effect=fixed_path), \
+                     mock.patch.object(worker, "validate_tree"), \
+                     mock.patch.object(worker.shutil, "disk_usage", return_value=self.usage(1)):
+                    if admitted:
+                        self.assertTrue(worker.cleanup()["android_sdk_removed"])
+                        self.assertFalse(physical.exists())
+                    else:
+                        with self.assertRaisesRegex(ValueError, "alias destination"):
+                            worker.cleanup()
+                        self.assertTrue(physical.exists())
+                self.assertTrue(other.is_dir())
+
 
 if __name__ == "__main__":
     unittest.main()
