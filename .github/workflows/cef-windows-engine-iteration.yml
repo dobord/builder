@@ -115,7 +115,9 @@ jobs:
           python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r requirements.lock
       - name: Reclaim unused Android SDK only on disposable hosted Windows
         if: runner.environment == 'github-hosted'
-        run: python -m secure_release.cef_windows_hosted_disk
+        run: |
+          python -c "from pathlib import Path; import json, os, shutil; p=Path(r'C:\Android\android-sdk'); print(json.dumps({'path':str(p),'symlink':p.is_symlink(),'link_target':os.readlink(p) if p.is_symlink() else None,'resolved':str(p.resolve()),'free_C':shutil.disk_usage('C:/').free,'free_D':shutil.disk_usage('D:/').free},sort_keys=True))"
+          throw 'Diagnostic-only run; no deletion or checkpoint restoration requested'
       - name: Verify exact source revisions and workspace capacity
         shell: pwsh
         run: |
