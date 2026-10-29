@@ -87,7 +87,8 @@ class WindowsReleaseTests(unittest.TestCase):
                        cef_cache.RELEASE_050_BINARY_CACHES['windows'], cef_cache.RELEASE_051_BINARY_CACHES['windows'],
                        cef_cache.RELEASE_052_WINDOWS_PACKAGE_CONTINUATION, cef_cache.RELEASE_052_RC4_PACKAGE_CACHES['windows'],
                        cef_cache.RELEASE_052_RC6_PACKAGE_CACHES['windows'],
-                       cef_cache.RELEASE_052_RC10_PACKAGE_CACHES['windows']):
+                       cef_cache.RELEASE_052_RC10_PACKAGE_CACHES['windows'],
+                       cef_cache.RELEASE_061_WINDOWS_PACKAGE_CONTINUATION):
             cached = copy.deepcopy(cfg)
             cached['platforms']['windows']['binary_cache'] = {name: record[name] for name in ('run', 'attempt', 'artifact_id', 'artifact_sha256')}
             windows_sdk.validate_binding(windows_sdk.binding(cached), cached)

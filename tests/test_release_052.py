@@ -140,6 +140,11 @@ class RC10WindowsPackageContinuationTests(CandidatePackageContinuationTests):
     record = cache.RELEASE_052_RC10_PACKAGE_CACHES["windows"]
 
 
+class SDK061WindowsPackageContinuationTests(CandidatePackageContinuationTests):
+    platform = "windows"
+    record = cache.RELEASE_061_WINDOWS_PACKAGE_CONTINUATION
+
+
 class FullCodecProviderTests(unittest.TestCase):
     def test_complete_provider_ownership_and_bytes_survive_relocation(self):
         with tempfile.TemporaryDirectory() as folder:
