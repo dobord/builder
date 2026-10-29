@@ -8,9 +8,14 @@ from . import cef_cache, cef_strict_iteration
 # ubuntu24/20261012.334: 7e7dc1bcc0ef464e5e315a2b4c33609590c6cffe
 # ubuntu24/20261004.327: e3fe113a581eb9a44ca43f479b69f9c93f36df34
 # ubuntu24/20261018.339: b4067e48bd9bd803e958bfe1503ea0a06a3a127f
+# ubuntu24/20261026.354: 799bcd0daf03c14c460e2662bcc9ca94a4a8aaa8
+# 20261025.353.1 was observed in release job123667302302. Both new labels
+# additionally require the unchanged native fingerprint and complete content
+# identity below; image inventory alone never authorizes checkpoint reuse.
 # Chromium uses its captured compiler/sysroot; frozen target inputs and the
 # complete recipe/contract/path identity must still compare exactly.
-IMAGES = ("20260927.320.1", "20261012.334.1", "20261004.327.1", "20261018.339.1")
+IMAGES = ("20260927.320.1", "20261012.334.1", "20261004.327.1", "20261018.339.1",
+          "20261025.353.1", "20261026.354.1")
 HOST = {"os_id": "ubuntu", "os_version_id": "24.04", "machine": "x86_64",
         "glibc": "2.39", "gcc14": "14.2.0", "gxx14": "14.2.0",
         "binutils": "2.42", "pkg_config": "1.8.1", "bison": "3.8.2", "ninja": "1.13.2"}
