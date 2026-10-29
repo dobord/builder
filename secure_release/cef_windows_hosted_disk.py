@@ -37,7 +37,8 @@ def cleanup() -> dict:
         return report
     # Fixed path only: no user-controlled path, glob, toolcache or workspace root.
     if target.is_symlink():
-        raise ValueError("Redirected Android SDK cleanup path")
+        raise ValueError("Refusing redirected fixed Android SDK cleanup path; "
+                         f"link_target={os.readlink(target)!r}; resolved={str(target.resolve())!r}")
     if target.exists():
         validate_tree(target)
         shutil.rmtree(target)
