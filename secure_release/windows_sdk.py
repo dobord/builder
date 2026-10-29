@@ -99,7 +99,8 @@ def binding(cfg: dict) -> dict:
                     cef_cache.RELEASE_052_WINDOWS_PACKAGE_CONTINUATION,
                     cef_cache.RELEASE_052_RC4_PACKAGE_CACHES["windows"],
                     cef_cache.RELEASE_052_RC6_PACKAGE_CACHES["windows"],
-                    cef_cache.RELEASE_052_RC10_PACKAGE_CACHES["windows"])
+                    cef_cache.RELEASE_052_RC10_PACKAGE_CACHES["windows"],
+                    cef_cache.RELEASE_061_WINDOWS_PACKAGE_CONTINUATION)
         if cache not in [{name: record[name] for name in ("run", "attempt", "artifact_id", "artifact_sha256")}
                          for record in reviewed]:
             raise ValueError("Windows release binary cache is not the exact reviewed producer")
