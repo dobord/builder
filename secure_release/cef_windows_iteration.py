@@ -542,6 +542,15 @@ def download_checkpoint_transport(
     raise AssertionError("unreachable")
 
 
+def validate_checkpoint_producer(producer: dict, selected: dict) -> None:
+    event = producer.get("event")
+    if (event not in {"push", "workflow_dispatch"}
+            or producer.get("head_branch") != "feature/cef-static-integration"):
+        raise ValueError("Untrusted Windows CEF checkpoint producer event or branch")
+    check_run(producer, BUILDER, WORKFLOW, selected["producer_sha"],
+              selected["attempt"], event, success=True)
+
+
 def restore_checkpoint(selected: dict, destination: Path, build_key: str,
                        private_key: str) -> dict:
     api = Client(os.environ["GITHUB_TOKEN"])
@@ -554,12 +563,7 @@ def restore_checkpoint(selected: dict, destination: Path, build_key: str,
     producer = api.get(
         f"/repos/{BUILDER}/actions/runs/{run_id}/attempts/{attempt}"
     )
-    check_run(
-        producer, BUILDER, WORKFLOW, revision, attempt, "push", success=False
-    )
-    if (producer.get("status") != "completed"
-            or producer.get("conclusion") != "success"):
-        raise ValueError("Windows CEF checkpoint producer is not successful and complete")
+    validate_checkpoint_producer(producer, selected)
     current = api.get(f"/repos/{BUILDER}/actions/runs/{run_id}")
     if (current.get("run_attempt") != attempt
             or current.get("status") != "completed"
