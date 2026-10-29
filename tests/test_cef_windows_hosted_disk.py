@@ -69,7 +69,7 @@ class HostedDiskTests(unittest.TestCase):
     def test_only_reviewed_sdk_alias_destination_is_removed(self):
         for admitted in (True, False):
             with self.subTest(admitted=admitted), tempfile.TemporaryDirectory() as folder:
-                root = Path(folder)
+                root = Path(folder).resolve()
                 physical = root / "physical-sdk"
                 physical.mkdir()
                 (physical / "unused.bin").write_bytes(b"unused")
