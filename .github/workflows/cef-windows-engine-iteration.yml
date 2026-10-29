@@ -113,6 +113,9 @@ jobs:
       - name: Install hash-pinned checkpoint cryptography
         run: |
           python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r requirements.lock
+      - name: Reclaim unused Android SDK only on disposable hosted Windows
+        if: runner.environment == 'github-hosted'
+        run: python -m secure_release.cef_windows_hosted_disk
       - name: Verify exact source revisions and workspace capacity
         shell: pwsh
         run: |

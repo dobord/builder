@@ -1,10 +1,10 @@
 {
-  "run": 38181326135,
+  "run": 40902424067,
   "attempt": 1,
-  "producer_sha": "dc1bdf1634ec99fcad6c88270fc5071695c81fe5",
-  "artifact_id": 11721486331,
-  "artifact_sha256": "4127994cac9c8e3d4acfa8d15aada372d78dc5eda1076d7a97cee21ef11b3f03",
-  "summary_artifact_id": 11720872640,
-  "summary_artifact_sha256": "55ef0bf4b946c6f7af36bf30242b4c61653715f26ad4477312010670e33d2263",
+  "producer_sha": "98c52629af8c92e7655cbe2c2f2b6b874da97da4",
+  "artifact_id": 12922322144,
+  "artifact_sha256": "60d75c24b1a5879fec59845e229936eea6b15a8de2ad20c0d0ecbb6f7bcec6dc",
+  "summary_artifact_id": 12921673491,
+  "summary_artifact_sha256": "bb834eb3fc5f3cd2264553a799a9c556d441cf469a6315a6abc649b9af13ff27",
   "build_key": "98a1252a498fc1e65a983f8f5ac9f0096a90b695abe5ba6f1cc4aab5eba6f766"
 }
