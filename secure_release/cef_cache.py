@@ -237,17 +237,6 @@ RELEASE_052_RC10_PACKAGE_CACHES = {
 }
 
 
-# Windows SDK qualification succeeded in this combined candidate; Linux stopped
-# at host-image admission. Reuse exact package bytes only, not its cross-run SDK.
-RELEASE_061_WINDOWS_PACKAGE_CONTINUATION = {
-    "run": 40936140543, "attempt": 1,
-    "revision": "4d4324cec4556fa99aeca8dd4ded94add8546795",
-    "artifact_id": 12932539878,
-    "artifact_sha256": "cf238fd2a1648444dfffd504a5e72734cf3192eb07569b5f2d303045861914f7",
-    "image": "20261025.346.1",
-}
-
-
 def continuation_record(run: int) -> dict | None:
     return next((record for record in (LINUX_CONTINUATION, LINUX_RUNTIME_CONTINUATION,
                                       LINUX_INSTALL_CONTINUATION, LINUX_INVENTORY_CONTINUATION,
@@ -268,12 +257,6 @@ def producer_revision(platform: str, kind: str, run: int, attempt: int, revision
 def selected_revision(selected: dict | None, platform: str, kind: str, revision: str) -> str:
     if selected is None:
         return revision
-    if selected["run"] == RELEASE_061_WINDOWS_PACKAGE_CONTINUATION["run"]:
-        record = RELEASE_061_WINDOWS_PACKAGE_CONTINUATION
-        require(platform == "windows" and kind == "vcpkg-binaries"
-                and all(selected[name] == record[name] for name in ("run", "attempt", "artifact_id", "artifact_sha256")),
-                "Reviewed 0.6.1 Windows package selector changed")
-        return record["revision"]
     if selected["run"] == 39625824076:
         record = RELEASE_052_RC10_PACKAGE_CACHES.get(platform)
         require(record is not None and kind == "vcpkg-binaries"
@@ -351,8 +334,6 @@ def selected_revision(selected: dict | None, platform: str, kind: str, revision:
 
 def binary_cache_image(selected: dict, platform: str, revision: str) -> str | None:
     selected_revision(selected, platform, "vcpkg-binaries", revision)
-    if selected["run"] == RELEASE_061_WINDOWS_PACKAGE_CONTINUATION["run"]:
-        return RELEASE_061_WINDOWS_PACKAGE_CONTINUATION["image"]
     if selected["run"] == 39625824076:
         return RELEASE_052_RC10_PACKAGE_CACHES[platform]["image"]
     if selected["run"] == 39541599659:
@@ -507,8 +488,7 @@ def fetch(api, selected: dict, directory: Path, *, platform: str, kind: str, key
     require(platform in BUILD_WORKFLOWS[workflow], "Cache platform differs from producer workflow")
     if run in {38583556953, 39103476664, 39195808918, LINUX_SUCCESSFUL_RELEASE_PACKAGES["run"],
                RELEASE_052_LINUX_PACKAGE_CONTINUATION["run"], RELEASE_052_WINDOWS_PACKAGE_CONTINUATION["run"],
-                RELEASE_052_LINUX_NATIVE_PACKAGE_CONTINUATION["run"], 39450676455, 39541599659, 39625824076,
-                RELEASE_061_WINDOWS_PACKAGE_CONTINUATION["run"]}:
+                RELEASE_052_LINUX_NATIVE_PACKAGE_CONTINUATION["run"], 39450676455, 39541599659, 39625824076}:
         require(workflow == "build-combined-release.yml", "Reviewed completed-package cache workflow changed")
     if continuation_record(run) is not None:
         require(workflow == "build-linux-release.yml", "Reviewed Linux continuation workflow changed")
@@ -517,8 +497,7 @@ def fetch(api, selected: dict, directory: Path, *, platform: str, kind: str, key
     current = api.get(f"/repos/{BUILDER}/actions/runs/{run}")
     require(current["run_attempt"] == attempt and current["status"] == "completed", "Cache producer was rerun")
     if run in {RELEASE_052_LINUX_PACKAGE_CONTINUATION["run"], RELEASE_052_WINDOWS_PACKAGE_CONTINUATION["run"],
-                RELEASE_052_LINUX_NATIVE_PACKAGE_CONTINUATION["run"], 39450676455, 39541599659, 39625824076,
-                RELEASE_061_WINDOWS_PACKAGE_CONTINUATION["run"]}:
+                RELEASE_052_LINUX_NATIVE_PACKAGE_CONTINUATION["run"], 39450676455, 39541599659, 39625824076}:
         require(producer.get("conclusion") == "failure" and current.get("conclusion") == "failure"
                 and current.get("head_sha") == revision, "Reviewed package-only continuation producer changed")
     if run in {LINUX_RELEASE_CONTINUATION["run"], WINDOWS_RELEASE_BINARY_CACHE["run"],

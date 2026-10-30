@@ -87,8 +87,7 @@ class WindowsReleaseTests(unittest.TestCase):
                        cef_cache.RELEASE_050_BINARY_CACHES['windows'], cef_cache.RELEASE_051_BINARY_CACHES['windows'],
                        cef_cache.RELEASE_052_WINDOWS_PACKAGE_CONTINUATION, cef_cache.RELEASE_052_RC4_PACKAGE_CACHES['windows'],
                        cef_cache.RELEASE_052_RC6_PACKAGE_CACHES['windows'],
-                       cef_cache.RELEASE_052_RC10_PACKAGE_CACHES['windows'],
-                       cef_cache.RELEASE_061_WINDOWS_PACKAGE_CONTINUATION):
+                       cef_cache.RELEASE_052_RC10_PACKAGE_CACHES['windows']):
             cached = copy.deepcopy(cfg)
             cached['platforms']['windows']['binary_cache'] = {name: record[name] for name in ('run', 'attempt', 'artifact_id', 'artifact_sha256')}
             windows_sdk.validate_binding(windows_sdk.binding(cached), cached)
@@ -105,6 +104,15 @@ class WindowsReleaseTests(unittest.TestCase):
             altered[field] = None
             with self.assertRaises(ValueError):
                 windows_sdk.validate_binding(altered, cfg)
+
+    def test_unconfirmed_rc1_package_cache_context_is_not_admitted(self):
+        cfg = self.configuration()
+        cfg['platforms']['windows']['binary_cache'] = {
+            'run': 40936140543, 'attempt': 1, 'artifact_id': 12932539878,
+            'artifact_sha256': 'cf238fd2a1648444dfffd504a5e72734cf3192eb07569b5f2d303045861914f7',
+        }
+        with self.assertRaises(ValueError):
+            windows_sdk.binding(cfg)
 
     def test_windows_workflow_requires_sdk_before_publication(self):
         root = Path(__file__).resolve().parents[1]
