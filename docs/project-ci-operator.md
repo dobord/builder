@@ -313,6 +313,22 @@ inspection. The MD5 is only gcovr's existing filename identifier, explicitly not
 security digest. SHA-256 archive manifests, source/lane binding, recipient roles,
 authenticated context and ciphertext-only publication remain unchanged.
 
+## Source-backed coverage report names
+
+Report collection keeps the credential-like filename guard. A narrow exception
+admits direct-child `coverage.<C/C++ basename>.<gcovr MD5>.html` pages only when
+bounded gcovr format `0.6` metadata maps the exact name to an existing, nonlinked
+C/C++ source inside the materialized source tree. Missing, malformed or unsupported
+metadata grants no exception; raw credential-like files, key-source extensions,
+unmapped/wrong-hash HTML, nested pages, links and escaping paths remain rejected.
+Metadata is capped at 64 MiB and 20,000 records; archive bounds are unchanged.
+
+The approved recipe output and materialized source are trusted inputs. This is
+filename classification for private source-coverage reports, not HTML body/DLP
+inspection. The MD5 is only gcovr's existing filename identifier, explicitly not a
+security digest. SHA-256 archive manifests, source/lane binding, recipient roles,
+authenticated context and ciphertext-only publication remain unchanged.
+
 ## Signed transport
 
 The strict schema-2 field set is:
