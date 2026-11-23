@@ -44,6 +44,16 @@ class ConsumerContracts(unittest.TestCase):
         consumer.validate_request(request())
         consumer.validate_policy(policy())
 
+    def test_workflow_is_valid_yaml_and_token_is_prepare_only(self):
+        import yaml
+        workflow = Path(__file__).resolve().parents[1] / ".github/workflows/encrypted-consumer-ci.yml"
+        value = yaml.load(workflow.read_text(), Loader=yaml.BaseLoader)
+        self.assertEqual({"workflow_dispatch"}, set(value["on"]))
+        steps = value["jobs"]["prepare"]["steps"]
+        self.assertTrue(any(step.get("env", {}).get("SOURCE_READ_TOKEN") == "${{ secrets.SOURCE_READ_TOKEN }}"
+                            for step in steps))
+        self.assertNotIn("SOURCE_READ_TOKEN", json.dumps(value["jobs"]["qualify"]))
+
     def test_request_rejects_unknown_fields_bad_types_expiry_and_ref(self):
         for change in ({"token": "no"}, {"pr": True}, {"source_id": True}, {"pr": -1},
                        {"source_sha": "main"}, {"expires": 1}, {"created": int(time.time()) + 1000},
@@ -168,6 +178,7 @@ class ConsumerContracts(unittest.TestCase):
         self.assertEqual(hosted["run"], 100)
         self.assertNotEqual(a, hosted)
 
+    @unittest.skipUnless(os.name == "posix", "local consumer operator requires POSIX ownership checks")
     def test_state_signature_refuses_modified_inventory(self):
         private, public = crypto.generate("sign")
         state = {"payload": request(), "request": "synthetic-ciphertext",
@@ -204,6 +215,7 @@ class ConsumerContracts(unittest.TestCase):
             consumer.checkout(bundle, root / "output", revision, root)
             self.assertEqual((root / "output/source.txt").read_text(), "synthetic\n")
 
+    @unittest.skipUnless(os.name == "posix", "native consumer execution is Linux-only")
     def test_authenticated_prepare_materialize_and_credential_free_execution(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -286,6 +298,7 @@ class ConsumerContracts(unittest.TestCase):
                 self.assertEqual(json.loads((consumer.work_root() / "results/result.json").read_text())["source_sha"],
                                  revision)
 
+    @unittest.skipUnless(os.name == "posix", "local consumer operator requires POSIX ownership checks")
     def test_fetch_authenticates_artifact_and_expected_lane_context(self):
         value = request()
         digest = "0" * 64
