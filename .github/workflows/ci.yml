@@ -7,7 +7,42 @@ on:
 permissions:
   contents: read
 jobs:
+  public-metadata-probe:
+    if: github.event_name == 'workflow_dispatch' && github.ref_name == 'diagnostics/project-ci-public-metadata'
+    permissions: {}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.12'
+      - name: Check anonymous access to public metadata
+        run: |
+          python - <<'PY'
+          import json
+          import urllib.error
+          import urllib.request
+
+          urls = {
+              'raw public file': 'https://raw.githubusercontent.com/microsoft/vcpkg/master/README.md',
+              'public Git ref': 'https://api.github.com/repos/actions/checkout/git/ref/tags/v4.2.2',
+              'public matching refs': 'https://api.github.com/repos/actions/checkout/git/matching-refs/tags',
+          }
+          for label, url in urls.items():
+              req = urllib.request.Request(url, headers={'User-Agent': 'builder-dependency-review', 'Content-Type': 'application/json'})
+              try:
+                  with urllib.request.urlopen(req, timeout=20) as r:
+                      data = r.read(16777217)
+                      print(label, 'HTTP', r.status, 'quota', r.headers.get('X-RateLimit-Remaining'), 'bytes', len(data))
+                      if label != 'raw public file':
+                          json.loads(data)
+              except urllib.error.HTTPError as e:
+                  print(label, 'HTTP', e.code, 'quota', e.headers.get('X-RateLimit-Remaining'), 'retry-after', e.headers.get('Retry-After'))
+              except (OSError, ValueError) as e:
+                  print(label, type(e).__name__)
+          PY
   security-tests:
+    if: github.ref_name != 'diagnostics/project-ci-public-metadata'
     strategy:
       fail-fast: false
       matrix:
