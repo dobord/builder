@@ -224,6 +224,10 @@ committed wheelhouse.
 
 ## Encrypted project CI
 
+Independent Linux consumers use the separately provisioned
+[encrypted consumer contour](docs/consumer-ci.md). It preserves the project-CI
+source policy and release recipe contract described below.
+
 The separately provisioned `.github/workflows/encrypted-project-ci.yml` accepts
 an opaque, signed HPKE request from a protected source-repository authorizer.
 It verifies repository IDs, operator identity, dependency review, immutable
