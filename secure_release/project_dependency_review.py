@@ -13,6 +13,8 @@ import json
 from pathlib import PurePosixPath
 import re
 import subprocess
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -38,10 +40,21 @@ OTHER_MANIFESTS = {"package.json", "package-lock.json", "npm-shrinkwrap.json", "
                    "uv.lock", "packages.lock.json", "vcpkg-configuration.json"}
 
 
+PUBLIC_ENDPOINTS = {"api.github.com": "github-api", "raw.githubusercontent.com": "github-raw", "api.osv.dev": "osv"}
+
+
+class DependencyTransportError(ValueError):
+    def __init__(self, endpoint, failure, status=None):
+        super().__init__("dependency data unavailable")
+        self.endpoint = endpoint
+        self.failure = failure
+        self.status = status
+
+
 def public_json(url, *, data=None):
     """Bound responses and prohibit credentials and cross-host redirects."""
     parts = urllib.parse.urlsplit(url)
-    if (parts.scheme != "https" or parts.hostname not in {"api.github.com", "raw.githubusercontent.com", "api.osv.dev"}
+    if (parts.scheme != "https" or parts.hostname not in PUBLIC_ENDPOINTS
             or parts.username or parts.password or parts.fragment):
         raise ValueError("invalid public dependency endpoint")
     class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -53,14 +66,35 @@ def public_json(url, *, data=None):
             return super().redirect_request(req, fp, code, msg, headers, newurl)
     request = urllib.request.Request(url, data=None if data is None else json.dumps(data).encode(),
                                      headers={"Content-Type": "application/json", "User-Agent": "builder-dependency-review"})
-    try:
-        with urllib.request.build_opener(NoRedirect()).open(request, timeout=60) as response:
-            raw = response.read(MAX_BYTES + 1)
-        if len(raw) > MAX_BYTES:
-            raise ValueError("oversized dependency response")
-        return json.loads(raw)
-    except Exception:
-        raise ValueError("dependency data unavailable") from None
+    endpoint = PUBLIC_ENDPOINTS[parts.hostname]
+    opener = urllib.request.build_opener(NoRedirect())
+    for delay in (1, 2, None):
+        status = None
+        retryable = False
+        try:
+            with opener.open(request, timeout=60) as response:
+                raw = response.read(MAX_BYTES + 1)
+            if len(raw) > MAX_BYTES:
+                raise DependencyTransportError(endpoint, "response-size")
+            return json.loads(raw)
+        except urllib.error.HTTPError as error:
+            status = error.code
+            failure = "http"
+            retryable = status in {502, 503, 504}
+            error.close()
+        except (TimeoutError, ConnectionResetError) as error:
+            failure = "timeout" if isinstance(error, TimeoutError) else "connection-reset"
+            retryable = True
+        except urllib.error.URLError as error:
+            failure = "network"
+            if isinstance(error.reason, (TimeoutError, ConnectionResetError)):
+                failure = "timeout" if isinstance(error.reason, TimeoutError) else "connection-reset"
+                retryable = True
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            failure = "invalid-json"
+        if not retryable or delay is None:
+            raise DependencyTransportError(endpoint, failure, status) from None
+        time.sleep(delay)
 
 
 @functools.lru_cache(maxsize=256)

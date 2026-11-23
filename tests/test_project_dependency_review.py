@@ -2,12 +2,49 @@
 import unittest
 import hashlib
 import json
+import urllib.error
 from unittest.mock import patch
 
 from secure_release import project_dependency_review as review
 
 
 class DependencyReviewTests(unittest.TestCase):
+    def test_metadata_transport_retries_transient_gateway_failure(self):
+        url = 'https://api.github.com/repos/actions/checkout/git/ref/tags/v4'
+        with patch.object(review.urllib.request, 'build_opener') as build, patch('time.sleep') as delay:
+            opener = build.return_value
+            response = unittest.mock.MagicMock()
+            response.__enter__.return_value.read.return_value = b'{"object": {}}'
+            opener.open.side_effect = [urllib.error.HTTPError(url, 503, 'private', {}, None), response]
+            self.assertEqual(review.public_json(url), {'object': {}})
+            self.assertEqual(opener.open.call_count, 2)
+            delay.assert_called_once()
+
+    def test_metadata_transport_keeps_denials_fail_closed_without_exposing_details(self):
+        from secure_release import project_ci
+
+        url = 'https://api.github.com/repos/actions/checkout/git/ref/tags/v4'
+        with patch.object(review.urllib.request, 'build_opener') as build:
+            opener = build.return_value
+            opener.open.side_effect = urllib.error.HTTPError(url, 403, 'private body', {}, None)
+            with self.assertRaisesRegex(ValueError, '^dependency data unavailable$') as error:
+                review.public_json(url)
+            opener.open.assert_called_once()
+        report = project_ci.prepare_failure_record(error.exception)
+        self.assertEqual(report['dependency_transport'], {'endpoint': 'github-api', 'failure': 'http', 'status': 403})
+        self.assertNotIn(url, json.dumps(report))
+        self.assertNotIn('private body', json.dumps(report))
+
+    def test_metadata_transport_fails_closed_after_bounded_timeouts(self):
+        url = 'https://api.github.com/repos/actions/checkout/git/ref/tags/v4'
+        with patch.object(review.urllib.request, 'build_opener') as build, patch('time.sleep') as delay:
+            opener = build.return_value
+            opener.open.side_effect = urllib.error.URLError(TimeoutError('private reason'))
+            with self.assertRaisesRegex(ValueError, '^dependency data unavailable$'):
+                review.public_json(url)
+            self.assertEqual(opener.open.call_count, 3)
+            self.assertEqual(delay.call_count, 2)
+
     def test_pinned_actions_and_fetchcontent_are_commit_queries(self):
         files = {"ci/builder/ci.yml": b"jobs:\n  test:\n    steps:\n      - uses: actions/checkout@" + b"a" * 40 + b"\n",
                  "CMakeLists.txt": b"FetchContent_Declare(test URL https://github.com/example/public/archive/" + b"b" * 40 + b".tar.gz)"}

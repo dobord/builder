@@ -448,6 +448,12 @@ Detailed qualification evidence is saved locally in owner-only
 qualification; retention/removal is an operator responsibility. Six-hour signed
 request expiry is enforced throughout; expired work needs a fresh request.
 
+Dependency metadata remains mandatory. The anonymous public metadata client
+retries timeouts, connection resets and HTTP 502/503/504 at most twice per
+request. Missing, denied, malformed or oversized responses still fail prepare.
+The encrypted prepare diagnostic records only the endpoint class, failure
+class and a bounded HTTP status; it does not record URLs, headers or bodies.
+
 ## Validation and handoff
 
 ```sh
