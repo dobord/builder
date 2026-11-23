@@ -377,7 +377,8 @@ def materialize():
             ci.checked(["git", "-C", str(dep), "archive", "--format=tar.gz", item["sha"],
                         "-o", str(inputs / (path.stem + ".tar.gz"))], work, env, work / "preparation.log")
             ci.remove_staging(dep)
-            path.unlink()
+            # Retain the authenticated bundle for bootstrap tools which need
+            # original commit identity. Native code must not need API credentials.
     (work / "request.json").write_bytes(crypto.canonical(value))
     (work / "prepared.tar").unlink()
 
