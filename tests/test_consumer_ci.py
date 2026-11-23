@@ -217,6 +217,7 @@ class ConsumerContracts(unittest.TestCase):
             bundle = root / "dependency.bundle"
             git("-C", str(bare), "bundle", "create", str(bundle), "--all")
             consumer.checkout(bundle, root / "output", revision, root)
+            self.assertEqual((root / "output/.git/shallow").read_bytes(), (revision + "\n").encode("ascii"))
             self.assertEqual((root / "output/source.txt").read_text(), "synthetic\n")
             self.assertNotIn(retired, git("-C", str(root / "output"), "rev-list", "--all"))
             self.assertFalse((root / "output/retired.txt").exists())

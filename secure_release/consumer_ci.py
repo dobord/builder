@@ -265,7 +265,7 @@ def checkout(bundle, root, revision, work, *, roots=None):
     if root.exists() or root.is_symlink():
         raise ValueError("consumer checkout must be new")
     ci.checked(["git", "init", str(root)], work, env, log)
-    (root / ".git/shallow").write_text("".join(r + "\n" for r in roots), encoding="ascii")
+    (root / ".git/shallow").write_text("".join(r + "\n" for r in roots), encoding="ascii", newline="\n")
     ci.checked(["git", "-C", str(root), "bundle", "unbundle", str(bundle)], work, env, log)
     for index, sha in enumerate(roots):
         ci.checked(["git", "-C", str(root), "update-ref", "refs/heads/snapshot-" + str(index), sha], work, env, log)
