@@ -64,7 +64,10 @@ def package(args, token):
     repo = args.work / "repository.git"
     log = args.work / "transport.log"
     ci.checked(["git", "init", "--bare", str(repo)], args.work, env, log)
-    ci.checked(["git", "-C", str(repo), "fetch", "--no-tags", "https://github.com/" + value["source"] + ".git",
+    # Preserve original commit/tree IDs without retransmitting retired files or
+    # unrelated history. Both approved trees become explicit shallow roots.
+    ci.checked(["git", "-C", str(repo), "fetch", "--no-tags", "--depth=1",
+                "https://github.com/" + value["source"] + ".git",
                 value["source_sha"] + ":refs/heads/candidate", value["base_sha"] + ":refs/heads/base"],
                args.work, env, log)
     # Inspect bounded Git data only: do not check out or run source code locally.

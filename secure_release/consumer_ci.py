@@ -250,10 +250,25 @@ def download_asset(item, path, token):
         raise ValueError("consumer asset checksum mismatch")
 
 
-def checkout(bundle, root, revision, work):
+def checkout(bundle, root, revision, work, *, roots=None):
+    """Restore explicitly authorized shallow roots, not missing parent history.
+
+    Git bundle does not carry the producer's shallow file. A normal clone would
+    traverse unavailable parents. Install only signed/policy-approved boundaries
+    before unbundling, then verify objects and commit refs before checkout.
+    """
+    roots = tuple(dict.fromkeys((revision, *(roots or ()))))
+    if any(not isinstance(r, str) or not ci.SHA.fullmatch(r) for r in roots) or len(roots) > 2:
+        raise ValueError("invalid consumer snapshot roots")
     env = ci.git_environment(os.environ, work)
     log = work / "preparation.log"
-    ci.checked(["git", "clone", "--no-checkout", str(bundle), str(root)], work, env, log)
+    if root.exists() or root.is_symlink():
+        raise ValueError("consumer checkout must be new")
+    ci.checked(["git", "init", str(root)], work, env, log)
+    (root / ".git/shallow").write_text("".join(r + "\n" for r in roots), encoding="ascii")
+    ci.checked(["git", "-C", str(root), "bundle", "unbundle", str(bundle)], work, env, log)
+    for index, sha in enumerate(roots):
+        ci.checked(["git", "-C", str(root), "update-ref", "refs/heads/snapshot-" + str(index), sha], work, env, log)
     ci.checked(["git", "-C", str(root), "fsck", "--no-reflogs"], work, env, log)
     ci.checked(["git", "-C", str(root), "-c", "core.autocrlf=false", "checkout", "--detach", revision], work, env, log)
     return env
@@ -297,7 +312,7 @@ def prepare():
     crypto.decrypt_file(work / "source.enc", work / "source.bundle", key("INPUT_PRIVATE_KEY_B64"),
                         context("source", value))
     root = work / "source"
-    checkout(work / "source.bundle", root, value["source_sha"], work)
+    checkout(work / "source.bundle", root, value["source_sha"], work, roots=(value["base_sha"],))
     lanes = recipe(root, selected)
     # Resources are independent protected policy, never source-selected URLs.
     inputs = work / "inputs"
@@ -345,7 +360,7 @@ def materialize():
     if {p.name for p in inputs.iterdir()} != {i["name"] for i in selected["inputs"]}:
         raise ValueError("consumer input inventory mismatch")
     root = work / "source"
-    checkout(staging / "source.bundle", root, value["source_sha"], work)
+    checkout(staging / "source.bundle", root, value["source_sha"], work, roots=(value["base_sha"],))
     recipe(root, selected)
     for item in selected["inputs"]:
         path = inputs / item["name"]
@@ -354,6 +369,8 @@ def materialize():
                 raise ValueError("distributed consumer asset mismatch")
             if path.suffix == ".zip":
                 safeio.zip_files(path)
+                if ci.required("CONSUMER_LANE") in {"static", "browser"}:
+                    safeio.extract_zip(path, inputs / path.stem)
         else:
             dep = work / (path.stem + "-source")
             env = checkout(path, dep, item["sha"], work)
@@ -427,9 +444,18 @@ def main():
         work = work_root()
         work.mkdir(mode=0o700, exist_ok=True)
         import traceback
-        (work / "failure.json").write_bytes(crypto.canonical({"stage": args.stage, "type": type(error).__name__,
+        record = {"stage": args.stage, "type": type(error).__name__,
             "frames": [{"function": f.name, "line": f.lineno}
-                       for f in traceback.extract_tb(error.__traceback__)[-8:]]}))
+                       for f in traceback.extract_tb(error.__traceback__)[-8:]]}
+        cause = error
+        for _ in range(5):
+            if isinstance(cause, urllib.error.HTTPError) and type(cause.code) is int and 400 <= cause.code <= 599:
+                record["http_status"] = cause.code
+                break
+            cause = cause.__context__
+            if cause is None:
+                break
+        (work / "failure.json").write_bytes(crypto.canonical(record))
         raise SystemExit("CONSUMER_STAGE_FAILED " + args.stage) from None
 
 

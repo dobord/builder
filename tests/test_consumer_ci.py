@@ -206,14 +206,20 @@ class ConsumerContracts(unittest.TestCase):
             git("-C", str(source), "config", "user.name", "Synthetic")
             git("-C", str(source), "config", "user.email", "synthetic@example.invalid")
             (source / "source.txt").write_text("synthetic\n")
+            (source / "retired.txt").write_text("synthetic retired data\n")
             git("-C", str(source), "add", ".")
             git("-C", str(source), "-c", "commit.gpgsign=false", "commit", "-m", "Synthetic")
+            retired = git("-C", str(source), "rev-parse", "HEAD")
+            git("-C", str(source), "rm", "retired.txt")
+            git("-C", str(source), "-c", "commit.gpgsign=false", "commit", "-m", "Synthetic cleanup")
             revision = git("-C", str(source), "rev-parse", "HEAD")
             git("clone", "--bare", "--depth=1", "file://" + str(source), str(bare))
             bundle = root / "dependency.bundle"
             git("-C", str(bare), "bundle", "create", str(bundle), "--all")
             consumer.checkout(bundle, root / "output", revision, root)
             self.assertEqual((root / "output/source.txt").read_text(), "synthetic\n")
+            self.assertNotIn(retired, git("-C", str(root / "output"), "rev-list", "--all"))
+            self.assertFalse((root / "output/retired.txt").exists())
 
     @unittest.skipUnless(os.name == "posix", "native consumer execution is Linux-only")
     def test_authenticated_prepare_materialize_and_credential_free_execution(self):
@@ -262,7 +268,7 @@ class ConsumerContracts(unittest.TestCase):
                 "CONSUMER_BUILDER_SHA": value["builder_sha"], "GITHUB_EVENT_NAME": "workflow_dispatch",
                 "GITHUB_RUN_ATTEMPT": "1", "GITHUB_RUN_ID": "100", "GITHUB_ACTOR_ID": "5323024",
                 "CONSUMER_REQUEST": sealed, "CONSUMER_REQUEST_DIGEST": digest,
-                "CONSUMER_REQUEST_ID": value["request_id"], "CONSUMER_LANE": "gcc",
+                "CONSUMER_REQUEST_ID": value["request_id"], "CONSUMER_LANE": "static",
                 "CONSUMER_INPUT_PRIVATE_KEY_B64": crypto.b64(private.encode()),
                 "CONSUMER_VERIFY_PUBLIC_KEY_B64": crypto.b64(signing_public.encode()),
                 "CONSUMER_POLICY_B64": crypto.b64(crypto.canonical(selected)),
@@ -293,6 +299,7 @@ class ConsumerContracts(unittest.TestCase):
                 self.assertEqual(2, admission.call_count)
                 self.assertFalse(consumer.work_root().exists())
                 consumer.materialize()
+                self.assertEqual((consumer.work_root() / "staging/inputs/sdk/synthetic.txt").read_text(), "synthetic")
                 consumer.run()
                 self.assertEqual((consumer.work_root() / "results/proof.txt").read_text(), "synthetic")
                 self.assertEqual(json.loads((consumer.work_root() / "results/result.json").read_text())["source_sha"],

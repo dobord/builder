@@ -17,7 +17,9 @@ does not independently review every source script or upstream package.
 The local operator signs an exact source/PR/base, request ID, expiry, builder
 revision and source ciphertext identity using the existing Tink request
 signature implementation. The separate input encryption role seals the request
-and full source Git bundle. Only `sources.enc` in an opaque parentless Git input
+and exact head/base Git snapshot bundle. The source fetch has depth one: retired
+files and unrelated history are not retransmitted. Original commit/tree IDs
+remain verifiable. Only `sources.enc` in an opaque parentless Git input
 commit is public. Inputs are bounded to 90 MiB and requests to six hours.
 
 Trusted preparation verifies the source repository ID, private visibility,
