@@ -953,6 +953,15 @@ def prepare_failure_record(error):
         status = error.code
         if type(status) is int and 400 <= status <= 599:
             report["http_status"] = status  # Never URL, headers, body or reason.
+    from .project_dependency_review import DependencyTransportError, PUBLIC_ENDPOINTS
+    if type(error) is DependencyTransportError:
+        endpoint, failure, status = error.endpoint, error.failure, error.status
+        if (type(endpoint) is str and endpoint in PUBLIC_ENDPOINTS.values() and type(failure) is str
+                and failure in {"http", "timeout", "connection-reset", "network", "invalid-json", "response-size"}):
+            transport = {"endpoint": endpoint, "failure": failure}
+            if failure == "http" and type(status) is int and 300 <= status <= 599:
+                transport["status"] = status
+            report["dependency_transport"] = transport
     return report
 
 
