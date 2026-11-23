@@ -67,6 +67,10 @@ An input is either `{name, kind: "git", repository, sha}` for a bounded immutabl
 Git bundle, or `{name, kind: "asset", repository, tag, asset, sha256, max_bytes}`
 for a published stable release asset. The total declared bound cannot exceed
 2 GiB. Resource names are simple, unique `.bundle`, `.zip` or `.json` basenames.
+Materialization retains each already authenticated `.bundle` alongside its
+generated `.tar.gz`. A native toolchain bootstrap can restore the approved
+shallow commit from these Git objects without private network access; it must
+verify the expected revision rather than manufacture a new commit from a tar.
 The existing `SOURCE_READ_TOKEN` is used only by preparation; it needs read
 access to the selected source, PR metadata and pinned inputs. No token is
 copied from the operator account or exposed to native jobs.

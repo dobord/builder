@@ -300,6 +300,8 @@ class ConsumerContracts(unittest.TestCase):
                 self.assertEqual(2, admission.call_count)
                 self.assertFalse(consumer.work_root().exists())
                 consumer.materialize()
+                self.assertTrue((consumer.work_root() / "staging/inputs/dependency.bundle").is_file(),
+                                "authenticated Git metadata must remain available without network credentials")
                 self.assertEqual((consumer.work_root() / "staging/inputs/sdk/synthetic.txt").read_text(), "synthetic")
                 consumer.run()
                 self.assertEqual((consumer.work_root() / "results/proof.txt").read_text(), "synthetic")
