@@ -58,6 +58,9 @@ rm -rf /tmp/builder-ci-logs-RUN_ID
 - Never commit decrypted logs or derived plaintext diagnostics. Keep them under `/tmp` or another disposable local directory.
 - Do not weaken envelope/context/recipient validation to make a decryption succeed.
 - Use the minimum diagnostic content needed to identify the failure. Public summaries should contain bounded failure identity whenever possible.
+- Project dependency HTTP 403/429 diagnostics may retain only bounded numeric
+  rate-limit counters in the encrypted record. Never record arbitrary response
+  headers, URLs or bodies, and never treat a diagnostic counter as admission.
 - Do not advance a CEF resumable lock from a failed run unless the run produced a checkpoint explicitly accepted by the strict checkpoint contract.
 - Keep the combined CEF lock closed until engine compilation is complete and browser/renderer runtime verification has succeeded.
 - Preserve the static FreeRDP contract and `WITH_FFMPEG=ON` while working on CEF qualification.

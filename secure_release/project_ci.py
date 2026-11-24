@@ -961,6 +961,17 @@ def prepare_failure_record(error):
             transport = {"endpoint": endpoint, "failure": failure}
             if failure == "http" and type(status) is int and 300 <= status <= 599:
                 transport["status"] = status
+            # Only bounded numeric evidence reaches encrypted diagnostics.
+            # Do not inspect or serialize arbitrary HTTP headers or bodies.
+            if endpoint == "github-api" and status in {403, 429} and type(error.rate_limit) is dict:
+                counters = {}
+                for field, maximum in (("remaining", 1000000), ("limit", 1000000),
+                                        ("retry_after_seconds", 86400)):
+                    value = error.rate_limit.get(field)
+                    if type(value) is int and 0 <= value <= maximum:
+                        counters[field] = value
+                if counters:
+                    transport["rate_limit"] = counters
             report["dependency_transport"] = transport
     return report
 

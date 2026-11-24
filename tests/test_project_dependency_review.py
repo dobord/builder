@@ -9,6 +9,47 @@ from secure_release import project_dependency_review as review
 
 
 class DependencyReviewTests(unittest.TestCase):
+    def test_http_denial_records_only_bounded_rate_limit_evidence(self):
+        from secure_release import project_ci
+
+        url = 'https://api.github.com/repos/actions/checkout/git/ref/tags/v4'
+        headers = {'X-RateLimit-Remaining': '0', 'X-RateLimit-Limit': '60',
+                   'Retry-After': '59', 'Authorization': 'PUBLIC_SYNTHETIC_SECRET'}
+        with patch.object(review.urllib.request, 'build_opener') as build:
+            build.return_value.open.side_effect = urllib.error.HTTPError(url, 403, 'private', headers, None)
+            with self.assertRaises(review.DependencyTransportError) as caught:
+                review.public_json(url)
+        report = project_ci.prepare_failure_record(caught.exception)
+        self.assertEqual(report['dependency_transport']['rate_limit'],
+                         {'remaining': 0, 'limit': 60, 'retry_after_seconds': 59})
+        self.assertNotIn(url, json.dumps(report))
+        self.assertNotIn('PUBLIC_SYNTHETIC_SECRET', json.dumps(report))
+        build.return_value.open.assert_called_once()
+
+    def test_malformed_or_excessive_rate_limit_headers_are_not_retained(self):
+        from secure_release import project_ci
+
+        url = 'https://api.github.com/repos/actions/checkout/git/ref/tags/v4'
+        for value in ('-1', '1234567890123456789', 'PUBLIC_SYNTHETIC_SECRET', '3.2', ' 0', True):
+            with self.subTest(value=value), patch.object(review.urllib.request, 'build_opener') as build:
+                build.return_value.open.side_effect = urllib.error.HTTPError(
+                    url, 403, 'private', {'X-RateLimit-Remaining': value}, None)
+                with self.assertRaises(review.DependencyTransportError) as caught:
+                    review.public_json(url)
+                report = project_ci.prepare_failure_record(caught.exception)
+                self.assertNotIn('rate_limit', report['dependency_transport'])
+
+    def test_forged_transport_counters_are_validated_again_at_diagnostic_boundary(self):
+        from secure_release import project_ci
+
+        error = review.DependencyTransportError('github-api', 'http', 403,
+            {'remaining': True, 'limit': 'PUBLIC_SYNTHETIC_SECRET', 'retry_after_seconds': 86401,
+             'Authorization': 'PUBLIC_SYNTHETIC_SECRET'})
+        report = project_ci.prepare_failure_record(error)
+        self.assertNotIn('rate_limit', report['dependency_transport'])
+        self.assertNotIn('PUBLIC_SYNTHETIC_SECRET', json.dumps(report))
+        self.assertEqual(review.bounded_rate_limit(None), {})
+
     def test_metadata_transport_retries_transient_gateway_failure(self):
         url = 'https://api.github.com/repos/actions/checkout/git/ref/tags/v4'
         with patch.object(review.urllib.request, 'build_opener') as build, patch('time.sleep') as delay:
