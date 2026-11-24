@@ -182,3 +182,25 @@ evidence rather than the approval itself, resolve the complete qualification,
 retrieve and recheck the tag ref, and perform scoped draft upload with
 byte-for-byte verification.
 The SDK publisher remains separate.
+
+## Verified archive handoff
+
+`consumer_handoff` can re-encrypt the exact locally verified archive to the
+existing builder input **public** recipient using the unchanged Tink envelope.
+It does not accept the operator log private key or any signing private key.
+The original archive is neither rebuilt, extracted nor executed.
+
+Callers must first independently authenticate the complete expected publication
+approval. Transport alone grants no release authority. `seal_archive` snapshots
+a bounded regular source and requires its exact approved name and SHA-256;
+the authenticated encryption context binds the complete approval digest.
+`open_archive` uses the builder input private recipient only in trusted staging,
+authenticates every encryption tag and rechecks the exact plaintext SHA-256.
+A valid encrypted envelope carrying the wrong archive is still rejected.
+
+Private same-filesystem staging and atomic no-overwrite links prevent partial
+outputs or replacement of an existing/racing destination. Linux staging must be
+owner-only; the eventual production publisher is Linux-only. Temporary plaintext
+and ciphertext staging is removed on success and failure. This is a library
+primitive, not a command, workflow, upload operation or actual handoff proof.
+Original run/artifact evidence and independent approval remain mandatory.
