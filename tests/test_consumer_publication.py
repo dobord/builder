@@ -1,4 +1,5 @@
 import copy
+import hashlib
 import os
 from pathlib import Path
 import re
@@ -157,6 +158,63 @@ class ConsumerPublicationSignatures(unittest.TestCase):
         with self.assertRaises(ValueError):
             consumer_publication.verify_signed_approval(
                 self.raw, self.signature, self.public, "0" * 40, fixture())
+
+    def test_release_tag_requires_exact_git_object_and_pinned_signature(self):
+        payload = (b"object " + b"2" * 40 + b"\ntype commit\ntag 0.9.1\n"
+                   b"tagger Synthetic Approver <signer@example.invalid> 1 +0000\n\nRelease\n")
+        signature = self.run_gpg(
+            "--pinentry-mode", "loopback", "--passphrase-file",
+            self.tool_home + "/synthetic-passphrase", "--armor", "--detach-sign",
+            "--output", "-", data=payload)
+        raw = payload + signature
+        oid = hashlib.sha1(b"tag " + str(len(raw)).encode() + b"\0" + raw).hexdigest()
+        if shutil.which("git"):
+            git_oid = subprocess.run(
+                ["git", "hash-object", "-t", "tag", "--stdin"], input=raw,
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=10, check=True)
+            self.assertEqual(git_oid.stdout.decode("ascii").strip(), oid)
+        args = (raw, "0.9.1", "2" * 40, oid, self.public, self.fingerprint)
+        self.assertEqual(consumer_publication.verify_source_tag(*args), oid)
+        for position, changed in (
+            (0, raw + b"tamper"), (1, "0.9.2"), (2, "3" * 40),
+            (3, "4" * 40), (5, "0" * 40),
+        ):
+            with self.subTest(position=position), self.assertRaises(ValueError):
+                bad = list(args)
+                bad[position] = changed
+                consumer_publication.verify_source_tag(*bad)
+        extra = raw + b"unsigned suffix\n"
+        extra_oid = hashlib.sha1(b"tag " + str(len(extra)).encode() + b"\0" + extra).hexdigest()
+        with self.assertRaises(ValueError):
+            consumer_publication.verify_source_tag(
+                extra, "0.9.1", "2" * 40, extra_oid, self.public, self.fingerprint)
+
+    def test_tag_signature_cannot_be_replaced_by_github_verified_metadata(self):
+        for raw in (b"", b"x" * 65537, b'{"verified":true}', b"object " + b"2" * 40):
+            with self.subTest(raw=raw[:24]), self.assertRaises(ValueError):
+                consumer_publication.verify_source_tag(
+                    raw, "0.9.1", "2" * 40, "1" * 40, self.public, self.fingerprint)
+
+    def test_correct_signature_does_not_authorize_nested_or_foreign_tags(self):
+        good = (b"object " + b"2" * 40 + b"\ntype commit\ntag 0.9.1\n"
+                b"tagger Synthetic Approver <signer@example.invalid> 1 +0000\n\nRelease\n")
+        for payload in (
+            good.replace(b"type commit", b"type tag"),
+            good.replace(b"tag 0.9.1", b"tag 0.9.2"),
+            good.replace(b"2" * 40, b"3" * 40),
+            good.replace(b"\n\nRelease", b"\nextra header\n\nRelease"),
+            good.replace(b" 1 +0000", b" invalid"),
+            good.rstrip(b"\n"),
+        ):
+            signature = self.run_gpg(
+                "--pinentry-mode", "loopback", "--passphrase-file",
+                self.tool_home + "/synthetic-passphrase", "--armor", "--detach-sign",
+                "--output", "-", data=payload)
+            raw = payload + signature
+            oid = hashlib.sha1(b"tag " + str(len(raw)).encode() + b"\0" + raw).hexdigest()
+            with self.subTest(payload=payload[:80]), self.assertRaises(ValueError):
+                consumer_publication.verify_source_tag(
+                    raw, "0.9.1", "2" * 40, oid, self.public, self.fingerprint)
 
     def test_setup_never_relies_on_empty_tool_arguments(self):
         with self.assertRaisesRegex(RuntimeError, "empty argument"):

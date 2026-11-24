@@ -143,8 +143,17 @@ an error, not permission to skip signature verification.
 Setup diagnostics are bounded and strip paths and synthetic fingerprints;
 production verification continues to discard raw GnuPG error output.
 
-Neither validator reevaluates acceptance receipts or uploads anything. The
+`verify_source_tag` authenticates bounded raw annotated Git tag bytes using the
+same isolated pinned signer. It recomputes the Git object ID, requires a direct
+commit target and the exact expected version/source, and checks the embedded
+OpenPGP signature over the unsigned tag payload. Lightweight, nested, foreign,
+tampered and unsigned tags are rejected. GitHub's generic `verified` metadata
+does not substitute for this check. Callers must resolve the actual tag ref and
+raw object independently; a caller-supplied object ID alone is not ref evidence.
+
+These validators do not reevaluate acceptance receipts or upload anything. The
 remaining publisher must obtain expectations from independently verified
-evidence rather than the approval itself, resolve the complete qualification
-and tag, and perform scoped draft upload with byte-for-byte verification.
+evidence rather than the approval itself, resolve the complete qualification,
+retrieve and recheck the tag ref, and perform scoped draft upload with
+byte-for-byte verification.
 The SDK publisher remains separate.

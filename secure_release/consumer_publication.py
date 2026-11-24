@@ -6,6 +6,7 @@ or publish assets.
 """
 from __future__ import annotations
 
+import hashlib
 import os
 from pathlib import Path
 import re
@@ -97,6 +98,45 @@ def verify_signed_approval(raw: bytes, signature: bytes, public_key: bytes,
     ambient keyring, keyserver, trust database or consumer executable is used.
     """
     value = check_approval(raw, expected)
+    _verify_release_signature(raw, signature, public_key, fingerprint)
+    return value
+
+
+def verify_source_tag(raw: bytes, tag: str, source_sha: str, object_sha: str,
+                      public_key: bytes, fingerprint: str) -> str:
+    """Authenticate an annotated Git tag, not GitHub's generic verified flag.
+
+    The caller resolves the tag ref and supplies its raw Git object bytes without
+    checking out or executing consumer code. Expected version/source and signer
+    come from independent publication policy and authenticated qualification.
+    """
+    if (not isinstance(raw, bytes) or not 0 < len(raw) <= 65536
+            or not _matches(tag, _TAG) or not _matches(source_sha, _SHA)
+            or not _matches(object_sha, _SHA)):
+        raise ValueError("invalid consumer release tag inputs")
+    actual = hashlib.sha1(b"tag " + str(len(raw)).encode("ascii") + b"\0" + raw).hexdigest()
+    if actual != object_sha:
+        raise ValueError("consumer release tag object mismatch")
+    marker = b"-----BEGIN PGP SIGNATURE-----"
+    payload, found, armor = raw.partition(marker)
+    header, separator, message = payload.partition(b"\n\n")
+    lines = header.split(b"\n")
+    if (not found or not separator or len(lines) != 4
+            or lines[:3] != [b"object " + source_sha.encode("ascii"), b"type commit",
+                             b"tag " + tag.encode("ascii")]
+            or re.fullmatch(rb"tagger [^\x00-\x1f\x7f]{1,512} <[^\s<>]{1,254}> [0-9]{1,12} [+-][0-9]{4}",
+                            lines[3]) is None
+            or not message or not payload.endswith(b"\n")
+            or marker in armor or armor.count(b"-----END PGP SIGNATURE-----") != 1
+            or not armor.endswith((b"-----END PGP SIGNATURE-----\n",
+                                    b"-----END PGP SIGNATURE-----\r\n"))):
+        raise ValueError("invalid annotated consumer release tag")
+    _verify_release_signature(payload, found + armor, public_key, fingerprint)
+    return actual
+
+
+def _verify_release_signature(raw, signature, public_key, fingerprint):
+    """Share the isolated pinned-primary-key verifier for approvals and tags."""
     if (not isinstance(fingerprint, str) or re.fullmatch(r"[0-9A-F]{40}", fingerprint) is None
             or not isinstance(signature, bytes) or not 0 < len(signature) <= 65536
             or not isinstance(public_key, bytes) or not 0 < len(public_key) <= 65536
@@ -136,4 +176,3 @@ def verify_signed_approval(raw: bytes, signature: bytes, public_key: bytes,
             or valid[0][8] not in {"22", "27"} or valid[0][9] not in {"8", "9", "10"}
             or valid[0][10] != "00"):
         raise ValueError("consumer approval signature is not from the pinned release signer")
-    return value
