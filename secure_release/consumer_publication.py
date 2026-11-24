@@ -24,6 +24,7 @@ _FIELDS = frozenset({
     "base_sha", "builder_sha", "run", "attempt", "request_digest", "archive", "acceptance",
 })
 _REPORTS = frozenset({"dataplane", "client", "supplier"})
+_CHECK = re.compile(r"[a-z][a-z0-9_-]{0,63}")
 
 
 def _tool_home(path, env, *, windows=None):
@@ -53,6 +54,41 @@ def _matches(value, expression):
 
 def _positive_id(value):
     return type(value) is int and 0 < value <= 2**63 - 1
+
+
+def check_acceptance_receipt(raw: bytes, kind: str, identity: dict,
+                             required_checks: tuple) -> str:
+    """Digest a complete receipt bound to independently qualified artifact data.
+
+    The required check inventory is protected publisher policy, never selected by
+    a receipt. This validates assertions, not packet paths: the operator must
+    independently review their evidence before signing the publication approval
+    that binds these receipt digests. Raw operational evidence stays private.
+    """
+    fields = {"source_sha", "builder_sha", "run", "attempt", "archive_sha256"}
+    if (not isinstance(raw, bytes) or not 0 < len(raw) <= 32768
+            or not isinstance(kind, str) or kind not in _REPORTS or not isinstance(identity, dict)
+            or set(identity) != fields
+            or not all(_matches(identity[key], _SHA) for key in ("source_sha", "builder_sha"))
+            or not _matches(identity["archive_sha256"], _DIGEST)
+            or not _positive_id(identity["run"])
+            or type(identity["attempt"]) is not int or identity["attempt"] != 1
+            or not isinstance(required_checks, tuple) or not 1 <= len(required_checks) <= 128
+            or any(not _matches(name, _CHECK) for name in required_checks)
+            or len(set(required_checks)) != len(required_checks)):
+        raise ValueError("invalid consumer acceptance requirements")
+    value = crypto.parse(raw)
+    if (not isinstance(value, dict)
+            or set(value) != fields | {"schema", "purpose", "kind", "checks"}
+            or type(value["schema"]) is not int or value["schema"] != 1
+            or value["purpose"] != "consumer-release-acceptance" or value["kind"] != kind
+            or any(type(value[key]) is not type(identity[key]) or value[key] != identity[key]
+                   for key in fields)
+            or not isinstance(value["checks"], dict) or set(value["checks"]) != set(required_checks)
+            or any(result != "pass" for result in value["checks"].values())
+            or crypto.canonical(value) != raw):
+        raise ValueError("consumer acceptance incomplete or mismatched")
+    return hashlib.sha256(raw).hexdigest()
 
 
 def check_approval(raw: bytes, expected: dict) -> dict:

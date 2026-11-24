@@ -24,6 +24,50 @@ def fixture():
 
 
 class ConsumerPublicationContracts(unittest.TestCase):
+    def test_acceptance_requires_exact_qualified_identity_and_every_required_check(self):
+        identity = {"source_sha": "2" * 40, "builder_sha": "4" * 40,
+                    "run": 21, "attempt": 1, "archive_sha256": "6" * 64}
+        value = dict(identity, schema=1, purpose="consumer-release-acceptance",
+                     kind="dataplane", checks={"handshake": "pass", "rollback": "pass"})
+        raw = crypto.canonical(value)
+        self.assertEqual(consumer_publication.check_acceptance_receipt(
+            raw, "dataplane", identity, ("handshake", "rollback")), hashlib.sha256(raw).hexdigest())
+        for override in (
+            {"source_sha": "8" * 40}, {"builder_sha": "9" * 40}, {"run": 22},
+            {"attempt": 2}, {"archive_sha256": "7" * 64}, {"kind": "client"},
+            {"purpose": "candidate-only"}, {"schema": True}, {"extra": "untrusted"},
+            {"checks": {"handshake": "pass"}},
+            {"checks": {"handshake": "pass", "rollback": "NOT RUN"}},
+            {"checks": {"handshake": "pass", "rollback": "skipped"}},
+            {"checks": {"handshake": "pass", "rollback": True}},
+            {"checks": {"handshake": "pass", "rollback": "pass", "extra": "pass"}},
+        ):
+            with self.subTest(override=override), self.assertRaises(ValueError):
+                consumer_publication.check_acceptance_receipt(
+                    crypto.canonical(dict(value, **override)), "dataplane", identity,
+                    ("handshake", "rollback"))
+
+    def test_acceptance_inventory_and_input_bounds_fail_closed(self):
+        identity = {"source_sha": "2" * 40, "builder_sha": "4" * 40,
+                    "run": 21, "attempt": 1, "archive_sha256": "6" * 64}
+        value = dict(identity, schema=1, purpose="consumer-release-acceptance",
+                     kind="client", checks={"import": "pass"})
+        raw = crypto.canonical(value)
+        for checks in ((), ("import", "import"), ("../import",), ("x" * 65,), ("import",) * 129,
+                       "import", {"import": "pass"}):
+            with self.subTest(checks=str(checks)[:32]), self.assertRaises(ValueError):
+                consumer_publication.check_acceptance_receipt(raw, "client", identity, checks)
+        for body in (b"", b"x" * 32769, b" " + raw, b"{}", raw.decode()):
+            with self.subTest(body=str(body)[:20]), self.assertRaises(ValueError):
+                consumer_publication.check_acceptance_receipt(body, "client", identity, ("import",))
+        for override in ({"run": True}, {"attempt": True}, {"source_sha": "bad"},
+                         {"archive_sha256": "bad"}, {"extra": "untrusted"}):
+            bad_identity = dict(identity, **override)
+            bad_raw = crypto.canonical(dict(value, **override))
+            with self.subTest(override=override), self.assertRaises(ValueError):
+                consumer_publication.check_acceptance_receipt(
+                    bad_raw, "client", bad_identity, ("import",))
+
     def test_windows_msys_toolchain_receives_its_own_path_namespace(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

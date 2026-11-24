@@ -151,7 +151,17 @@ tampered and unsigned tags are rejected. GitHub's generic `verified` metadata
 does not substitute for this check. Callers must resolve the actual tag ref and
 raw object independently; a caller-supplied object ID alone is not ref evidence.
 
-These validators do not reevaluate acceptance receipts or upload anything. The
+`check_acceptance_receipt` requires a bounded canonical acceptance record with
+the exact independently qualified source, builder, run, first attempt and archive
+digest. Each of `dataplane`, `client` and `supplier` uses a separately protected
+nonempty check inventory; every listed result must be exactly `pass`. Missing,
+extra, skipped or `NOT RUN` results fail closed. The returned SHA-256 binds the
+record to the signed publication approval. These are assertions, not synthetic
+proof of actual packet paths or supplier review: the operator must review the
+underlying private evidence before signing approval. Do not put raw operational
+logs or real profiles into these records or publish them.
+
+These validators do not acquire evidence, resolve its authority or upload anything. The
 remaining publisher must obtain expectations from independently verified
 evidence rather than the approval itself, resolve the complete qualification,
 retrieve and recheck the tag ref, and perform scoped draft upload with
