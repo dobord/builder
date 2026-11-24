@@ -175,7 +175,11 @@ def fetch(state, args, token):
     try:
         with zipfile.ZipFile(io.BytesIO(raw)) as archive:
             entries = archive.infolist()
-            if (len(entries) != 2 or {e.filename for e in entries} != {"results.enc", "diagnostics.enc"}
+            names = {e.filename for e in entries}
+            inventories = [{"results.enc", "diagnostics.enc"}]
+            if args.lane == "static":
+                inventories.append({"results.enc", "diagnostics.enc", "publisher-results.enc"})
+            if (len(entries) != len(names) or names not in inventories
                     or any(e.flag_bits & 1 or not 0 < e.file_size <= consumer.MAX_PREPARED for e in entries)):
                 raise ValueError("unsafe consumer result artifact")
             (temporary / "results.enc").write_bytes(archive.read("results.enc"))

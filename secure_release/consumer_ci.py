@@ -421,18 +421,36 @@ def outputs():
     cipher = Path(ci.required("RUNNER_TEMP")) / "consumer-output"
     cipher.mkdir(mode=0o700, exist_ok=True)
     encrypted_logs.collect([work], cipher / "diagnostics.enc", public, encrypted_logs.github_context())
+    publisher_mode = os.environ.get("CONSUMER_PUBLISH_ENABLED", "") or "false"
+    if publisher_mode not in {"true", "false"}:
+        raise ValueError("invalid consumer publisher output mode")
     results = work / "results"
     if results.is_dir():
+        publisher = None
+        if publisher_mode == "true" and ci.required("CONSUMER_LANE") == "static":
+            publisher = key("PUBLISH_PUBLIC_KEY_B64")
+            if crypto.fingerprint(publisher) == crypto.fingerprint(public):
+                raise ValueError("consumer publisher must use an independent public recipient")
         archive = work / "results.tar.gz"
         safeio.pack_tar(results, archive)
-        if archive.stat().st_size > MAX_PREPARED:
-            raise ValueError("consumer result archive exceeds bound")
-        value = crypto.parse((work / "request.json").read_bytes())
-        validate_request(value)
-        ctx = context("results", value, hosted=True)
-        ctx["lane"] = ci.required("CONSUMER_LANE")
-        crypto.encrypt_file(archive, cipher / "results.enc", public, ctx)
-        archive.unlink()
+        try:
+            if archive.stat().st_size > MAX_PREPARED:
+                raise ValueError("consumer result archive exceeds bound")
+            value = crypto.parse((work / "request.json").read_bytes())
+            validate_request(value)
+            ctx = context("results", value, hosted=True)
+            ctx["lane"] = ci.required("CONSUMER_LANE")
+            crypto.encrypt_file(archive, cipher / "results.enc", public, ctx)
+            if publisher is not None:
+                # Independently generated keys, same original tar bytes. No
+                # local master/file key or delegated capability is required.
+                publisher_ctx = dict(ctx, purpose="consumer-ci-publisher-results")
+                crypto.encrypt_file(archive, cipher / "publisher-results.enc", publisher, publisher_ctx)
+                if sum((cipher / name).stat().st_size for name in
+                       ("diagnostics.enc", "results.enc", "publisher-results.enc")) > MAX_PREPARED - 1024**2:
+                    raise ValueError("consumer publisher artifact exceeds transport bound")
+        finally:
+            archive.unlink(missing_ok=True)
 
 
 def main():

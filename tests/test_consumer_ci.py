@@ -368,14 +368,31 @@ class ConsumerContracts(unittest.TestCase):
                     mock.patch.object(operator.operator, "builder_ref"):
                 operator.fetch(state, args, "SYNTHETIC")
             self.assertTrue((args.output / "result.json").exists())
+            content = io.BytesIO()
+            with zipfile.ZipFile(content, "w") as archive:
+                archive.writestr("results.enc", (root / "result.enc").read_bytes())
+                archive.writestr("diagnostics.enc", b"synthetic-not-consumed")
+                archive.writestr("publisher-results.enc", b"synthetic-publisher-cipher-not-consumed")
+            raw = content.getvalue()
+            artifact.update(size_in_bytes=len(raw), digest="sha256:" + consumer.ci.digest_bytes(raw))
+            args.output = root / "verified-with-publisher"
+            with mock.patch.object(operator, "matches", return_value=[run]), \
+                    mock.patch.object(consumer.ci, "api_json", return_value=run), \
+                    mock.patch.object(consumer.ci, "pages", side_effect=[jobs, [artifact]]), \
+                    mock.patch.object(consumer.ci, "api", return_value=raw), \
+                    mock.patch.object(operator.operator, "builder_ref"):
+                operator.fetch(state, args, "SYNTHETIC")
+            self.assertTrue((args.output / "result.json").exists())
             args.lane, args.output = "gcc", root / "must-not-exist"
             altered_artifact = dict(artifact, name="consumer-output-gcc-100-1")
             with mock.patch.object(operator, "matches", return_value=[run]), \
                     mock.patch.object(consumer.ci, "api_json", return_value=run), \
                     mock.patch.object(consumer.ci, "pages", side_effect=[jobs, [altered_artifact]]), \
                     mock.patch.object(consumer.ci, "api", return_value=raw), \
-                    mock.patch.object(operator.operator, "builder_ref"), self.assertRaises(Exception):
+                    mock.patch.object(operator.operator, "builder_ref"), \
+                    mock.patch.object(crypto, "decrypt_file") as decrypt, self.assertRaises(ValueError):
                 operator.fetch(state, args, "SYNTHETIC")
+            decrypt.assert_not_called()
             self.assertFalse(args.output.exists())
 
 
