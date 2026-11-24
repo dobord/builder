@@ -1,5 +1,11 @@
 import copy
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import tempfile
 import unittest
+from unittest import mock
 
 from secure_release import consumer_publication, crypto
 
@@ -51,3 +57,85 @@ class ConsumerPublicationContracts(unittest.TestCase):
         for malformed in (b'{}', b' ' + crypto.canonical(good), b'x' * 8193):
             with self.assertRaises(ValueError):
                 consumer_publication.check_approval(malformed, good)
+
+
+@unittest.skipUnless(all(shutil.which(name) for name in ("gpg", "gpgv", "gpgconf")),
+                     "OpenPGP verification tools required")
+class ConsumerPublicationSignatures(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.temp = tempfile.TemporaryDirectory(prefix="synthetic-release-signature-")
+        cls.addClassCleanup(cls.temp.cleanup)
+        home = Path(cls.temp.name)
+        cls.home = home
+        cls.addClassCleanup(
+            subprocess.run, ["gpgconf", "--homedir", str(home), "--kill", "gpg-agent"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
+        cls.run_gpg("--pinentry-mode", "loopback", "--passphrase", "",
+                    "--quick-generate-key", "Synthetic Approver <signer@example.invalid>", "ed25519", "sign", "1d")
+        listing = cls.run_gpg("--with-colons", "--list-keys").decode()
+        cls.fingerprint = next(line.split(":")[9] for line in listing.splitlines() if line.startswith("fpr:"))
+        cls.public = cls.run_gpg("--armor", "--export", cls.fingerprint)
+        cls.raw = crypto.canonical(fixture())
+        cls.signature = cls.run_gpg("--pinentry-mode", "loopback", "--passphrase", "",
+                                    "--armor", "--detach-sign", "--output", "-", data=cls.raw)
+
+    @classmethod
+    def run_gpg(cls, *args, data=None):
+        result = subprocess.run(["gpg", "--no-options", "--batch", "--homedir", str(cls.home), *args],
+                                input=data, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=15)
+        if result.returncode:
+            raise RuntimeError("synthetic OpenPGP setup failed")
+        return result.stdout
+
+    def test_only_pinned_signer_can_authenticate_exact_approval(self):
+        self.assertEqual(
+            consumer_publication.verify_signed_approval(
+                self.raw, self.signature, self.public, self.fingerprint, fixture()),
+            fixture())
+        with self.assertRaises(ValueError):
+            consumer_publication.verify_signed_approval(
+                self.raw, self.signature, self.public, "0" * 40, fixture())
+
+    def test_valid_signature_for_different_canonical_approval_is_rejected(self):
+        modified = dict(fixture(), run=22)
+        raw = crypto.canonical(modified)
+        with self.assertRaises(ValueError):
+            consumer_publication.verify_signed_approval(
+                raw, self.signature, self.public, self.fingerprint, modified)
+        with self.assertRaises(ValueError):
+            consumer_publication.verify_signed_approval(
+                self.raw, self.signature + self.signature, self.public, self.fingerprint, fixture())
+
+    def test_unbounded_or_malformed_signature_inputs_fail_closed(self):
+        for signature, key, fingerprint in (
+            (b"", self.public, self.fingerprint),
+            (b"x" * 65537, self.public, self.fingerprint),
+            (self.signature, b"x" * 65537, self.fingerprint),
+            (b"not a signature", self.public, self.fingerprint),
+            (self.signature, b"not a public key", self.fingerprint),
+            (self.signature, self.public, "main"),
+        ):
+            with self.subTest(length=len(signature), fingerprint=fingerprint), self.assertRaises(ValueError):
+                consumer_publication.verify_signed_approval(
+                    self.raw, signature, key, fingerprint, fixture())
+
+    def test_ambient_credentials_and_keyrings_are_not_forwarded(self):
+        run = subprocess.run
+        with mock.patch.dict(os.environ, {"GH_TOKEN": "SYNTHETIC", "GNUPGHOME": "/synthetic/ambient"}), \
+                mock.patch.object(consumer_publication.subprocess, "run", wraps=run) as calls:
+            self.assertEqual(consumer_publication.verify_signed_approval(
+                self.raw, self.signature, self.public, self.fingerprint, fixture()), fixture())
+        self.assertEqual(len(calls.call_args_list), 2)
+        for call in calls.call_args_list:
+            self.assertNotIn("GH_TOKEN", call.kwargs["env"])
+            self.assertNotIn("GNUPGHOME", call.kwargs["env"])
+            self.assertEqual(call.kwargs["timeout"], 10)
+
+    def test_missing_or_timed_out_crypto_tool_is_not_signature_success(self):
+        for error in (FileNotFoundError(), subprocess.TimeoutExpired(["gpg"], 10)):
+            with self.subTest(error=type(error).__name__), \
+                    mock.patch.object(consumer_publication.subprocess, "run", side_effect=error), \
+                    self.assertRaises(ValueError):
+                consumer_publication.verify_signed_approval(
+                    self.raw, self.signature, self.public, self.fingerprint, fixture())

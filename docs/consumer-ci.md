@@ -122,8 +122,19 @@ revision and first run attempt, request digest, archive name/digest, and the
 three independent acceptance receipt digests (dataplane, client, supplier).
 A qualification receipt or candidate provenance is not a publication approval.
 
-This validator does not verify a release signature, reevaluate the receipts,
-or publish anything. The remaining publisher must authenticate the exact
-approval bytes with a separately trusted signer, obtain expectations from
-verified evidence rather than the approval itself, and perform scoped draft
-upload with byte-for-byte verification. The SDK publisher remains separate.
+`verify_signed_approval` additionally authenticates those canonical bytes using
+exactly one detached Ed25519 OpenPGP signature. It uses GnuPG/gpgv with an
+isolated temporary keyring, a separately provisioned public key and exact
+primary-key fingerprint (signing subkeys are not admitted); ambient keys,
+credentials and user configuration are not forwarded. SHA-1/MD5 signatures,
+multiple signatures, expired/revoked signature status, missing tools and timeout
+fail closed. Private signing keys
+are not accepted or used. Tests generate only disposable synthetic signers;
+their crypto cases explicitly skip where GnuPG tools are unavailable. A real
+publication stage must require these tools rather than skip verification.
+
+Neither validator reevaluates acceptance receipts or uploads anything. The
+remaining publisher must obtain expectations from independently verified
+evidence rather than the approval itself, resolve the complete qualification
+and tag, and perform scoped draft upload with byte-for-byte verification.
+The SDK publisher remains separate.
