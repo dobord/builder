@@ -112,3 +112,73 @@ digest, decrypts with the expected request/run/attempt/lane context, validates
 archive paths and the exact-source result receipt, and publishes plaintext only
 to a new local directory. The supplied output private key stays local. This is
 artifact verification, not authorization to publish a release.
+
+## Consumer publication approval contract
+
+`resolve_qualification` decrypts and authenticates the original sealed request
+with independently configured consumer transport keys. It checks protected
+source policy and builder revision, then reads the exact run and all first-attempt
+jobs from GitHub. All eight lanes and required commands must have succeeded;
+duplicate request dispatches, reruns, changed runs and partial aggregates fail
+closed. The current run is read again before returning its authenticated source
+identity. No source checkout, consumer executable or write API is used.
+
+Historical request expiry is checked at GitHub's run-creation timestamp. This
+does not permit dispatching an expired request: preparation and operator paths
+continue to validate against the current clock. A historical successful run is
+qualification evidence, not approval to publish or proof of the later acceptance
+records. Protected policy, API access and transport keys must be independently
+provisioned; the approval cannot select them.
+
+`consumer_publication.check_approval` validates a bounded canonical approval
+document against independently resolved trusted inputs. It binds the
+destination repository ID, signed tag object, source and base, exact builder
+revision and first run attempt, request digest, archive name/digest, and the
+three independent acceptance receipt digests (dataplane, client, supplier).
+A qualification receipt or candidate provenance is not a publication approval.
+
+`verify_signed_approval` additionally authenticates those canonical bytes using
+exactly one detached Ed25519 OpenPGP signature. It uses GnuPG/gpgv with an
+isolated temporary keyring, a separately provisioned public key and exact
+primary-key fingerprint (signing subkeys are not admitted); ambient keys,
+credentials and user configuration are not forwarded. SHA-1/MD5 signatures,
+multiple signatures, expired/revoked signature status, missing tools and timeout
+fail closed. Private signing keys
+are not accepted or used. Tests generate only disposable synthetic signers;
+their crypto cases explicitly skip where GnuPG tools are unavailable. A real
+publication stage must require these tools rather than skip verification.
+The synthetic signer uses a private passphrase file rather than an empty
+command-line argument, including on Windows/MSYS. A small crypto smoke runs
+before the complete hosted security suite so setup failures remain localized.
+Tool-facing paths use forward slashes on Windows as well as POSIX systems.
+When the selected Windows GnuPG has a sibling MSYS `cygpath.exe`, its temporary
+home is translated into that toolchain's POSIX namespace; native GnuPG and
+POSIX hosts do not require this translator. Invalid or failed translation is
+an error, not permission to skip signature verification.
+Setup diagnostics are bounded and strip paths and synthetic fingerprints;
+production verification continues to discard raw GnuPG error output.
+
+`verify_source_tag` authenticates bounded raw annotated Git tag bytes using the
+same isolated pinned signer. It recomputes the Git object ID, requires a direct
+commit target and the exact expected version/source, and checks the embedded
+OpenPGP signature over the unsigned tag payload. Lightweight, nested, foreign,
+tampered and unsigned tags are rejected. GitHub's generic `verified` metadata
+does not substitute for this check. Callers must resolve the actual tag ref and
+raw object independently; a caller-supplied object ID alone is not ref evidence.
+
+`check_acceptance_receipt` requires a bounded canonical acceptance record with
+the exact independently qualified source, builder, run, first attempt and archive
+digest. Each of `dataplane`, `client` and `supplier` uses a separately protected
+nonempty check inventory; every listed result must be exactly `pass`. Missing,
+extra, skipped or `NOT RUN` results fail closed. The returned SHA-256 binds the
+record to the signed publication approval. These are assertions, not synthetic
+proof of actual packet paths or supplier review: the operator must review the
+underlying private evidence before signing approval. Do not put raw operational
+logs or real profiles into these records or publish them.
+
+These validators do not acquire evidence, resolve its authority or upload anything. The
+remaining publisher must obtain expectations from independently verified
+evidence rather than the approval itself, resolve the complete qualification,
+retrieve and recheck the tag ref, and perform scoped draft upload with
+byte-for-byte verification.
+The SDK publisher remains separate.

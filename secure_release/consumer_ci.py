@@ -35,7 +35,12 @@ def repository(value):
     return isinstance(value, str) and re.fullmatch(r"dobord/[A-Za-z0-9_.-]{1,100}", value)
 
 
-def validate_request(value):
+def validate_request(value, *, admitted_at=None):
+    """Validate live admission, or history at an independently resolved run time.
+
+    Dispatch/preparation callers omit admitted_at and retain current-clock expiry.
+    Only retrospective publication checks supply GitHub's run creation time.
+    """
     fields = {"schema", "request_id", "source", "source_id", "operator_id", "source_sha",
               "base_sha", "builder_sha", "pr", "created", "expires", "input_ref",
               "input_commit", "input_blob", "source_cipher_digest"}
@@ -53,7 +58,9 @@ def validate_request(value):
             or not isinstance(value["source_cipher_digest"], str)
             or not ci.HASH.fullmatch(value["source_cipher_digest"])):
         raise ValueError("invalid consumer transport")
-    now = int(time.time())
+    if admitted_at is not None and not integer(admitted_at, 0):
+        raise ValueError("invalid consumer admission time")
+    now = int(time.time()) if admitted_at is None else admitted_at
     if (not integer(value["created"], 0) or not integer(value["expires"], 0)
             or value["created"] > now + 300 or value["expires"] < now
             or not 0 < value["expires"] - value["created"] <= 21600):

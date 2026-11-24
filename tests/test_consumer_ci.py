@@ -44,6 +44,16 @@ class ConsumerContracts(unittest.TestCase):
         consumer.validate_request(request())
         consumer.validate_policy(policy())
 
+    def test_historical_validation_does_not_relax_live_dispatch_expiry(self):
+        value = request()
+        with mock.patch.object(consumer.time, "time", return_value=value["expires"] + 1):
+            with self.assertRaises(ValueError):
+                consumer.validate_request(value)
+            consumer.validate_request(value, admitted_at=value["created"])
+        for admitted in (True, -1, "2026-01-01", value["expires"] + 1):
+            with self.subTest(admitted=admitted), self.assertRaises(ValueError):
+                consumer.validate_request(value, admitted_at=admitted)
+
     def test_workflow_is_valid_yaml_and_token_is_prepare_only(self):
         import yaml
         workflow = Path(__file__).resolve().parents[1] / ".github/workflows/encrypted-consumer-ci.yml"
