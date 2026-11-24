@@ -1,4 +1,5 @@
 import copy
+from datetime import datetime, timezone
 import hashlib
 import os
 from pathlib import Path
@@ -9,7 +10,8 @@ import tempfile
 import unittest
 from unittest import mock
 
-from secure_release import consumer_publication, crypto
+from secure_release import consumer_ci as consumer, consumer_publication, crypto
+from tests.test_consumer_ci import request as synthetic_request, policy as synthetic_policy
 
 
 def fixture():
@@ -24,6 +26,64 @@ def fixture():
 
 
 class ConsumerPublicationContracts(unittest.TestCase):
+    def test_qualification_is_resolved_from_authenticated_request_and_live_api(self):
+        value = synthetic_request()
+        private, public = crypto.generate("encrypt")
+        signing_private, signing_public = crypto.generate("sign")
+        sealed = crypto.seal_message(crypto.canonical(crypto.sign(value, signing_private)), public,
+                                     consumer.context("request", value))
+        digest = hashlib.sha256(sealed.encode("ascii")).hexdigest()
+        run = {
+            "repository": {"id": consumer.ci.BUILDER_ID}, "head_repository": {"id": consumer.ci.BUILDER_ID},
+            "head_sha": value["builder_sha"], "path": ".github/workflows/" + consumer.WORKFLOW,
+            "event": "workflow_dispatch", "run_attempt": 1, "status": "completed", "conclusion": "success",
+            "display_title": "Encrypted consumer " + digest, "id": 100,
+            "actor": {"id": value["operator_id"]}, "triggering_actor": {"id": value["operator_id"]},
+            "html_url": "https://github.com/dobord/builder/actions/runs/100",
+            "created_at": datetime.fromtimestamp(value["created"], timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+        jobs = [{"name": name, "status": "completed", "conclusion": "success",
+                 "run_id": 100, "head_sha": value["builder_sha"],
+                 "steps": [{"name": "Authenticate consumer and prepare pinned inputs" if name == "prepare"
+                            else "Require every consumer lane" if name == "Consumer required" else "Execute native recipe",
+                            "status": "completed", "conclusion": "success"}]}
+                for name in ["prepare", "Consumer required"] + ["Consumer " + lane for lane in consumer.LANES]]
+        args = (sealed, value["request_id"], value["builder_sha"], 100,
+                synthetic_policy(), private, signing_public, "synthetic-reader")
+        with mock.patch.object(consumer.ci, "api_json", return_value=run), \
+                mock.patch.object(consumer.ci, "pages", side_effect=[[run], jobs]):
+            self.assertEqual(consumer_publication.resolve_qualification(*args), value)
+        with mock.patch.object(consumer.time, "time", return_value=value["expires"] + 1):
+            with self.assertRaises(ValueError):
+                consumer.validate_request(value)
+            with mock.patch.object(consumer.ci, "api_json", return_value=run), \
+                    mock.patch.object(consumer.ci, "pages", side_effect=[[run], jobs]):
+                self.assertEqual(consumer_publication.resolve_qualification(*args), value)
+        for mutation in ("missing-lane", "rerun", "wrong-digest", "replay", "expired-at-admission",
+                         "moved-after-check", "foreign-policy", "unapproved-builder"):
+            changed_run, changed_jobs, changed_args = copy.deepcopy(run), copy.deepcopy(jobs), list(args)
+            matches = [run]
+            if mutation == "missing-lane":
+                changed_jobs.pop()
+            elif mutation == "rerun":
+                changed_run["run_attempt"] = 2
+            elif mutation == "wrong-digest":
+                changed_run["display_title"] = "Encrypted consumer " + "0" * 64
+            elif mutation == "replay":
+                matches = [run, run]
+            elif mutation == "expired-at-admission":
+                changed_run["created_at"] = "2099-01-01T00:00:00Z"
+            elif mutation == "foreign-policy":
+                changed_args[4] = dict(synthetic_policy(), repository_id=101)
+            elif mutation == "unapproved-builder":
+                changed_args[2] = "f" * 40
+            last = dict(changed_run, run_attempt=2) if mutation == "moved-after-check" else changed_run
+            with self.subTest(mutation=mutation), \
+                    mock.patch.object(consumer.ci, "api_json", side_effect=[changed_run, last]), \
+                    mock.patch.object(consumer.ci, "pages", side_effect=[matches, changed_jobs]), \
+                    self.assertRaises(ValueError):
+                consumer_publication.resolve_qualification(*changed_args)
+
     def test_acceptance_requires_exact_qualified_identity_and_every_required_check(self):
         identity = {"source_sha": "2" * 40, "builder_sha": "4" * 40,
                     "run": 21, "attempt": 1, "archive_sha256": "6" * 64}

@@ -115,6 +115,21 @@ artifact verification, not authorization to publish a release.
 
 ## Consumer publication approval contract
 
+`resolve_qualification` decrypts and authenticates the original sealed request
+with independently configured consumer transport keys. It checks protected
+source policy and builder revision, then reads the exact run and all first-attempt
+jobs from GitHub. All eight lanes and required commands must have succeeded;
+duplicate request dispatches, reruns, changed runs and partial aggregates fail
+closed. The current run is read again before returning its authenticated source
+identity. No source checkout, consumer executable or write API is used.
+
+Historical request expiry is checked at GitHub's run-creation timestamp. This
+does not permit dispatching an expired request: preparation and operator paths
+continue to validate against the current clock. A historical successful run is
+qualification evidence, not approval to publish or proof of the later acceptance
+records. Protected policy, API access and transport keys must be independently
+provisioned; the approval cannot select them.
+
 `consumer_publication.check_approval` validates a bounded canonical approval
 document against independently resolved trusted inputs. It binds the
 destination repository ID, signed tag object, source and base, exact builder

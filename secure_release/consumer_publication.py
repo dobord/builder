@@ -8,13 +8,14 @@ from __future__ import annotations
 
 import hashlib
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 import re
 import shutil
 import subprocess
 import tempfile
 
-from . import crypto
+from . import consumer_ci as consumer, crypto
 
 _SHA = re.compile(r"[0-9a-f]{40}")
 _DIGEST = re.compile(r"[0-9a-f]{64}")
@@ -54,6 +55,57 @@ def _matches(value, expression):
 
 def _positive_id(value):
     return type(value) is int and 0 < value <= 2**63 - 1
+
+
+def resolve_qualification(sealed: str, request_id: str, builder_sha: str, run_id: int,
+                          selected: dict, input_private: str, verify_public: str,
+                          token: str) -> dict:
+    """Resolve one complete historical qualification without executing its code.
+
+    The builder SHA and source policy are independent protected configuration.
+    The old request is decrypted and authenticated, not trusted from approval
+    fields. Expiry is checked at API-resolved admission time, not waived for old
+    builds. Fresh dispatches still use current-clock validation.
+    """
+    if (not isinstance(sealed, str) or not 0 < len(sealed) <= 65536
+            or not _matches(request_id, re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}"))
+            or not _matches(builder_sha, _SHA) or not _positive_id(run_id)):
+        raise ValueError("invalid consumer qualification reference")
+    consumer.validate_policy(selected)
+    digest = hashlib.sha256(sealed.encode("ascii")).hexdigest()
+    reference = {"request_id": request_id, "builder_sha": builder_sha}
+    try:
+        document = crypto.parse(crypto.open_message(
+            sealed, input_private, consumer.context("request", reference)))
+        value = crypto.verify(document, verify_public)
+    except Exception:
+        # Backend exceptions must not disclose ciphertext, request data or keys.
+        raise ValueError("consumer qualification request authentication failed") from None
+    prefix = f"repos/{consumer.ci.BUILDER}/actions"
+    run = consumer.ci.api_json(f"{prefix}/runs/{run_id}", token)
+    stamp = run.get("created_at")
+    if (not isinstance(stamp, str)
+            or re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z", stamp) is None):
+        raise ValueError("invalid consumer run admission timestamp")
+    admitted = int(datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).timestamp())
+    consumer.validate_request(value, admitted_at=admitted)
+    if (value["request_id"] != request_id or value["builder_sha"] != builder_sha
+            or value["source"] != selected["repository"] or value["source_id"] != selected["repository_id"]
+            or value["operator_id"] != selected["operator_id"] or run.get("id") != run_id):
+        raise ValueError("consumer qualification policy mismatch")
+    consumer.validate_execution(value, digest, run)
+    runs = consumer.ci.pages(
+        f"{prefix}/workflows/{consumer.WORKFLOW}/runs?head_sha={builder_sha}", token, "workflow_runs")
+    matches = [item for item in runs if item.get("display_title") == "Encrypted consumer " + digest]
+    if len(matches) != 1 or matches[0].get("id") != run_id:
+        raise ValueError("consumer qualification request replay")
+    jobs = consumer.ci.pages(f"{prefix}/runs/{run_id}/attempts/1/jobs", token, "jobs")
+    consumer.validate_result(value, digest, run, jobs)
+    current = consumer.ci.api_json(f"{prefix}/runs/{run_id}", token)
+    consumer.validate_result(value, digest, current, jobs)
+    if current.get("id") != run_id or current.get("created_at") != stamp:
+        raise ValueError("consumer qualification changed during verification")
+    return value
 
 
 def check_acceptance_receipt(raw: bytes, kind: str, identity: dict,
