@@ -51,7 +51,9 @@ jobs:
         # This stage receives no publication, source or signing credentials.
         env:
           REQUIRE_TINK_TESTS: '1'
-        run: python -m unittest tests.test_consumer_publication -v
+        run: |
+          python -c "import subprocess; [print(subprocess.check_output([tool, '--version'], text=True).splitlines()[0]) for tool in ('gpg', 'gpgv')]"
+          python -m unittest tests.test_consumer_publication -v
       - name: Synthetic tests only; no repository secrets
         env:
           REQUIRE_TINK_TESTS: '1'

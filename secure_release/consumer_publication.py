@@ -93,13 +93,13 @@ def verify_signed_approval(raw: bytes, signature: bytes, public_key: bytes,
                 path.write_bytes(content)
                 path.chmod(0o600)
             keyring = root / "trusted.gpg"
-            subprocess.run(["gpg", "--no-options", "--batch", "--homedir", str(root),
-                            "--dearmor", "--output", str(keyring)], input=public_key, env=env,
+            subprocess.run(["gpg", "--no-options", "--batch", "--homedir", root.as_posix(),
+                            "--dearmor", "--output", keyring.as_posix()], input=public_key, env=env,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10, check=True)
             keyring.chmod(0o600)
-            result = subprocess.run(["gpgv", "--homedir", str(root), "--keyring", str(keyring),
-                                     "--status-fd", "1", str(root / "signature.asc"),
-                                     str(root / "approval.json")], env=env, stdin=subprocess.DEVNULL,
+            result = subprocess.run(["gpgv", "--homedir", root.as_posix(), "--keyring", keyring.as_posix(),
+                                     "--status-fd", "1", (root / "signature.asc").as_posix(),
+                                     (root / "approval.json").as_posix()], env=env, stdin=subprocess.DEVNULL,
                                     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=10, check=True)
         records = [line.split() for line in result.stdout.decode("ascii").splitlines()
                    if line.startswith("[GNUPG:] ")]

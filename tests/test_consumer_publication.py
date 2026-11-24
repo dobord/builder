@@ -1,6 +1,7 @@
 import copy
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import tempfile
@@ -69,27 +70,27 @@ class ConsumerPublicationSignatures(unittest.TestCase):
         home = Path(cls.temp.name)
         cls.home = home
         cls.addClassCleanup(
-            subprocess.run, ["gpgconf", "--homedir", str(home), "--kill", "gpg-agent"],
+            subprocess.run, ["gpgconf", "--homedir", home.as_posix(), "--kill", "gpg-agent"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
         # A file avoids empty-argument loss in Windows/MSYS tool invocation.
         # This passphrase protects only a disposable synthetic test signer.
         cls.passphrase = home / "synthetic-passphrase"
         cls.passphrase.write_bytes(b"synthetic-test-only\n")
         cls.passphrase.chmod(0o600)
-        cls.run_gpg("--pinentry-mode", "loopback", "--passphrase-file", str(cls.passphrase),
+        cls.run_gpg("--pinentry-mode", "loopback", "--passphrase-file", cls.passphrase.as_posix(),
                     "--quick-generate-key", "Synthetic Approver <signer@example.invalid>", "ed25519", "sign", "1d")
         listing = cls.run_gpg("--with-colons", "--list-keys").decode()
         cls.fingerprint = next(line.split(":")[9] for line in listing.splitlines() if line.startswith("fpr:"))
         cls.public = cls.run_gpg("--armor", "--export", cls.fingerprint)
         cls.raw = crypto.canonical(fixture())
-        cls.signature = cls.run_gpg("--pinentry-mode", "loopback", "--passphrase-file", str(cls.passphrase),
+        cls.signature = cls.run_gpg("--pinentry-mode", "loopback", "--passphrase-file", cls.passphrase.as_posix(),
                                     "--armor", "--detach-sign", "--output", "-", data=cls.raw)
 
     @classmethod
     def run_gpg(cls, *args, data=None):
         if any(not arg for arg in args):
             raise RuntimeError("synthetic OpenPGP invocation has an empty argument")
-        result = subprocess.run(["gpg", "--no-options", "--batch", "--homedir", str(cls.home), *args],
+        result = subprocess.run(["gpg", "--no-options", "--batch", "--homedir", cls.home.as_posix(), *args],
                                 input=data, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15)
         if result.returncode:
             stage = next((name for name in ("--quick-generate-key", "--list-keys", "--export", "--detach-sign")
@@ -102,7 +103,13 @@ class ConsumerPublicationSignatures(unittest.TestCase):
                 (b"no such file", "file-unavailable"), (b"invalid value", "invalid-value"),
                 (b"key generation failed", "key-generation-failed"),
             ) if text in result.stderr.lower()), "unclassified-tool-error")
-            raise RuntimeError(f"synthetic OpenPGP {stage} failed: {reason} (exit {result.returncode})")
+            detail = result.stderr.decode("utf-8", errors="replace")
+            detail = re.sub(r"""(?i)[`'"](?:[a-z]:[/\\]|/)[^`'"\r\n]*[`'"]""", "<path>", detail)
+            detail = re.sub(r"""(?i)(?:[a-z]:)?[/\\][^\s`'"]+""", "<path>", detail)
+            detail = re.sub(r"\b[0-9a-fA-F]{32,}\b", "<synthetic-fingerprint>", detail)
+            detail = " ".join(detail.split())[:400]
+            raise RuntimeError(f"synthetic OpenPGP {stage} failed: {reason} "
+                               f"(exit {result.returncode}); redacted tool diagnostic: {detail}")
         return result.stdout
 
     def test_only_pinned_signer_can_authenticate_exact_approval(self):
@@ -117,6 +124,20 @@ class ConsumerPublicationSignatures(unittest.TestCase):
     def test_setup_never_relies_on_empty_tool_arguments(self):
         with self.assertRaisesRegex(RuntimeError, "empty argument"):
             self.run_gpg("--passphrase", "")
+
+    def test_synthetic_setup_diagnostic_is_bounded_and_redacts_paths_and_fingerprint(self):
+        path = "C:/Users/Fixture User/synthetic-key/packet"
+        fingerprint = "A" * 40
+        stderr = f"gpg: cannot open '{path}': No such file; {fingerprint}; " + "x" * 600
+        failed = subprocess.CompletedProcess(["gpg"], 2, stdout=b"", stderr=stderr.encode())
+        with mock.patch.object(subprocess, "run", return_value=failed):
+            with self.assertRaises(RuntimeError) as caught:
+                self.run_gpg("--quick-generate-key")
+        message = str(caught.exception)
+        self.assertIn("file-unavailable", message)
+        self.assertNotIn("Fixture User", message)
+        self.assertNotIn(fingerprint, message)
+        self.assertLess(len(message), 600)
 
     def test_valid_signature_for_different_canonical_approval_is_rejected(self):
         modified = dict(fixture(), run=22)
