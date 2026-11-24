@@ -23,6 +23,39 @@ def fixture():
 
 
 class ConsumerPublicationContracts(unittest.TestCase):
+    def test_windows_msys_toolchain_receives_its_own_path_namespace(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "cygpath.exe").touch()
+            env = {"PATH": "synthetic"}
+            reply = subprocess.CompletedProcess(["cygpath"], 0, stdout=b"/c/synthetic/home\n")
+            with mock.patch.object(shutil, "which", return_value=str(root / "gpg.exe")), \
+                    mock.patch.object(subprocess, "run", return_value=reply) as run:
+                self.assertEqual(consumer_publication._tool_home(root, env, windows=True), "/c/synthetic/home")
+            self.assertEqual(run.call_args.args[0], [str(root / "cygpath.exe"), "-u", root.as_posix()])
+            self.assertEqual(run.call_args.kwargs["env"], env)
+            self.assertEqual(run.call_args.kwargs["timeout"], 10)
+
+    def test_native_toolchain_does_not_require_msys_translation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with mock.patch.object(subprocess, "run") as run:
+                self.assertEqual(consumer_publication._tool_home(root, {}, windows=False), root.as_posix())
+                with mock.patch.object(shutil, "which", return_value=str(root / "gpg.exe")):
+                    self.assertEqual(consumer_publication._tool_home(root, {}, windows=True), root.as_posix())
+            run.assert_not_called()
+
+    def test_unsafe_translated_home_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "cygpath.exe").touch()
+            for output in (b"", b"relative-path", b"/home\nother", b"/home\0other", b"/" + b"x" * 4096):
+                with self.subTest(output=output[:12]), \
+                        mock.patch.object(shutil, "which", return_value=str(root / "gpg.exe")), \
+                        mock.patch.object(subprocess, "run", return_value=subprocess.CompletedProcess(
+                            ["cygpath"], 0, stdout=output)), self.assertRaises(ValueError):
+                    consumer_publication._tool_home(root, {}, windows=True)
+
     def test_approval_binds_every_publication_input(self):
         expected = fixture()
         self.assertEqual(consumer_publication.check_approval(crypto.canonical(expected), expected), expected)
@@ -69,28 +102,29 @@ class ConsumerPublicationSignatures(unittest.TestCase):
         cls.addClassCleanup(cls.temp.cleanup)
         home = Path(cls.temp.name)
         cls.home = home
+        cls.tool_home = consumer_publication._tool_home(home, dict(os.environ))
         cls.addClassCleanup(
-            subprocess.run, ["gpgconf", "--homedir", home.as_posix(), "--kill", "gpg-agent"],
+            subprocess.run, ["gpgconf", "--homedir", cls.tool_home, "--kill", "gpg-agent"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
         # A file avoids empty-argument loss in Windows/MSYS tool invocation.
         # This passphrase protects only a disposable synthetic test signer.
         cls.passphrase = home / "synthetic-passphrase"
         cls.passphrase.write_bytes(b"synthetic-test-only\n")
         cls.passphrase.chmod(0o600)
-        cls.run_gpg("--pinentry-mode", "loopback", "--passphrase-file", cls.passphrase.as_posix(),
+        cls.run_gpg("--pinentry-mode", "loopback", "--passphrase-file", cls.tool_home + "/synthetic-passphrase",
                     "--quick-generate-key", "Synthetic Approver <signer@example.invalid>", "ed25519", "sign", "1d")
         listing = cls.run_gpg("--with-colons", "--list-keys").decode()
         cls.fingerprint = next(line.split(":")[9] for line in listing.splitlines() if line.startswith("fpr:"))
         cls.public = cls.run_gpg("--armor", "--export", cls.fingerprint)
         cls.raw = crypto.canonical(fixture())
-        cls.signature = cls.run_gpg("--pinentry-mode", "loopback", "--passphrase-file", cls.passphrase.as_posix(),
+        cls.signature = cls.run_gpg("--pinentry-mode", "loopback", "--passphrase-file", cls.tool_home + "/synthetic-passphrase",
                                     "--armor", "--detach-sign", "--output", "-", data=cls.raw)
 
     @classmethod
     def run_gpg(cls, *args, data=None):
         if any(not arg for arg in args):
             raise RuntimeError("synthetic OpenPGP invocation has an empty argument")
-        result = subprocess.run(["gpg", "--no-options", "--batch", "--homedir", cls.home.as_posix(), *args],
+        result = subprocess.run(["gpg", "--no-options", "--batch", "--homedir", cls.tool_home, *args],
                                 input=data, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15)
         if result.returncode:
             stage = next((name for name in ("--quick-generate-key", "--list-keys", "--export", "--detach-sign")
@@ -108,8 +142,11 @@ class ConsumerPublicationSignatures(unittest.TestCase):
             detail = re.sub(r"""(?i)(?:[a-z]:)?[/\\][^\s`'"]+""", "<path>", detail)
             detail = re.sub(r"\b[0-9a-fA-F]{32,}\b", "<synthetic-fingerprint>", detail)
             detail = " ".join(detail.split())[:400]
+            context = ("posix" if cls.tool_home.startswith("/") else "drive") + \
+                f"; passphrase_exists={cls.passphrase.is_file()}; agent_on_path={bool(shutil.which('gpg-agent'))}"
             raise RuntimeError(f"synthetic OpenPGP {stage} failed: {reason} "
-                               f"(exit {result.returncode}); redacted tool diagnostic: {detail}")
+                               f"(exit {result.returncode}; home={context}); "
+                               f"redacted tool diagnostic: {detail}")
         return result.stdout
 
     def test_only_pinned_signer_can_authenticate_exact_approval(self):
@@ -137,7 +174,7 @@ class ConsumerPublicationSignatures(unittest.TestCase):
         self.assertIn("file-unavailable", message)
         self.assertNotIn("Fixture User", message)
         self.assertNotIn(fingerprint, message)
-        self.assertLess(len(message), 600)
+        self.assertLess(len(message), 700)
 
     def test_valid_signature_for_different_canonical_approval_is_rejected(self):
         modified = dict(fixture(), run=22)
@@ -168,7 +205,9 @@ class ConsumerPublicationSignatures(unittest.TestCase):
                 mock.patch.object(consumer_publication.subprocess, "run", wraps=run) as calls:
             self.assertEqual(consumer_publication.verify_signed_approval(
                 self.raw, self.signature, self.public, self.fingerprint, fixture()), fixture())
-        self.assertEqual(len(calls.call_args_list), 2)
+        self.assertIn(len(calls.call_args_list), (2, 3))
+        if len(calls.call_args_list) == 3:
+            self.assertEqual(Path(calls.call_args_list[0].args[0][0]).name.lower(), "cygpath.exe")
         for call in calls.call_args_list:
             self.assertNotIn("GH_TOKEN", call.kwargs["env"])
             self.assertNotIn("GNUPGHOME", call.kwargs["env"])

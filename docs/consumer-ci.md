@@ -136,6 +136,10 @@ The synthetic signer uses a private passphrase file rather than an empty
 command-line argument, including on Windows/MSYS. A small crypto smoke runs
 before the complete hosted security suite so setup failures remain localized.
 Tool-facing paths use forward slashes on Windows as well as POSIX systems.
+When the selected Windows GnuPG has a sibling MSYS `cygpath.exe`, its temporary
+home is translated into that toolchain's POSIX namespace; native GnuPG and
+POSIX hosts do not require this translator. Invalid or failed translation is
+an error, not permission to skip signature verification.
 Setup diagnostics are bounded and strip paths and synthetic fingerprints;
 production verification continues to discard raw GnuPG error output.
 

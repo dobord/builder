@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import tempfile
 
@@ -22,6 +23,27 @@ _FIELDS = frozenset({
     "base_sha", "builder_sha", "run", "attempt", "request_digest", "archive", "acceptance",
 })
 _REPORTS = frozenset({"dataplane", "client", "supplier"})
+
+
+def _tool_home(path, env, *, windows=None):
+    """Use the path namespace of the installed GnuPG, not the Python host."""
+    if windows is None:
+        windows = os.name == "nt"
+    if windows:
+        executable = shutil.which("gpg", path=env.get("PATH"))
+        if not executable:
+            raise OSError("GnuPG unavailable")
+        translator = Path(executable).with_name("cygpath.exe")
+        if translator.is_file():
+            result = subprocess.run([str(translator), "-u", path.as_posix()], env=env,
+                                    stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                    stderr=subprocess.DEVNULL, timeout=10, check=True)
+            home = result.stdout.decode("utf-8").strip()
+            if (not home.startswith("/") or len(home) > 4096
+                    or any(char in home for char in "\r\n\0")):
+                raise ValueError("invalid GnuPG tool home")
+            return home
+    return path.as_posix()
 
 
 def _matches(value, expression):
@@ -88,18 +110,19 @@ def verify_signed_approval(raw: bytes, signature: bytes, public_key: bytes,
         with tempfile.TemporaryDirectory(prefix="consumer-approval-") as directory:
             root = Path(directory)
             root.chmod(0o700)
+            tool_home = _tool_home(root, env)
             for name, content in (("approval.json", raw), ("signature.asc", signature)):
                 path = root / name
                 path.write_bytes(content)
                 path.chmod(0o600)
             keyring = root / "trusted.gpg"
-            subprocess.run(["gpg", "--no-options", "--batch", "--homedir", root.as_posix(),
-                            "--dearmor", "--output", keyring.as_posix()], input=public_key, env=env,
+            subprocess.run(["gpg", "--no-options", "--batch", "--homedir", tool_home,
+                            "--dearmor", "--output", tool_home + "/trusted.gpg"], input=public_key, env=env,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10, check=True)
             keyring.chmod(0o600)
-            result = subprocess.run(["gpgv", "--homedir", root.as_posix(), "--keyring", keyring.as_posix(),
-                                     "--status-fd", "1", (root / "signature.asc").as_posix(),
-                                     (root / "approval.json").as_posix()], env=env, stdin=subprocess.DEVNULL,
+            result = subprocess.run(["gpgv", "--homedir", tool_home, "--keyring", tool_home + "/trusted.gpg",
+                                     "--status-fd", "1", tool_home + "/signature.asc",
+                                     tool_home + "/approval.json"], env=env, stdin=subprocess.DEVNULL,
                                     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=10, check=True)
         records = [line.split() for line in result.stdout.decode("ascii").splitlines()
                    if line.startswith("[GNUPG:] ")]
