@@ -239,7 +239,40 @@ it does not delete others' assets, rewrite tags or claim recovery from concurren
 external mutations. Synthetic API tests do not prove actual scoped-token access
 or authorize a live publication. Workflow/authority wiring remains unfinished.
 
-## Original-artifact decryption capability
+## Direct publisher result encryption
+
+Operators who prohibit derived-key delegation can opt into direct static-result
+encryption with protected variable `CONSUMER_CI_PUBLISH_ENABLED=true` and protected
+public-recipient value `CONSUMER_CI_PUBLISH_PUBLIC_KEY_B64`. The latter contains
+base64-encoded official Tink public JSON for a freshly generated dedicated
+publisher keypair. Do not reuse the log or input recipient. Only the PUBLIC key
+is available to the trusted result-encryption step, never to native commands.
+The publisher private key belongs only in a future trusted verification stage;
+it must not be installed in this qualification workflow.
+
+Opt-in static runs emit `publisher-results.enc` alongside unchanged local-log
+`results.enc` and `diagnostics.enc`. Both result envelopes encrypt the exact same
+original tar bytes with independently generated Tink streaming keys. Publisher
+context purpose is `consumer-ci-publisher-results`, bound to the same exact
+request/builder/run/first attempt/static lane. No master-log or derived file key
+is transferred. Diagnostics remain encrypted only to the existing log recipient.
+Unset/false preserves legacy output; unknown flags, missing enabled recipients,
+log-recipient reuse and oversized combined artifacts fail closed. Dual output
+reserves space for the outer ZIP inside the existing transport bound.
+
+Enabling this requires a reviewed immutable builder pin and a **fresh signed
+request with all eight lanes**, never rerunning an old qualification. A run that
+predates the feature has no publisher ciphertext and cannot be retroactively
+treated as directly encrypted. Its newly produced archive requires renewed
+acceptance; older archive evidence is not automatically transferable.
+
+Local `fetch` still decrypts only `results.enc` with its existing key/context and
+verifies the original API artifact digest. It permits the one known optional
+`publisher-results.enc` member only for static artifacts; unexpected members,
+duplicates or publisher members in other lanes are rejected before decryption.
+This does not implement or authorize the publication workflow.
+
+## Optional original-artifact decryption capability
 
 Archive re-encryption alone cannot independently prove its origin in an earlier
 encrypted CI result. `consumer_capability` adds an explicit one-envelope
@@ -275,6 +308,8 @@ AEAD tags. Existing global-recipient decryption remains strict and cannot use th
 builder input key to decrypt the original result without explicit delegation.
 
 A capability authorizes reading one original result, not publishing a release.
+It is a separate explicit opt-in primitive, not part of direct publisher-result
+encryption, and must not be used where operators prohibit derived-key transfer.
 The future workflow must additionally verify release approval, exact archive
 bytes and signatures, acceptance and all original CI evidence before giving
 scoped authority to the upload stage. No master key or real capability has been
