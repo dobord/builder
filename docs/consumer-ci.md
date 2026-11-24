@@ -238,3 +238,47 @@ The primitive checks assets again after publication and fails on inconsistency;
 it does not delete others' assets, rewrite tags or claim recovery from concurrent
 external mutations. Synthetic API tests do not prove actual scoped-token access
 or authorize a live publication. Workflow/authority wiring remains unfinished.
+
+## Original-artifact decryption capability
+
+Archive re-encryption alone cannot independently prove its origin in an earlier
+encrypted CI result. `consumer_capability` adds an explicit one-envelope
+delegation primitive for that boundary, without changing the existing envelope
+format, original header/recipient/context/ciphertext or `crypto.decrypt_file`.
+
+The POSIX-local operator `create` reads protected master-log and operator-signing
+key **paths** only. It refuses Actions execution before reading either key.
+It snapshots the exact ciphertext, unwraps only that envelope's independently
+random streaming file key and consumes every original AEAD tag to authenticated
+EOF before issuing a capability. The delegated payload contains that file key, not the master-log or
+operator signing private key. It is signed with the existing consumer operator
+key and HPKE-encrypted to the builder input public recipient. Plaintext delegated
+keysets must never be printed, persisted, placed in argv/environment, committed
+or published. Only the encrypted capability may be transferred.
+
+The binding includes the complete approval digest, exact builder/request/run,
+first attempt, static lane, original artifact ID and ZIP SHA-256, ciphertext
+SHA-256 and original log recipient fingerprint. The trusted receiver must derive
+**all** those expectations independently from protected policy, authenticated
+qualification and the original API-downloaded/digest-verified artifact. It must
+never echo capability fields back as expected values. The helper itself takes
+the extracted original ciphertext, not the ZIP or API credential; archive
+retrieval and original-artifact provenance checks remain caller obligations.
+
+`open_result` accepts only the builder input private key and independently pinned
+operator public key. It verifies the encrypted signed capability and exact
+ciphertext digest, keeps the original header/context/recipient checks and uses
+the original Streaming AEAD AAD/tags unchanged. Authenticated EOF and bounds
+precede atomic no-overwrite plaintext publication in private staging. Correctly
+signed delegation with matching ciphertext hashes still cannot bypass corrupted
+AEAD tags. Existing global-recipient decryption remains strict and cannot use the
+builder input key to decrypt the original result without explicit delegation.
+
+A capability authorizes reading one original result, not publishing a release.
+The future workflow must additionally verify release approval, exact archive
+bytes and signatures, acceptance and all original CI evidence before giving
+scoped authority to the upload stage. No master key or real capability has been
+provisioned in CI by this library change. Tests use fresh synthetic keys:
+POSIX exercises the local creator, while Windows explicitly rejects unsupported
+operator creation and exercises the receiver with a real Tink reference capsule.
+Python does not promise secure erasure of in-memory key material.
