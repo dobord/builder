@@ -71,21 +71,38 @@ class ConsumerPublicationSignatures(unittest.TestCase):
         cls.addClassCleanup(
             subprocess.run, ["gpgconf", "--homedir", str(home), "--kill", "gpg-agent"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
-        cls.run_gpg("--pinentry-mode", "loopback", "--passphrase", "",
+        # A file avoids empty-argument loss in Windows/MSYS tool invocation.
+        # This passphrase protects only a disposable synthetic test signer.
+        cls.passphrase = home / "synthetic-passphrase"
+        cls.passphrase.write_bytes(b"synthetic-test-only\n")
+        cls.passphrase.chmod(0o600)
+        cls.run_gpg("--pinentry-mode", "loopback", "--passphrase-file", str(cls.passphrase),
                     "--quick-generate-key", "Synthetic Approver <signer@example.invalid>", "ed25519", "sign", "1d")
         listing = cls.run_gpg("--with-colons", "--list-keys").decode()
         cls.fingerprint = next(line.split(":")[9] for line in listing.splitlines() if line.startswith("fpr:"))
         cls.public = cls.run_gpg("--armor", "--export", cls.fingerprint)
         cls.raw = crypto.canonical(fixture())
-        cls.signature = cls.run_gpg("--pinentry-mode", "loopback", "--passphrase", "",
+        cls.signature = cls.run_gpg("--pinentry-mode", "loopback", "--passphrase-file", str(cls.passphrase),
                                     "--armor", "--detach-sign", "--output", "-", data=cls.raw)
 
     @classmethod
     def run_gpg(cls, *args, data=None):
+        if any(not arg for arg in args):
+            raise RuntimeError("synthetic OpenPGP invocation has an empty argument")
         result = subprocess.run(["gpg", "--no-options", "--batch", "--homedir", str(cls.home), *args],
-                                input=data, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=15)
+                                input=data, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15)
         if result.returncode:
-            raise RuntimeError("synthetic OpenPGP setup failed")
+            stage = next((name for name in ("--quick-generate-key", "--list-keys", "--export", "--detach-sign")
+                          if name in args), "unknown-stage")
+            # Never print raw tool output, paths or key material, even though
+            # these tests use freshly generated synthetic-only signing data.
+            reason = next((code for text, code in (
+                (b"invalid option", "unsupported-option"), (b"no pinentry", "pinentry-unavailable"),
+                (b"can't connect to the agent", "agent-unavailable"),
+                (b"no such file", "file-unavailable"), (b"invalid value", "invalid-value"),
+                (b"key generation failed", "key-generation-failed"),
+            ) if text in result.stderr.lower()), "unclassified-tool-error")
+            raise RuntimeError(f"synthetic OpenPGP {stage} failed: {reason} (exit {result.returncode})")
         return result.stdout
 
     def test_only_pinned_signer_can_authenticate_exact_approval(self):
@@ -96,6 +113,10 @@ class ConsumerPublicationSignatures(unittest.TestCase):
         with self.assertRaises(ValueError):
             consumer_publication.verify_signed_approval(
                 self.raw, self.signature, self.public, "0" * 40, fixture())
+
+    def test_setup_never_relies_on_empty_tool_arguments(self):
+        with self.assertRaisesRegex(RuntimeError, "empty argument"):
+            self.run_gpg("--passphrase", "")
 
     def test_valid_signature_for_different_canonical_approval_is_rejected(self):
         modified = dict(fixture(), run=22)

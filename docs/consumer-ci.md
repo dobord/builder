@@ -132,6 +132,9 @@ fail closed. Private signing keys
 are not accepted or used. Tests generate only disposable synthetic signers;
 their crypto cases explicitly skip where GnuPG tools are unavailable. A real
 publication stage must require these tools rather than skip verification.
+The synthetic signer uses a private passphrase file rather than an empty
+command-line argument, including on Windows/MSYS. A small crypto smoke runs
+before the complete hosted security suite so setup failures remain localized.
 
 Neither validator reevaluates acceptance receipts or uploads anything. The
 remaining publisher must obtain expectations from independently verified
