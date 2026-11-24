@@ -204,3 +204,37 @@ owner-only; the eventual production publisher is Linux-only. Temporary plaintext
 and ciphertext staging is removed on success and failure. This is a library
 primitive, not a command, workflow, upload operation or actual handoff proof.
 Original run/artifact evidence and independent approval remain mandatory.
+
+## Trusted upload primitive
+
+`consumer_upload.publish_release` is a separate consumer-only library primitive.
+It has no command/workflow or environment credential lookup. Only a future trusted
+upload stage may call it, after independently verifying qualification, acceptance,
+approval and asset signatures and deriving the authenticated asset inventory.
+The destination-scoped API credential must never reach consumer code. The
+existing SDK publisher is unchanged.
+
+The inventory is exactly the approved archive and its `.asc` signature,
+`SHA256SUMS` and its signature, `provenance.json` and its signature, and
+`release-approval.json` and its signature. All local files are snapshotted in
+owner-only staging and checked against their authenticated hashes before writes.
+The approval file must equal the independently authenticated canonical approval.
+The private repository identity and preexisting annotated tag ref are checked
+before writes and again before finalization; this primitive never creates tags.
+
+Publication starts as a draft marked by approval and inventory digests. Only an
+identical owned draft can resume; missing assets are uploaded without replacing
+or deleting anything. Conflicting bodies, names, metadata, extra/aliased assets
+and incomplete published releases fail closed. Exact remote bytes are fetched
+and hashed before draft finalization, not trusted from metadata alone. Storage
+redirects are HTTPS-only to fixed GitHub asset hosts and do not receive API
+authorization. A complete identical published release is verified without writes.
+Finalization does not change GitHub's latest-release designation.
+
+Interrupted uploads leave a resumable draft. Finalization and GitHub ref/asset
+updates are separate remote operations, not one atomic transaction: callers must
+serialize their own publisher and independently verify the final remote state.
+The primitive checks assets again after publication and fails on inconsistency;
+it does not delete others' assets, rewrite tags or claim recovery from concurrent
+external mutations. Synthetic API tests do not prove actual scoped-token access
+or authorize a live publication. Workflow/authority wiring remains unfinished.
