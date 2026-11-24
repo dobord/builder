@@ -112,3 +112,18 @@ digest, decrypts with the expected request/run/attempt/lane context, validates
 archive paths and the exact-source result receipt, and publishes plaintext only
 to a new local directory. The supplied output private key stays local. This is
 artifact verification, not authorization to publish a release.
+
+## Consumer publication approval contract
+
+`consumer_publication.check_approval` validates a bounded canonical approval
+document against independently resolved trusted inputs. It binds the
+destination repository ID, signed tag object, source and base, exact builder
+revision and first run attempt, request digest, archive name/digest, and the
+three independent acceptance receipt digests (dataplane, client, supplier).
+A qualification receipt or candidate provenance is not a publication approval.
+
+This validator does not verify a release signature, reevaluate the receipts,
+or publish anything. The remaining publisher must authenticate the exact
+approval bytes with a separately trusted signer, obtain expectations from
+verified evidence rather than the approval itself, and perform scoped draft
+upload with byte-for-byte verification. The SDK publisher remains separate.
