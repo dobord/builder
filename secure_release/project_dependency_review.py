@@ -44,11 +44,26 @@ PUBLIC_ENDPOINTS = {"api.github.com": "github-api", "raw.githubusercontent.com":
 
 
 class DependencyTransportError(ValueError):
-    def __init__(self, endpoint, failure, status=None):
+    def __init__(self, endpoint, failure, status=None, rate_limit=None):
         super().__init__("dependency data unavailable")
         self.endpoint = endpoint
         self.failure = failure
         self.status = status
+        self.rate_limit = rate_limit
+
+
+def bounded_rate_limit(headers):
+    """Copy only numeric transport counters; never retain header strings."""
+    result = {}
+    if headers is None:
+        return result
+    for header, field, maximum in (("X-RateLimit-Remaining", "remaining", 1000000),
+                                   ("X-RateLimit-Limit", "limit", 1000000),
+                                   ("Retry-After", "retry_after_seconds", 86400)):
+        value = headers.get(header)
+        if type(value) is str and re.fullmatch(r"[0-9]{1,7}", value) and int(value) <= maximum:
+            result[field] = int(value)
+    return result
 
 
 def public_json(url, *, data=None):
@@ -70,6 +85,7 @@ def public_json(url, *, data=None):
     opener = urllib.request.build_opener(NoRedirect())
     for delay in (1, 2, None):
         status = None
+        rate_limit = None
         retryable = False
         try:
             with opener.open(request, timeout=60) as response:
@@ -81,6 +97,8 @@ def public_json(url, *, data=None):
             status = error.code
             failure = "http"
             retryable = status in {502, 503, 504}
+            if endpoint == "github-api" and status in {403, 429}:
+                rate_limit = bounded_rate_limit(error.headers)
             error.close()
         except (TimeoutError, ConnectionResetError) as error:
             failure = "timeout" if isinstance(error, TimeoutError) else "connection-reset"
@@ -93,7 +111,7 @@ def public_json(url, *, data=None):
         except (json.JSONDecodeError, UnicodeDecodeError):
             failure = "invalid-json"
         if not retryable or delay is None:
-            raise DependencyTransportError(endpoint, failure, status) from None
+            raise DependencyTransportError(endpoint, failure, status, rate_limit) from None
         time.sleep(delay)
 
 
