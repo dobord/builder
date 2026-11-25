@@ -12,10 +12,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 import re
 import shutil
+import stat
 import subprocess
 import tempfile
 
-from . import consumer_ci as consumer, crypto
+from . import consumer_ci as consumer, crypto, safeio
 
 _SHA = re.compile(r"[0-9a-f]{40}")
 _DIGEST = re.compile(r"[0-9a-f]{64}")
@@ -223,6 +224,14 @@ def verify_source_tag(raw: bytes, tag: str, source_sha: str, object_sha: str,
     return actual
 
 
+def verify_release_file(path: Path, signature: bytes, public_key: bytes, fingerprint: str):
+    """Verify a bounded regular asset with streaming staging, not a giant bytes object."""
+    if (not isinstance(path, Path) or not safeio.regular(path)
+            or not 0 < path.stat().st_size <= consumer.MAX_PREPARED):
+        raise ValueError("invalid consumer release signature source")
+    _verify_release_signature(path, signature, public_key, fingerprint)
+
+
 def _verify_release_signature(raw, signature, public_key, fingerprint):
     """Share the isolated pinned-primary-key verifier for approvals and tags."""
     if (not isinstance(fingerprint, str) or re.fullmatch(r"[0-9A-F]{40}", fingerprint) is None
@@ -241,7 +250,23 @@ def _verify_release_signature(raw, signature, public_key, fingerprint):
             tool_home = _tool_home(root, env)
             for name, content in (("approval.json", raw), ("signature.asc", signature)):
                 path = root / name
-                path.write_bytes(content)
+                if isinstance(content, Path):
+                    descriptor = os.open(content, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+                                         | getattr(os, "O_BINARY", 0))
+                    with os.fdopen(descriptor, "rb") as source, path.open("xb") as target:
+                        info = os.fstat(source.fileno())
+                        if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size <= consumer.MAX_PREPARED:
+                            raise ValueError("unsafe consumer signature source")
+                        total = 0
+                        while block := source.read(1024**2):
+                            total += len(block)
+                            if total > consumer.MAX_PREPARED:
+                                raise ValueError("consumer signature source exceeds bounds")
+                            target.write(block)
+                        if total != info.st_size:
+                            raise ValueError("consumer signature source changed")
+                else:
+                    path.write_bytes(content)
                 path.chmod(0o600)
             keyring = root / "trusted.gpg"
             subprocess.run(["gpg", "--no-options", "--batch", "--homedir", tool_home,
