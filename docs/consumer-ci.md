@@ -176,11 +176,11 @@ proof of actual packet paths or supplier review: the operator must review the
 underlying private evidence before signing approval. Do not put raw operational
 logs or real profiles into these records or publish them.
 
-These validators do not acquire evidence, resolve its authority or upload anything. The
-remaining publisher must obtain expectations from independently verified
-evidence rather than the approval itself, resolve the complete qualification,
-retrieve and recheck the tag ref, and perform scoped draft upload with
-byte-for-byte verification.
+These validators do not acquire evidence, resolve its authority or upload anything.
+The separate [consumer publisher](consumer-publication.md) obtains expectations
+from independently verified evidence rather than the approval itself, resolves
+the complete qualification, verifies exact signed tag bytes, and performs scoped
+draft upload with byte-for-byte verification.
 The SDK publisher remains separate.
 
 ## Verified archive handoff
@@ -208,8 +208,8 @@ Original run/artifact evidence and independent approval remain mandatory.
 ## Trusted upload primitive
 
 `consumer_upload.publish_release` is a separate consumer-only library primitive.
-It has no command/workflow or environment credential lookup. Only a future trusted
-upload stage may call it, after independently verifying qualification, acceptance,
+It has no command/workflow or environment credential lookup. Only the separate trusted
+publication stage may call it, after independently verifying qualification, acceptance,
 approval and asset signatures and deriving the authenticated asset inventory.
 The destination-scoped API credential must never reach consumer code. The
 existing SDK publisher is unchanged.
@@ -237,7 +237,8 @@ serialize their own publisher and independently verify the final remote state.
 The primitive checks assets again after publication and fails on inconsistency;
 it does not delete others' assets, rewrite tags or claim recovery from concurrent
 external mutations. Synthetic API tests do not prove actual scoped-token access
-or authorize a live publication. Workflow/authority wiring remains unfinished.
+or authorize a live publication. Workflow/authority wiring is described separately
+in [consumer publication](consumer-publication.md); provision trust only after review.
 
 ## Direct publisher result encryption
 
@@ -247,7 +248,7 @@ public-recipient value `CONSUMER_CI_PUBLISH_PUBLIC_KEY_B64`. The latter contains
 base64-encoded official Tink public JSON for a freshly generated dedicated
 publisher keypair. Do not reuse the log or input recipient. Only the PUBLIC key
 is available to the trusted result-encryption step, never to native commands.
-The publisher private key belongs only in a future trusted verification stage;
+The publisher private key belongs only in the separate trusted verification stage;
 it must not be installed in this qualification workflow.
 
 Opt-in static runs emit `publisher-results.enc` alongside unchanged local-log
@@ -270,7 +271,8 @@ Local `fetch` still decrypts only `results.enc` with its existing key/context an
 verifies the original API artifact digest. It permits the one known optional
 `publisher-results.enc` member only for static artifacts; unexpected members,
 duplicates or publisher members in other lanes are rejected before decryption.
-This does not implement or authorize the publication workflow.
+This output alone does not implement or authorize publication. The separately
+reviewed workflow additionally requires independent policy, signatures and acceptance.
 
 ## Optional original-artifact decryption capability
 

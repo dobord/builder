@@ -1,0 +1,87 @@
+name: Publish a verified consumer release
+run-name: Consumer publication ${{ inputs.request_digest }}
+on:
+  workflow_dispatch:
+    inputs:
+      request_id:
+        required: true
+        type: string
+      request_digest:
+        required: true
+        type: string
+      request:
+        description: Encrypted publication bundle only
+        required: true
+        type: string
+permissions: {}
+concurrency:
+  group: consumer-release-publication
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: >-
+      github.repository_id == '1372874997' &&
+      github.sha == vars.CONSUMER_RELEASE_BUILDER_SHA &&
+      github.ref == format('refs/tags/consumer-publisher-{0}', vars.CONSUMER_RELEASE_BUILDER_SHA) &&
+      github.run_attempt == 1 &&
+      github.actor_id == '5323024' &&
+      vars.CONSUMER_RELEASE_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    environment: consumer-publication
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      actions: read
+    env:
+      CONSUMER_RELEASE_BUILDER_SHA: ${{ vars.CONSUMER_RELEASE_BUILDER_SHA }}
+      CONSUMER_RELEASE_ENABLED: ${{ vars.CONSUMER_RELEASE_ENABLED }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: dobord/builder
+          ref: ${{ vars.CONSUMER_RELEASE_BUILDER_SHA }}
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.12'
+      - name: Install reviewed offline crypto runtime
+        run: |
+          python tools/verify_wheelhouse.py
+          python -m pip install --disable-pip-version-check --no-index --find-links=vendor/wheels --require-hashes --only-binary=:all: -r requirements.lock
+      - name: Authenticate qualification, original artifact, signatures and acceptance
+        id: verify
+        env:
+          CONSUMER_RELEASE_REQUEST_ID: ${{ inputs.request_id }}
+          CONSUMER_RELEASE_REQUEST_DIGEST: ${{ inputs.request_digest }}
+          CONSUMER_RELEASE_REQUEST: ${{ inputs.request }}
+          CONSUMER_RELEASE_POLICY_B64: ${{ secrets.CONSUMER_RELEASE_POLICY_B64 }}
+          CONSUMER_POLICY_B64: ${{ secrets.CONSUMER_CI_POLICY_B64 }}
+          CONSUMER_INPUT_PRIVATE_KEY_B64: ${{ secrets.CONSUMER_CI_INPUT_PRIVATE_KEY_B64 }}
+          CONSUMER_VERIFY_PUBLIC_KEY_B64: ${{ secrets.CONSUMER_CI_VERIFY_PUBLIC_KEY_B64 }}
+          CONSUMER_PUBLISH_PRIVATE_KEY_B64: ${{ secrets.CONSUMER_CI_PUBLISH_PRIVATE_KEY_B64 }}
+          CONSUMER_RELEASE_VERIFY_PUBLIC_KEY_B64: ${{ secrets.CONSUMER_RELEASE_VERIFY_PUBLIC_KEY_B64 }}
+          BUILDER_READ_TOKEN: ${{ github.token }}
+        run: python -m secure_release.consumer_publisher verify
+      - name: Publish only the exact independently verified assets
+        env:
+          CONSUMER_RELEASE_POLICY_B64: ${{ secrets.CONSUMER_RELEASE_POLICY_B64 }}
+          CONSUMER_POLICY_B64: ${{ secrets.CONSUMER_CI_POLICY_B64 }}
+          CONSUMER_RELEASE_VERIFY_PUBLIC_KEY_B64: ${{ secrets.CONSUMER_RELEASE_VERIFY_PUBLIC_KEY_B64 }}
+          CONSUMER_RELEASE_STAGING_DIGEST: ${{ steps.verify.outputs.staging_digest }}
+          BUILDER_READ_TOKEN: ${{ github.token }}
+          CONSUMER_RELEASE_PUBLISH_TOKEN: ${{ secrets.BIN_PUBLISH_TOKEN }}
+        run: python -m secure_release.consumer_publisher publish
+      - name: Encrypt bounded publisher diagnostics
+        if: always()
+        run: python -m secure_release.consumer_publisher diagnostics
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: consumer-publication-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/consumer-publication-diagnostics.enc
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Remove all plaintext publication staging
+        if: always()
+        run: python -m secure_release.consumer_publisher cleanup
