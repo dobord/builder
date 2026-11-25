@@ -21,6 +21,7 @@ import zipfile
 
 from . import consumer_ci as consumer, consumer_publication as approval
 from . import consumer_upload, crypto, safeio, encrypted_logs
+from . import consumer_presentation
 from .github import Client, NoRedirect
 
 WORKFLOW = "publish-consumer-release.yml"
@@ -34,7 +35,7 @@ _TAG = re.compile(r"(?:0|[1-9][0-9]{0,8})(?:\.(?:0|[1-9][0-9]{0,8})){2}")
 
 
 def validate_policy(value):
-    if (not isinstance(value, dict) or set(value) != _POLICY
+    if (not isinstance(value, dict) or set(value) - {"presentation", "automation"} != _POLICY
             or type(value["schema"]) is not int or value["schema"] != 1
             or not consumer.repository(value["repository"])
             or not consumer.integer(value["repository_id"])
@@ -52,6 +53,21 @@ def validate_policy(value):
                                 + r"-linux-x86_64-static\.tar\.gz", value["archive_name"])
             or not isinstance(value["acceptance"], dict) or set(value["acceptance"]) != _KINDS):
         raise ValueError("invalid protected consumer publication policy")
+    if "presentation" in value:
+        consumer_presentation.validate_policy(value["presentation"])
+    if "automation" in value:
+        item = value["automation"]
+        if (not isinstance(item, dict) or set(item) != {
+                "builder_sha", "signer_sha", "signer_recipient", "operator_verify_sha256", "receipt_sha256"}
+                or any(not isinstance(item[k], str) or not _SHA.fullmatch(item[k])
+                       for k in ("builder_sha", "signer_sha"))
+                or any(not isinstance(item[k], str) or not _HASH.fullmatch(item[k])
+                       for k in ("signer_recipient", "operator_verify_sha256"))
+                or not isinstance(item["receipt_sha256"], dict)
+                or set(item["receipt_sha256"]) != _KINDS
+                or any(not isinstance(x, str) or not _HASH.fullmatch(x)
+                       for x in item["receipt_sha256"].values())):
+            raise ValueError("invalid protected consumer automation policy")
     for checks in value["acceptance"].values():
         if (not isinstance(checks, list) or not 1 <= len(checks) <= 128
                 or any(not isinstance(x, str) or not re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", x)
@@ -392,7 +408,7 @@ def read_bundle(sha, input_private):
 def decode_bundle(value):
     names = {"qualification_request", "qualification_request_id", "approval", "approval_signature",
              "tag", "receipts", "signatures"}
-    if (not isinstance(value, dict) or set(value) != names
+    if (not isinstance(value, dict) or set(value) - {"presentation"} != names
             or not isinstance(value["receipts"], dict) or set(value["receipts"]) != _KINDS
             or not isinstance(value["signatures"], dict)
             or set(value["signatures"]) != {"archive", "provenance", "checksums"}):
@@ -407,15 +423,29 @@ def decode_bundle(value):
     if (any(not 0 < len(raw) <= 32768 for raw in decoded["receipts"].values())
             or any(not 0 < len(raw) <= 65536 for raw in decoded["signatures"].values())):
         raise ValueError("consumer publication attachments exceed bounds")
+    if "presentation" in value:
+        selected = value["presentation"]
+        if not isinstance(selected, dict) or set(selected) != {"notes", "signature"}:
+            raise ValueError("invalid consumer presentation attachment")
+        consumer_presentation.validate_notes(selected["notes"])
+        signature = crypto.unb64(selected["signature"])
+        if not 0 < len(signature) <= 65536:
+            raise ValueError("consumer presentation signature exceeds bounds")
+        decoded["presentation"] = {"notes": selected["notes"], "signature": signature}
     return decoded
 
 
 def receipt_digests(policy, receipts):
+    if not isinstance(receipts, dict) or set(receipts) != _KINDS:
+        raise ValueError("incomplete consumer acceptance receipt inventory")
     identity = {"source_sha": policy["source_sha"], "builder_sha": policy["qualifier_sha"],
-                "run": policy["run"], "attempt": 1, "archive_sha256": policy["archive_sha256"]}
-    return {kind: approval.check_acceptance_receipt(raw, kind, identity,
-                                                   tuple(policy["acceptance"][kind]))
+                 "run": policy["run"], "attempt": 1, "archive_sha256": policy["archive_sha256"]}
+    result = {kind: approval.check_acceptance_receipt(raw, kind, identity,
+                                                    tuple(policy["acceptance"][kind]))
             for kind, raw in receipts.items()}
+    if "automation" in policy and result != policy["automation"]["receipt_sha256"]:
+        raise ValueError("consumer acceptance is not independently approved")
+    return result
 
 
 def tag_object(raw):
@@ -425,14 +455,25 @@ def tag_object(raw):
 def verify():
     sha = guard()
     policy, selected = protected_policy()
-    work = work_root()
+    input_private = consumer.key("INPUT_PRIVATE_KEY_B64")
+    bundle = read_bundle(sha, input_private)
+    verify_bundle(bundle, policy, selected, work_root(), input_private,
+                  consumer.ci.required("BUILDER_READ_TOKEN"))
+
+
+def verify_bundle(bundle, policy, selected, work, input_private, token):
+    """Shared trusted verification, called only after the caller's hosted guard.
+
+    The automatic route authenticates a separate signer result before entering
+    this same qualification/artifact/asset verifier. No execution context is
+    forged to reuse the manual publisher's guard.
+    """
     work.mkdir(mode=0o700)
     assets = work / "assets"
     assets.mkdir(mode=0o700)
-    input_private = consumer.key("INPUT_PRIVATE_KEY_B64")
-    bundle = read_bundle(sha, input_private)
     data = decode_bundle(bundle)
-    token = consumer.ci.required("BUILDER_READ_TOKEN")
+    if ("presentation" in policy) != ("presentation" in data):
+        raise ValueError("consumer presentation policy/attachment mismatch")
     qualified = approval.resolve_qualification(
         bundle["qualification_request"], bundle["qualification_request_id"], policy["qualifier_sha"],
         policy["run"], selected, input_private, consumer.key("VERIFY_PUBLIC_KEY_B64"), token)
@@ -458,9 +499,15 @@ def verify():
     (assets / "SHA256SUMS").write_bytes(checksum_bytes(assets, expected))
     (assets / "SHA256SUMS.asc").write_bytes(data["signatures"]["checksums"])
     manifest = verify_assets(assets, expected, public, policy["signer_fingerprint"], prov)
+    if "presentation" in data:
+        consumer_presentation.verify(policy["presentation"], expected, manifest,
+                                     data["presentation"]["notes"], data["presentation"]["signature"],
+                                     public, policy["signer_fingerprint"])
     record = {"qualified": qualified, "request_digest": request_digest, "artifact": artifact,
               "receipts": {kind: crypto.b64(raw) for kind, raw in data["receipts"].items()},
-              "tag": crypto.b64(data["tag"]), "manifest": manifest}
+               "tag": crypto.b64(data["tag"]), "manifest": manifest}
+    if "presentation" in data:
+        record["presentation"] = bundle["presentation"]
     raw = crypto.canonical(record)
     (work / "verified.json").write_bytes(raw)
     (work / "verified.json").chmod(0o600)
@@ -479,6 +526,11 @@ def recheck_qualification(policy, qualified, digest, token):
 
 def publish():
     guard()
+    publish_verified()
+
+
+def publish_verified():
+    """Shared upload stage; caller must establish its immutable hosted guard."""
     policy, selected = protected_policy()
     work = work_root()
     path = work / "verified.json"
@@ -488,7 +540,7 @@ def publish():
     if hashlib.sha256(raw).hexdigest() != consumer.ci.required("CONSUMER_RELEASE_STAGING_DIGEST"):
         raise ValueError("consumer verification receipt changed")
     record = crypto.parse(raw)
-    if not isinstance(record, dict) or set(record) != {
+    if not isinstance(record, dict) or set(record) - {"presentation"} != {
             "qualified", "request_digest", "artifact", "receipts", "tag", "manifest"}:
         raise ValueError("invalid verified consumer publication receipt")
     receipts = receipt_digests(policy, {kind: crypto.unb64(value)
@@ -501,13 +553,24 @@ def publish():
     assets = work / "assets"
     if verify_assets(assets, expected, public, policy["signer_fingerprint"], prov) != record["manifest"]:
         raise ValueError("consumer publication assets changed after verification")
+    if ("presentation" in policy) != ("presentation" in record):
+        raise ValueError("verified consumer presentation policy mismatch")
+    presentation = None
+    if "presentation" in policy:
+        value = record["presentation"]
+        if not isinstance(value, dict) or set(value) != {"notes", "signature"}:
+            raise ValueError("invalid verified consumer presentation")
+        presentation = consumer_presentation.verify(
+            policy["presentation"], expected, record["manifest"], value["notes"],
+            crypto.unb64(value["signature"]), public, policy["signer_fingerprint"])
     reader = consumer.ci.required("BUILDER_READ_TOKEN")
     recheck_qualification(policy, record["qualified"], record["request_digest"], reader)
     # The only destination write-credential lookup is after all independent
     # checks in this separate trusted process/step. No consumer executable runs.
     api = Client(consumer.ci.required("CONSUMER_RELEASE_PUBLISH_TOKEN"))
     ensure_tag(api, policy["repository"], tag, expected, public, policy["signer_fingerprint"])
-    consumer_upload.publish_release(api, policy["repository"], assets, expected, record["manifest"])
+    consumer_upload.publish_release(api, policy["repository"], assets, expected, record["manifest"],
+                                    presentation=presentation)
     recheck_qualification(policy, record["qualified"], record["request_digest"], reader)
 
 

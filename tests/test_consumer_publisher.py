@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from unittest import mock
 
 from secure_release import consumer_publisher as publisher, crypto, consumer_ci, safeio
+from secure_release import consumer_presentation
 from tests.test_consumer_publication import fixture
 from tests import test_consumer_publication as signatures
 from tests.test_consumer_ci import request as request_fixture, policy as qualification_policy
@@ -205,8 +206,11 @@ class TagAPI(FakeAPI):
         self.tag_raw = raw
         self.tag_exists = False
         self.tag_created = False
+        self.latest = None
 
     def get(self, path):
+        if path.endswith("/releases/latest"):
+            return {"id": self.latest, "tag_name": self.expected["tag"] if self.latest else "0.9.0"}
         if "/git/ref/tags/" in path and not self.tag_exists:
             raise urllib.error.HTTPError("https://api.github.com", 404, "missing", {}, None)
         if "/git/tags/" in path:
@@ -217,6 +221,8 @@ class TagAPI(FakeAPI):
         return super().get(path)
 
     def json(self, method, path, payload):
+        if payload.get("make_latest") == "true":
+            self.latest = 100
         if path.endswith("/git/tags"):
             self.writes.append((method, copy.deepcopy(payload)))
             self.tag_created = True
@@ -376,6 +382,56 @@ class ConsumerPublisherCryptography(unittest.TestCase):
         before = copy.deepcopy(self.api.writes)
         self.publish()
         self.assertEqual(self.api.writes, before)
+
+    def presentation_bundle(self):
+        notes = "### Added\n\n- Independently synthetic release notes.\n"
+        settings = {"notes_sha256": hashlib.sha256(notes.encode()).hexdigest(), "make_latest": True}
+        self.policy["presentation"] = settings
+        self.env["CONSUMER_RELEASE_POLICY_B64"] = crypto.b64(crypto.canonical(self.policy))
+        original, signing = self.root / "original", self.root / "signing"
+        raw = {self.policy["archive_name"]: (original / self.policy["archive_name"]).read_bytes(),
+               self.policy["archive_name"] + ".asc": crypto.unb64(self.bundle["signatures"]["archive"]),
+               "release-approval.json": crypto.unb64(self.bundle["approval"]),
+               "release-approval.json.asc": crypto.unb64(self.bundle["approval_signature"]),
+               "provenance.json": (signing / "provenance.json").read_bytes(),
+               "provenance.json.asc": crypto.unb64(self.bundle["signatures"]["provenance"]),
+               "SHA256SUMS": publisher.checksum_bytes(signing, self.expected),
+               "SHA256SUMS.asc": crypto.unb64(self.bundle["signatures"]["checksums"])}
+        manifest = {name: hashlib.sha256(value).hexdigest() for name, value in raw.items()}
+        intent = consumer_presentation.intent(settings, self.expected, manifest, notes)
+        self.bundle["presentation"] = {"notes": notes, "signature": crypto.b64(self.sign(intent))}
+        return manifest
+
+    def test_signed_presentation_survives_staging_and_sets_latest_without_asset_changes(self):
+        manifest = self.presentation_bundle()
+        self.verify()
+        self.publish()
+        self.assertEqual(self.api.latest, 100)
+        self.assertIn("Independently synthetic release notes.", self.api.release["body"])
+        self.assertEqual({a["name"]: a["digest"].removeprefix("sha256:") for a in self.api.assets}, manifest)
+        before = copy.deepcopy(self.api.writes)
+        self.publish()
+        self.assertEqual(self.api.writes, before)
+
+    def test_presentation_policy_or_signature_mismatch_never_reaches_publication(self):
+        self.presentation_bundle()
+        for mutation in ("notes", "signature", "missing"):
+            bundle = copy.deepcopy(self.bundle)
+            if mutation == "notes":
+                bundle["presentation"]["notes"] += "Unapproved suffix."
+            elif mutation == "signature":
+                bundle["presentation"]["signature"] = bundle["approval_signature"]
+            else:
+                del bundle["presentation"]
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as directory:
+                env = self.env
+                self.env = dict(env, RUNNER_TEMP=directory)
+                try:
+                    with self.assertRaises(ValueError):
+                        self.verify(bundle)
+                finally:
+                    self.env = env
+            self.assertEqual(self.api.writes, [])
 
     def test_publication_fixture_keeps_system_tool_environment_but_not_ambient_credentials(self):
         self.verify()
