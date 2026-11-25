@@ -22,7 +22,11 @@ class SigningCleanupContracts(unittest.TestCase):
             listing = ("sec:-:255:22:\nfpr:::::::::" + fingerprint + ":\n").encode()
             return subprocess.CompletedProcess(argv, 0, stdout=listing)
         private = b"-----BEGIN PGP PRIVATE KEY BLOCK-----\nsynthetic mock input only\n"
-        with mock.patch.object(signing.subprocess, "run", side_effect=run):
+        # This test targets cleanup, not the independently tested MSYS path
+        # adapter. Its subprocess mock must never masquerade as cygpath output.
+        with mock.patch.object(signing.approval, "_tool_home",
+                               side_effect=lambda root, env: root.as_posix()), \
+                mock.patch.object(signing.subprocess, "run", side_effect=run):
             with self.assertRaisesRegex(ValueError, "^original synthetic assertion$"):
                 with signing.isolated_signer(private, b"synthetic-only", fingerprint):
                     raise ValueError("original synthetic assertion")
