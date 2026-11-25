@@ -36,8 +36,10 @@ executables and inner archive are **never executed** by this workflow.
   recipient. No master-log key, delegated file key or capability is accepted.
 - `CONSUMER_RELEASE_VERIFY_PUBLIC_KEY_B64` contains an independently approved
   armored OpenPGP **public** signer, base64 encoded. Its primary fingerprint
-  must equal policy. Signing private keys/passphrases remain local and are never
-  provisioned to any Actions job.
+  must equal policy. Signing private keys/passphrases are never provisioned to
+  this builder workflow. The separately opt-in
+  [isolated consumer signer](consumer-automation.md) can hold signing authority
+  only in an independently protected consumer-repository job.
 - Only the later publication step receives existing `BIN_PUBLISH_TOKEN`, as
   `CONSUMER_RELEASE_PUBLISH_TOKEN`. There is no SDK/default-token fallback.
   This process re-verifies every asset and the verification receipt, then checks

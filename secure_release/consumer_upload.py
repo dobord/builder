@@ -15,7 +15,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from . import consumer_ci, consumer_handoff, consumer_publication, crypto
+from . import consumer_ci, consumer_handoff, consumer_publication, consumer_presentation, crypto
 from .github import NoRedirect
 
 
@@ -33,11 +33,12 @@ def _destination(api, repository, expected):
     return base
 
 
-def _release(release, expected, marker):
+def _release(release, expected, marker, *, previous_marker=None):
     if (not isinstance(release, dict) or type(release.get("id")) is not int or release["id"] <= 0
             or release.get("tag_name") != expected["tag"] or release.get("name") != expected["tag"]
             or release.get("target_commitish") != expected["source_sha"]
-            or release.get("body") != marker or type(release.get("draft")) is not bool
+            or not isinstance(release.get("body"), str) or release["body"] not in {marker, previous_marker}
+            or type(release.get("draft")) is not bool
             or release.get("prerelease") is not False):
         raise ValueError("conflicting consumer release; never overwrite")
     return release
@@ -93,13 +94,16 @@ def _assets(api, base, release_id, manifest, snapshots, *, complete):
     return found
 
 
-def publish_release(api, repository: str, staging: Path, expected: dict, manifest: dict) -> int:
+def publish_release(api, repository: str, staging: Path, expected: dict, manifest: dict, *,
+                    presentation: dict | None = None) -> int:
     """Resume an identical draft; verify remote bytes before making it public.
 
     No asset is deleted/replaced and no tag is created. The existing signed tag
     ref and destination identity are rechecked before writes and finalization.
     Interrupted uploads leave a draft, eligible only for identical continuation.
     Already published identical releases are checked without further writes.
+    An optional separately authenticated presentation may replace only the exact
+    old integrity marker, never an arbitrary description, tag or asset.
     """
     approval = crypto.canonical(expected)
     consumer_publication.check_approval(approval, expected)
@@ -117,6 +121,13 @@ def publish_release(api, repository: str, staging: Path, expected: dict, manifes
     consumer_handoff._destination(staging / ".consumer-publication-new")
     marker = ("Consumer release approval SHA256: " + hashlib.sha256(approval).hexdigest()
               + "\nAsset inventory SHA256: " + hashlib.sha256(crypto.canonical(manifest)).hexdigest())
+    body, latest = marker, False
+    if presentation is not None:
+        if (not isinstance(presentation, dict) or set(presentation) != {"notes", "make_latest"}
+                or type(presentation["make_latest"]) is not bool):
+            raise ValueError("invalid authenticated consumer presentation")
+        body = consumer_presentation.render(presentation["notes"], marker)
+        latest = presentation["make_latest"]
     with tempfile.TemporaryDirectory(prefix=".consumer-upload-", dir=staging) as directory:
         snapshots = Path(directory)
         snapshots.chmod(0o700)
@@ -145,21 +156,40 @@ def publish_release(api, repository: str, staging: Path, expected: dict, manifes
             _destination(api, repository, expected)
             release = matches[0] if matches else api.json("POST", base + "/releases", {
                 "tag_name": expected["tag"], "target_commitish": expected["source_sha"],
-                "name": expected["tag"], "body": marker, "draft": True, "prerelease": False})
-        release = _release(release, expected, marker)
+                "name": expected["tag"], "body": body, "draft": True, "prerelease": False})
+        release = _release(release, expected, body, previous_marker=marker)
         release_id = release["id"]
         existing = _assets(api, base, release_id, manifest, snapshots, complete=not release["draft"])
         for name in sorted(names - set(existing)):
             api.upload_asset(repository, release_id, snapshots / name)
         _assets(api, base, release_id, manifest, snapshots, complete=True)
         _destination(api, repository, expected)
-        current = _release(api.get(f"{base}/releases/{release_id}"), expected, marker)
+        current = _release(api.get(f"{base}/releases/{release_id}"), expected, body, previous_marker=marker)
         if current["id"] != release_id:
             raise ValueError("consumer release identity changed")
+        desired = {}
         if current["draft"]:
-            api.json("PATCH", f"{base}/releases/{release_id}", {"draft": False, "make_latest": "false"})
-        final = _release(api.get(f"{base}/releases/{release_id}"), expected, marker)
+            desired.update(draft=False, make_latest="true" if latest else "false")
+        if current["body"] != body:
+            desired["body"] = body
+        if latest:
+            try:
+                selected_latest = api.get(base + "/releases/latest")
+            except urllib.error.HTTPError as error:
+                if error.code != 404:
+                    raise
+                selected_latest = {}
+            if selected_latest.get("id") != release_id:
+                desired["make_latest"] = "true"
+        if desired:
+            _destination(api, repository, expected)
+            api.json("PATCH", f"{base}/releases/{release_id}", desired)
+        final = _release(api.get(f"{base}/releases/{release_id}"), expected, body)
         if final["id"] != release_id or final["draft"]:
             raise ValueError("consumer release finalization incomplete")
         _assets(api, base, release_id, manifest, snapshots, complete=True)
+        if latest:
+            selected_latest = api.get(base + "/releases/latest")
+            if selected_latest.get("id") != release_id or selected_latest.get("tag_name") != expected["tag"]:
+                raise ValueError("consumer latest designation was not applied")
         return release_id
