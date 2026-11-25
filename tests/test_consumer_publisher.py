@@ -354,7 +354,11 @@ class ConsumerPublisherCryptography(unittest.TestCase):
 
     def publish(self):
         output = (self.root / "step-output").read_text().strip().split("=", 1)[1]
-        env = {k: v for k, v in self.env.items() if "PRIVATE_KEY" not in k}
+        # Model a fresh workflow step, not a machine without its toolchain/OS
+        # environment. Never retain ambient application or credential variables.
+        env = {k: v for k, v in os.environ.items()
+               if k.upper() in {"PATH", "SYSTEMROOT", "WINDIR", "TMP", "TEMP", "TMPDIR"}}
+        env.update({k: v for k, v in self.env.items() if "PRIVATE_KEY" not in k})
         env.update(CONSUMER_RELEASE_STAGING_DIGEST=output, CONSUMER_RELEASE_PUBLISH_TOKEN="synthetic-writer")
         with mock.patch.dict(os.environ, env, clear=True), \
                 mock.patch.object(publisher, "guard", return_value=self.sha), \
@@ -372,6 +376,23 @@ class ConsumerPublisherCryptography(unittest.TestCase):
         before = copy.deepcopy(self.api.writes)
         self.publish()
         self.assertEqual(self.api.writes, before)
+
+    def test_publication_fixture_keeps_system_tool_environment_but_not_ambient_credentials(self):
+        self.verify()
+        observed = {}
+        expected_path = os.environ.get("PATH")
+        def capture():
+            observed.update(os.environ)
+            publisher.recheck_qualification(None, None, None, None)
+            publisher.recheck_qualification(None, None, None, None)
+        with mock.patch.dict(os.environ, {"SYSTEMROOT": "synthetic-system-root",
+                                          "UNRELATED_SECRET": "do-not-forward"}), \
+                mock.patch.object(publisher, "publish", side_effect=capture):
+            self.publish()
+        self.assertEqual(observed.get("PATH"), expected_path)
+        self.assertEqual(observed.get("SYSTEMROOT"), "synthetic-system-root")
+        self.assertNotIn("UNRELATED_SECRET", observed)
+        self.assertFalse(any("PRIVATE_KEY" in key for key in observed))
 
     def test_wrong_signer_missing_receipt_bad_tag_and_expired_transport_never_write(self):
         for mutation in ("signer", "receipt", "tag", "expired", "qualification", "artifact"):

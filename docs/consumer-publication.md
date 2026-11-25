@@ -149,6 +149,10 @@ real direct-result decryption and signature verification, and an in-memory
 destination API for signed-tag creation, draft continuation and remote byte
 verification. Negative cases cover policy/source/signer/receipt/tag/artifact,
 expiry, state/assets tamper and workflow credential/pin boundaries.
+The fresh-step fixture retains only the host tool/OS environment (`PATH`,
+`SYSTEMROOT`, `WINDIR` and temporary-directory variables), never ambient
+credentials or verification private keys. This models actual Windows GnuPG
+discovery without relaxing signature verification or the production step boundary.
 
 These tests prove the product contracts, not an actual release, token scope,
 acceptance of a real candidate or permission to publish one. Actual publication
