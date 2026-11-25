@@ -13,6 +13,37 @@ operations only, never source scripts, builds or tests. Builder prepare owns
 signature, source-policy, baseline and automated OSV admission. Native builder
 jobs own all authoritative qualification. Local tests are diagnostic evidence.
 
+### Public dependency metadata authentication
+
+Trusted prepare passes its already provisioned `BUILDER_READ_TOKEN` (the job's
+`github.token`, with existing `contents: read` / `actions: read` permissions)
+only to the public GitHub metadata stage. It does not use the private source-read
+credential. This avoids sharing the hosted runner's anonymous 60-request quota.
+There is no new secret, permission expansion or credential rotation.
+
+The credential is lexical/context-local, never discovered from ambient
+environment by the scanner and never placed in metadata cache keys, receipts,
+diagnostics or Git/build/test subprocess environments. Only HTTPS GETs to
+`api.github.com` for the scanner's existing public repository allowlist and its
+exact tag-ref, annotated-tag and matching-tag paths can carry Authorization.
+The existing `mymindstorm/setup-emsdk` identity transferred to
+`emscripten-core/setup-emsdk`; its reviewed immutable public repository ID
+`203863565` selects the same three paths under `/repositories/203863565/git/`.
+This is a builder-owned identity mapping, never a response-derived redirect
+exception, and preserves the historical OSV query identity.
+Ports, query/fragment/userinfo, escaped paths and other API paths are rejected.
+Authenticated metadata requests reject every redirect, including same-host
+redirects. OSV queries and raw public vcpkg baseline downloads remain anonymous.
+
+HTTP 401/403/429, malformed data, unresolved versions and vulnerability findings
+still fail admission. There is no anonymous retry fallback or quota waiver;
+existing bounded transient retries and encrypted numeric diagnostics remain.
+The public synthetic workflow tests actual read-token capability against fixed
+public upstream identities on both native platforms, without source input or
+private credentials. Local diagnostic callers may explicitly scope their
+existing operator token via `github_metadata_credentials` or the `github_token`
+argument to `verify`; leaving it unset performs anonymous diagnostics only.
+
 The independently configured policy JSON in builder is stored as opaque Base64
 under `PROJECT_CI_SOURCE_POLICY_B64`, passed as `CI_SOURCE_POLICY_B64` and
 decoded only inside trusted prepare. This prevents Actions' structured-secret masking from
