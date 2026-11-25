@@ -123,7 +123,8 @@ class ProjectCiTests(unittest.TestCase):
 
     def test_api_allows_dependency_comparison_but_rejects_traversal(self):
         response = unittest.mock.MagicMock()
-        response.read.return_value = b"[]"
+        response.read.side_effect = [b"[]", b""]
+        response.headers = {}
         opener = unittest.mock.MagicMock()
         opener.open.return_value = response
         with patch("urllib.request.build_opener", return_value=opener):

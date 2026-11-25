@@ -43,7 +43,7 @@ MAX_MATRIX_DIMENSIONS = 16
 # Builder-owned, reviewed byte contract. No request, policy, environment or
 # candidate recipe may replace these pins; changes require a reviewed revision.
 RELEASE_RECIPE_DIGESTS = {
-    "ci": "a7d346013e6de2f8ab0242a0e7605f9a89bd87ffb392b9c3a2b3dba0691ab48d",
+    "ci": "d9e821af5822dfe99e748a078d1ab0864a1c8dd2342e77f1259c204e65b9f22e",
     "wasm-async": "d3f5f2bb2641333c4b68337ec723379746fe701ae06307b1099946d64080082c",
     "nightly-stress": "bd6fd50160ee7bb7aa1733e9230efea7ff935cb16fdc96f0f0e7f3dd81534885",
     "performance": "49e60f278fccbd2d6f546ab8803d8b8882cfa4db57f14d1dc1f4d555e15fabab",
@@ -109,10 +109,32 @@ def api(path, token, *, data=None, limit=MAX_ARCHIVE):
             raise ValueError("unsafe artifact redirect")
         response = urllib.request.urlopen(url, timeout=90)
     with response:
-        content = response.read(limit + 1)
-    if len(content) > limit:
-        raise ValueError("API response too large")
-    return content
+        length = response.headers.get("Content-Length")
+        if length is not None:
+            if not re.fullmatch(r"[0-9]{1,20}", length):
+                raise ValueError("invalid API response length")
+            length = int(length)
+            if length > limit:
+                raise ValueError("API response too large")
+        # HTTP read(n) may return fewer than n bytes without reaching EOF.
+        # Assemble bounded chunks; neither short reads nor valid partial JSON
+        # authorize truncation. No alternate transport or acceptance fallback.
+        deadline = time.monotonic() + 180
+        content = bytearray()
+        size = 0
+        while True:
+            if time.monotonic() >= deadline:
+                raise ValueError("API response read timed out")
+            chunk = response.read(min(1024**2, limit + 1 - size))
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > limit:
+                raise ValueError("API response too large")
+            content.extend(chunk)
+        if length is not None and size != length:
+            raise ValueError("API response length mismatch")
+    return bytes(content)
 
 
 def api_json(path, token, **kwargs):

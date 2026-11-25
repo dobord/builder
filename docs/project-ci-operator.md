@@ -191,6 +191,24 @@ source commit-status write, and builder contents/actions read/write permission.
 Its token is captured in memory and never printed, saved or passed to build/test
 commands. Existing cryptographic roles and SDK backups are unchanged.
 
+### Bounded ciphertext HTTP transport
+
+GitHub responses are assembled through bounded reads to EOF, rather than
+assuming a single sized read returns the complete body. The existing response
+byte limit still applies, a declared Content-Length must be valid and match the
+complete body, and the read loop has a 180-second deadline in addition to the
+90-second socket timeout. An incomplete or oversized response fails closed;
+there is no alternate-client, cached-response or digest-verification fallback.
+The isolated commit/tree/blob, ciphertext size, Git SHA-1, signed SHA-256 and
+before/after input-ref checks remain mandatory before the output path is created.
+
+The reviewed release CI recipe digest now includes the JSON development
+dependency and the maintained Windows tool-installer calls. The other four
+profile digests and complete 40-lane release inventory are unchanged. Deploy
+the newly reviewed immutable revision and matching repository SHA/ref selectors
+before signing new requests. No source, operator, baseline or cryptographic
+policy exception is needed for this byte-contract update.
+
 ## Noninteractive execution and Windows compiler diagnostics
 
 The shared public synthetic Windows host probe validates actual fingerprint
