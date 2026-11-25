@@ -795,7 +795,7 @@ def prepare():
     # dependency extractor parses candidate-controlled recipe YAML.
     lanes = recipes(root, payload["suite"])
     from . import project_dependency_review
-    receipt = project_dependency_review.verify(root, payload, env)
+    receipt = project_dependency_review.verify(root, payload, env, github_token=required("BUILDER_READ_TOKEN"))
     (work / "dependency-review.json").write_bytes(crypto.canonical(receipt))
     crypto.encrypt_file(work / "dependency-review.json", Path(required("RUNNER_TEMP")) / "cipher-dependency/dependency-review.enc",
                         crypto.public_text(key_env("CI_INPUT_PRIVATE_KEY_B64")), builder_context("dependency-review"))

@@ -1,4 +1,4 @@
-"""Credential-free OSV admission over authenticated, non-executed Git objects.
+"""Public-only OSV admission over authenticated, non-executed Git objects.
 
 Only public upstream identities leave staging. Private manifests and receipts
 stay local and are encrypted by the caller. Unsupported manifests or unresolved
@@ -7,6 +7,8 @@ versions are errors, never successful empty scans.
 from __future__ import annotations
 
 import configparser
+import contextlib
+import contextvars
 import functools
 import hashlib
 import json
@@ -26,7 +28,11 @@ OVERLAY_PINS = {"portfile.cmake": "4c54d1ed1515d2dcf53f2e0ab60a5b85d367e9b0d7157
 PUBLIC_REPOSITORIES = {"actions/checkout", "actions/upload-artifact", "actions/download-artifact",
                        "actions/cache", "actions/setup-python", "actions/dependency-review-action",
                        "actions/github-script", "mymindstorm/setup-emsdk", "google/googletest",
-                       "google/benchmark", "nlohmann/json", "zeux/pugixml", "dvyukov/relacy"}
+                        "google/benchmark", "nlohmann/json", "zeux/pugixml", "dvyukov/relacy"}
+# This existing allowlisted upstream transferred to emscripten-core/setup-emsdk.
+# Use its independently reviewed immutable public repository ID, not a redirect
+# target supplied by a response, while preserving its historical OSV identity.
+PUBLIC_GITHUB_REPOSITORY_IDS = {"mymindstorm/setup-emsdk": 203863565}
 # Explicit upstream names, not a guessed generic vcpkg ecosystem. vcpkg's
 # own CMake helpers are covered by its pinned repository commit.
 VCPKG_PROJECTS = {"nlohmann-json": "json", "openssl": "openssl", "zlib": "zlib",
@@ -41,6 +47,48 @@ OTHER_MANIFESTS = {"package.json", "package-lock.json", "npm-shrinkwrap.json", "
 
 
 PUBLIC_ENDPOINTS = {"api.github.com": "github-api", "raw.githubusercontent.com": "github-raw", "api.osv.dev": "osv"}
+_github_metadata_token = contextvars.ContextVar("github_metadata_token", default=None)
+
+
+@contextlib.contextmanager
+def github_metadata_credentials(token):
+    """Scope an existing read credential to trusted public GitHub metadata only.
+
+    Never discover credentials from ambient environment variables, place them in
+    subprocess environments or retain them in the public metadata cache keys.
+    Context-local reset also covers exceptions and concurrent independent scans.
+    """
+    if token is not None and (type(token) is not str or not re.fullmatch(r"[!-~]{1,16384}", token)):
+        raise ValueError("invalid public metadata credential")
+    previous = _github_metadata_token.set(token)
+    try:
+        yield
+    finally:
+        _github_metadata_token.reset(previous)
+
+
+def _public_github_metadata(parts):
+    """Recognize only the three upstream metadata paths emitted by this scanner."""
+    match = re.fullmatch(r"/repos/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/git/(.*)", parts.path)
+    by_id = re.fullmatch(r"/repositories/([0-9]+)/git/(.*)", parts.path)
+    if parts.netloc != "api.github.com" or parts.query:
+        return False
+    if match and match[1] in PUBLIC_REPOSITORIES:
+        suffix = match[2]
+    elif by_id and by_id[1] in {str(value) for value in PUBLIC_GITHUB_REPOSITORY_IDS.values()}:
+        suffix = by_id[2]
+    else:
+        return False
+    return (suffix == "matching-refs/tags" or
+            re.fullmatch(r"tags/[0-9a-f]{40}", suffix) is not None or
+            re.fullmatch(r"ref/tags/v?[0-9]+(?:\.[0-9]+)*(?:[-_.][A-Za-z0-9.-]+)?", suffix) is not None)
+
+
+def _github_repository_path(repository):
+    if repository not in PUBLIC_REPOSITORIES:
+        raise ValueError("unsupported upstream identity")
+    identity = PUBLIC_GITHUB_REPOSITORY_IDS.get(repository)
+    return f"repositories/{identity}" if identity is not None else "repos/" + repository
 
 
 class DependencyTransportError(ValueError):
@@ -67,20 +115,27 @@ def bounded_rate_limit(headers):
 
 
 def public_json(url, *, data=None):
-    """Bound responses and prohibit credentials and cross-host redirects."""
+    """Bound responses; authenticate only allowlisted public GitHub metadata GETs."""
     parts = urllib.parse.urlsplit(url)
     if (parts.scheme != "https" or parts.hostname not in PUBLIC_ENDPOINTS
             or parts.username or parts.password or parts.fragment):
         raise ValueError("invalid public dependency endpoint")
+    if parts.hostname == "api.github.com" and (data is not None or not _public_github_metadata(parts)):
+        raise ValueError("invalid public GitHub metadata endpoint")
+    token = _github_metadata_token.get() if parts.hostname == "api.github.com" else None
     class NoRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, req, fp, code, msg, headers, newurl):
             target = urllib.parse.urlsplit(newurl)
-            if (data is not None or parts.hostname != "api.github.com" or target.scheme != "https"
+            if (token is not None or data is not None or parts.hostname != "api.github.com" or target.scheme != "https"
                     or target.hostname != "api.github.com" or target.username or target.password or target.fragment):
                 return None
             return super().redirect_request(req, fp, code, msg, headers, newurl)
     request = urllib.request.Request(url, data=None if data is None else json.dumps(data).encode(),
                                      headers={"Content-Type": "application/json", "User-Agent": "builder-dependency-review"})
+    if token is not None:
+        # No redirect may receive this header, including a same-host redirect.
+        request.add_unredirected_header("Authorization", "Bearer " + token)
+        request.add_header("X-GitHub-Api-Version", "2022-11-28")
     endpoint = PUBLIC_ENDPOINTS[parts.hostname]
     opener = urllib.request.build_opener(NoRedirect())
     for delay in (1, 2, None):
@@ -124,14 +179,15 @@ def public_commit(repository, revision):
     # Do not resolve a moving branch as a version.
     if not re.fullmatch(r"v?[0-9]+(?:\.[0-9]+)*(?:[-_.][A-Za-z0-9.-]+)?", revision):
         raise ValueError("unversioned upstream dependency")
-    value = public_json(f"https://api.github.com/repos/{repository}/git/ref/tags/{revision}")
+    prefix = "https://api.github.com/" + _github_repository_path(repository)
+    value = public_json(f"{prefix}/git/ref/tags/{revision}")
     reference = value.get("object", {})
     for _ in range(4):
         if reference.get("type") == "commit" and SHA.fullmatch(reference.get("sha", "")):
             return reference["sha"]
         if reference.get("type") != "tag" or not SHA.fullmatch(reference.get("sha", "")):
             break
-        reference = public_json(f"https://api.github.com/repos/{repository}/git/tags/{reference['sha']}").get("object", {})
+        reference = public_json(f"{prefix}/git/tags/{reference['sha']}").get("object", {})
     raise ValueError("unresolved public dependency tag")
 
 
@@ -144,7 +200,7 @@ def action_version(repository, commit):
     """Map an immutable action pin to its release version for SEMVER advisories."""
     if repository not in PUBLIC_REPOSITORIES or not SHA.fullmatch(commit):
         raise ValueError("unsupported action identity")
-    refs = public_json(f"https://api.github.com/repos/{repository}/git/matching-refs/tags")
+    refs = public_json("https://api.github.com/" + _github_repository_path(repository) + "/git/matching-refs/tags")
     if not isinstance(refs, list) or len(refs) > 10000:
         raise ValueError("incomplete action version data")
     versions = []
@@ -336,9 +392,11 @@ def snapshot(root, revision, env, *, historical=False):
     return inventory(files, gitlinks, historical=historical)
 
 
-def verify(root, payload, env):
-    before = snapshot(root, payload["base_sha"], env, historical=True) if payload["pr"] else set()
-    after = snapshot(root, payload["source_sha"], env)
-    if not after:
-        raise ValueError("empty dependency inventory")
-    return check(before, after, payload["base_sha"], payload["source_sha"])
+def verify(root, payload, env, *, github_token=None):
+    """Keep metadata credentials lexical and separate from credential-free Git/OSV."""
+    with github_metadata_credentials(github_token):
+        before = snapshot(root, payload["base_sha"], env, historical=True) if payload["pr"] else set()
+        after = snapshot(root, payload["source_sha"], env)
+        if not after:
+            raise ValueError("empty dependency inventory")
+        return check(before, after, payload["base_sha"], payload["source_sha"])
