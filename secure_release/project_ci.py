@@ -43,11 +43,11 @@ MAX_MATRIX_DIMENSIONS = 16
 # Builder-owned, reviewed byte contract. No request, policy, environment or
 # candidate recipe may replace these pins; changes require a reviewed revision.
 RELEASE_RECIPE_DIGESTS = {
-    "ci": "d9e821af5822dfe99e748a078d1ab0864a1c8dd2342e77f1259c204e65b9f22e",
-    "wasm-async": "d3f5f2bb2641333c4b68337ec723379746fe701ae06307b1099946d64080082c",
+    "ci": "0b9cc454309f36ab152b795247a9e505c1ff388ecdf4b25f0430ebaec6dd89bb",
+    "wasm-async": "edd2fedd6676d078e63e5c996e49b9aad182a4d9c886786aaf165a9a766bdc3c",
     "nightly-stress": "bd6fd50160ee7bb7aa1733e9230efea7ff935cb16fdc96f0f0e7f3dd81534885",
     "performance": "49e60f278fccbd2d6f546ab8803d8b8882cfa4db57f14d1dc1f4d555e15fabab",
-    "vcpkg-port": "24aa3580cdd0ca47a80bddc8f046aee29035d8c34ff48a17dd1e2e7abd2dacc2",
+    "vcpkg-port": "0ff5aef19b2abba0c2a541d88fa9a4200ee0855f9b4f8fbbc6ff46037f5923af",
 }
 SUITES = {"ci": ("ci", "wasm-async"), "async": ("wasm-async",),
           "nightly": ("nightly-stress",), "performance": ("performance",),
